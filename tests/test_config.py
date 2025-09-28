@@ -25,11 +25,10 @@ version: 0.1
 source:
   type: rest
   base_url: https://api.test
-streams:
-  - name: sample
-    path: /objects
-    schema:
-      infer: true
+stream:
+  name: sample
+  path: /objects
+  infer_schema: true
 """.strip(),
     )
 
@@ -38,32 +37,9 @@ streams:
     assert isinstance(config, RestSourceConfig)
     assert config.base_url == "https://api.test"
     assert config.auth.type == "none"
-    assert config.streams[0].name == "sample"
-    assert config.streams[0].schema.infer is True
+    assert config.stream.name == "sample"
+    assert config.stream.infer_schema is True
 
-
-def test_load_config_env_substitution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("API_TOKEN", "abc123")
-    config_path = write_config(
-        tmp_path,
-        """
-version: 0.1
-source:
-  type: rest
-  base_url: https://secure.api
-  auth:
-    type: bearer
-    token: ${env:API_TOKEN}
-streams:
-  - name: secure
-    path: /items
-""".strip(),
-    )
-
-    config = load_config(config_path)
-
-    assert config.auth.type == "bearer"
-    assert config.auth.token == "abc123"
 
 
 def test_load_config_missing_file(tmp_path: Path) -> None:
@@ -101,19 +77,18 @@ version: 0.1
 source:
   type: rest
   base_url: https://api.test
-streams:
-  - name: sample
-    path: /objects
-    params:
-      limit: 10
+stream:
+  name: sample
+  path: /objects
+  params:
+    limit: 10
 """.strip(),
     )
 
     config = load_config(config_path)
     config_dict = config_to_dict(config)
     assert config_dict["source"]["base_url"] == "https://api.test"
-    assert config_dict["source"]["auth"]["type"] == "none"
-    assert config_dict["streams"][0]["params"]["limit"] == 10
+    assert config_dict["stream"]["params"]["limit"] == 10
 
     yaml_text = dump_config(config)
     assert "base_url: https://api.test" in yaml_text

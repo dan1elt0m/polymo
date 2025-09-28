@@ -199,8 +199,8 @@ def _parse_stream(raw: Any) -> StreamConfig:
     infer_schema = raw.get("infer_schema")
     schema = raw.get("schema")
     if not infer_schema and not schema:
-        raise ConfigError("Either 'infer_schema' must be true or 'schema' must be provided")
-
+        # Default to true if neither is provided
+        infer_schema = True
     if schema:
         if not isinstance(schema, str) or not schema.strip():
             raise ConfigError("'schema' must be a non-empty string when provided")
