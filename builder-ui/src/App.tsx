@@ -410,7 +410,7 @@ const App: React.FC = () => {
 					<div className="flex items-center gap-2">
 						<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-5 shadow-soft overflow-hidden dark:bg-blue-7/40">
 							<img
-								src={import.meta.env.DEV ? "/logo.png" : "/static/logo.png"}
+								src={import.meta.env.DEV ? "/favicon.ico" : "/static/favicon.ico"}
 								alt="polymo Logo"
 								className="h-7 w-7 object-contain"
 							/>

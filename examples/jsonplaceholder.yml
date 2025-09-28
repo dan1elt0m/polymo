@@ -7,5 +7,4 @@ stream:
   path: /posts
   params:
     _limit: 20
-  schema:
-    infer: true
+  infer_schema: true
