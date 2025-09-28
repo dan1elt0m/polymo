@@ -17,7 +17,6 @@ from starlette.concurrency import run_in_threadpool
 from ..config import (
     ConfigError,
     RestSourceConfig,
-    StreamConfig,
     config_to_dict,
     dump_config,
     parse_config,
@@ -78,7 +77,7 @@ class ValidationResponse(BaseModel):
 class SampleRequest(BaseModel):
     config: Optional[str] = None
     config_dict: Optional[Dict[str, Any]] = None
-    stream: Optional[str] = None
+    token: Optional[str] = None
     limit: int = Field(20, ge=1, le=500, description="Maximum records to preview")
 
     model_config = ConfigDict(extra="ignore")
@@ -158,15 +157,10 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         stream_config = config.stream
-        if payload.stream and payload.stream != stream_config.name:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Stream '{payload.stream}' not found in configuration",
-            )
 
         try:
             records, dtypes = await run_in_threadpool(
-                partial(_collect_records, config, stream_config, payload.limit)
+                partial(_collect_records, config, payload.token, payload.limit)
             )
         except Exception as exc:  # pragma: no cover - surfaced to UI
             raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -202,7 +196,7 @@ def _parse_yaml(text: str) -> RestSourceConfig:
     return parse_config(parsed)
 
 
-def _collect_records(config: RestSourceConfig, stream: StreamConfig, limit: int) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
+def _collect_records(config: RestSourceConfig, token: str | None, limit: int) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
     """Collect processed records and dtypes using PySpark DataSource."""
     import tempfile
     import os
@@ -216,7 +210,7 @@ def _collect_records(config: RestSourceConfig, stream: StreamConfig, limit: int)
 
     spark = _get_or_create_spark()
     try:
-        df = _get_preview_df(config_path, stream, spark)
+        df = _get_preview_df(config_path, token, spark)
         records = df.limit(limit).collect()
         dtypes = df.dtypes
         record_dicts = [row.asDict(recursive=True) for row in records]
@@ -226,7 +220,7 @@ def _collect_records(config: RestSourceConfig, stream: StreamConfig, limit: int)
         spark.stop()
         os.unlink(config_path)
 
-def _get_preview_df(config_path: str, stream: StreamConfig, spark: "SparkSession"):
+def _get_preview_df(config_path: str, token: str | None, spark: "SparkSession"):
     """Get a Spark DataFrame for previewing data from the specified stream."""
 
     from polymo import ApiReader
@@ -238,7 +232,7 @@ def _get_preview_df(config_path: str, stream: StreamConfig, spark: "SparkSession
     # Create the DataSource instance manually
     options = {
         "config_path": config_path,
-        "stream": stream,
+        "token": token,
     }
     return spark.read.format("polymo").options(**options).load()
 

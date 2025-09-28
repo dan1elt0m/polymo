@@ -77,9 +77,11 @@ class RestInputPartition(InputPartition):
 
 def _load_source_config(options: Mapping[str, str]) -> RestSourceConfig:
     config_path = options.get("config_path")
+    token = options.get("token")
     if not config_path:
         raise ConfigError("Option 'config_path' is required")
-    return load_config(config_path)
+
+    return load_config(config_path, token)
 
 
 def _infer_schema(config: RestSourceConfig) -> StructType:

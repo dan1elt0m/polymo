@@ -1,6 +1,8 @@
 import React from "react";
 import type { ConfigFormState } from "../types";
 import { InfoTooltip } from "./InfoTooltip";
+import { useSetAtom } from "jotai";
+import { bearerTokenAtom } from "../atoms";
 
 interface BuilderPanelProps {
 	state: ConfigFormState;
@@ -17,6 +19,8 @@ export const BuilderPanel: React.FC<BuilderPanelProps> = ({
 	onRemoveParam,
 	onUpdateParam,
 }) => {
+	const setBearerToken = useSetAtom(bearerTokenAtom);
+
 	return (
 		<div className="h-full p-6">
 			<div className="flex flex-col gap-6">
@@ -90,7 +94,15 @@ export const BuilderPanel: React.FC<BuilderPanelProps> = ({
 										<select
 											className="modern-select pr-9"
 											value={state.authType}
-											onChange={(event) => onUpdateState({ authType: event.target.value as 'none' | 'bearer' })}
+											onChange={(event) => {
+												const authType = event.target.value as 'none' | 'bearer';
+												const patch: Partial<ConfigFormState> = { authType };
+												if (authType === 'none') {
+													patch.authToken = '';
+													setBearerToken('');
+												}
+												onUpdateState(patch);
+											}}
 										>
 											<option value="none">None</option>
 											<option value="bearer">Bearer Token</option>
@@ -106,7 +118,7 @@ export const BuilderPanel: React.FC<BuilderPanelProps> = ({
 											className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-slate-12 shadow-sm focus-visible:border-blue-7 dark:border-slate-6 dark:bg-slate-2"
 											placeholder="your-token-here"
 											value={state.authToken}
-											onChange={(event) => onUpdateState({ authToken: event.target.value })}
+											onChange={(event) => { const value = event.target.value; onUpdateState({ authToken: value }); setBearerToken(value); }}
 										/>
 									</label>
 								)}

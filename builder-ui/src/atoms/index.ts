@@ -80,3 +80,6 @@ export const formStateToYamlAtom = atom((get) => {
   }
   return yaml.dump(ordered, { noRefs: true, lineWidth: 120, sortKeys: false, quotingType: "'" }).trimEnd();
 });
+
+
+export const bearerTokenAtom = atom<string>('');

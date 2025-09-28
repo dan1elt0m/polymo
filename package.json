@@ -4,13 +4,13 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview",
-    "lint": "eslint builder-ui/src builder-ui/tests --ext .ts,.tsx",
-    "format": "biome format --write builder-ui",
-    "test:e2e": "playwright test",
-    "msw": "msw init builder-ui/public --save"
+		"dev": "vite",
+		"build": "vite build",
+		"preview": "vite preview",
+		"lint": "eslint builder-ui/src builder-ui/tests --ext .ts,.tsx",
+		"format": "biome format --write builder-ui",
+		"test:e2e": "playwright test",
+		"msw": "msw init builder-ui/public --save"
 	},
 	"dependencies": {
 		"@radix-ui/colors": "^3.0.0",
@@ -20,16 +20,17 @@
 		"@radix-ui/react-tabs": "^1.0.3",
 		"@tanstack/react-table": "^8.11.8",
 		"clsx": "^2.1.1",
-		"js-yaml": "^4.1.0",
 		"jotai": "^2.7.1",
+		"js-yaml": "^4.1.0",
 		"msw": "^2.5.0",
+		"prismjs": "^1.29.0",
 		"react": "^18.3.1",
-		"react-dom": "^18.3.1",
-		"prismjs": "^1.29.0"
+		"react-dom": "^18.3.1"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^1.7.0",
 		"@playwright/test": "^1.45.0",
+		"@types/js-yaml": "^4.0.9",
 		"@types/node": "^20.11.30",
 		"@types/react": "^18.3.3",
 		"@types/react-dom": "^18.3.0",
@@ -45,6 +46,8 @@
 		"vite": "^5.2.10"
 	},
 	"msw": {
-		"workerDirectory": ["public"]
+		"workerDirectory": [
+			"public"
+		]
 	}
 }

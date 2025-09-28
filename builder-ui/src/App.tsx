@@ -14,28 +14,17 @@ import {
 	streamOptionsAtom,
 	configPayloadAtom,
 	formStateToYamlAtom,
+	bearerTokenAtom,
 } from "./atoms";
-import { formStateToConfig, configToFormState } from "./lib/transform";
+import { configToFormState } from "./lib/transform";
 import { validateConfigRequest, sampleRequest } from "./lib/api";
 import { BuilderPanel } from "./components/BuilderPanel";
 import { YamlEditor } from "./components/YamlEditor";
 import { SamplePreview } from "./components/SamplePreview";
 import { ThemeMenu } from "./components/ThemeMenu";
-import type { ConfigFormState, ValidationResponse, RestSourceConfig, SampleState } from "./types";
+import type { ConfigFormState, ValidationResponse, RestSourceConfig } from "./types";
 import { MAX_SAMPLE_ROWS, SAMPLE_VIEWS } from "./lib/constants";
 import yaml from 'js-yaml';
-
-// Simple YAML parser for basic config structure
-function parseYamlConfig(yamlText: string): RestSourceConfig | null {
-	try {
-		const loaded: any = yaml.load(yamlText) || {};
-		// minimal shape guarding
-		if (typeof loaded !== 'object' || !loaded) return null;
-		return loaded as RestSourceConfig;
-	} catch {
-		return null;
-	}
-}
 
 const App: React.FC = () => {
 	const [configFormState, setConfigFormState] = useAtom(configFormStateAtom);
@@ -50,6 +39,7 @@ const App: React.FC = () => {
 	const streamOptions = useAtomValue(streamOptionsAtom);
 	const configPayload = useAtomValue(configPayloadAtom);
 	const formStateYaml = useAtomValue(formStateToYamlAtom);
+	const bearerToken = useAtomValue(bearerTokenAtom); // moved from inside handlePreview
 	const [yamlErrorLine, setYamlErrorLine] = React.useState<number | null>(null);
 	const [yamlErrorCol, setYamlErrorCol] = React.useState<number | null>(null);
 	const [yamlSnapshot, setYamlSnapshot] = React.useState<string | null>(null);
@@ -192,8 +182,8 @@ const App: React.FC = () => {
 		}
 
 		const nextLimit = Math.min(MAX_SAMPLE_ROWS, Math.max(1, Math.round(sample.limit)));
-		const requestedStream = sample.stream || streamOptions[0];
-		setSample((prev: SampleState) => ({
+		// use top-level captured bearerToken instead of hook call here
+		setSample((prev) => ({
 			...prev,
 			limit: nextLimit,
 			loading: true,
@@ -205,21 +195,19 @@ const App: React.FC = () => {
 		try {
 			// Don't apply the validation response to form state during preview
 			await runValidation({ updateYaml: builderView === "yaml", applyResponse: false });
-			setStatus({ tone: "info", message: "Fetching sample���" });
+			setStatus({ tone: "info", message: "Fetching sample..." });
 			const payload = await sampleRequest({
 				...configPayload,
+				token: bearerToken,
 				limit: nextLimit,
-				stream: requestedStream,
 			});
 			const records = Array.isArray(payload.records) ? payload.records : [];
 			const truncated = records.slice(0, MAX_SAMPLE_ROWS);
-			const returnedStream = payload.stream || requestedStream;
 			const rowCount = truncated.length;
-			setSample((prev: SampleState) => ({
+			setSample((prev) => ({
 				...prev,
 				data: truncated,
 				dtypes: payload.dtypes || [],
-				stream: returnedStream,
 				loading: false,
 			}));
 
@@ -228,10 +216,10 @@ const App: React.FC = () => {
 				message: `Fetched ${rowCount} sample record${rowCount === 1 ? "" : "s"}`,
 			});
 		} catch (error) {
-			setSample((prev: SampleState) => ({ ...prev, loading: false }));
+			setSample((prev) => ({ ...prev, loading: false }));
 			setStatus({ tone: "error", message: formatError(error) });
 		}
-	}, [builderView, configPayload, runValidation, sample.limit, sample.stream, setSample, setStatus, streamOptions]);
+	}, [builderView, configPayload, runValidation, sample.limit, sample.stream, setSample, setStatus, streamOptions, bearerToken]);
 
 	const handleYamlChange = React.useCallback(
 		(value: string) => {
@@ -285,32 +273,32 @@ const App: React.FC = () => {
 
 	const handleSampleViewChange = React.useCallback(
 		(value: "table" | "json") => {
-			setSample((prev: SampleState) => ({ ...prev, view: value }));
+			setSample((prev) => ({ ...prev, view: value }));
 		},
 		[setSample],
 	);
 
 	const handleWrapToggle = React.useCallback(() => {
-		setSample((prev: SampleState) => ({ ...prev, wrap: !prev.wrap }));
+		setSample((prev) => ({ ...prev, wrap: !prev.wrap }));
 	}, [setSample]);
 
 	const handleLimitChange = React.useCallback(
 		(value: number) => {
-			setSample((prev: SampleState) => ({ ...prev, limit: value }));
+			setSample((prev) => ({ ...prev, limit: value }));
 		},
 		[setSample],
 	);
 
 	const handlePageSizeChange = React.useCallback(
 		(value: number) => {
-			setSample((prev: SampleState) => ({ ...prev, pageSize: value, page: 1 }));
+			setSample((prev) => ({ ...prev, pageSize: value, page: 1 }));
 		},
 		[setSample],
 	);
 
 	const handlePageChange = React.useCallback(
 		(value: number) => {
-			setSample((prev: SampleState) => ({ ...prev, page: value }));
+			setSample((prev) => ({ ...prev, page: value }));
 		},
 		[setSample],
 	);
@@ -381,7 +369,7 @@ const App: React.FC = () => {
 		let ddl = '';
 		if (sample.dtypes && sample.dtypes.length) {
 			// Single-line comma separated DDL
-			ddl = sample.dtypes.map(d => `${d.column} ${d.type}`).join(', ');
+			ddl = sample.dtypes.map((d: { column: string; type: string }) => `${d.column} ${d.type}`).join(', ');
 		} else if (configFormState.schema.trim()) {
 			ddl = configFormState.schema.trim();
 		} else {
@@ -546,12 +534,6 @@ const App: React.FC = () => {
 	);
 };
 
-function cloneState<T>(value: T): T {
-	if (typeof structuredClone === "function") {
-		return structuredClone(value);
-	}
-	return JSON.parse(JSON.stringify(value));
-}
 
 function formatError(error: unknown): string {
 	if (error instanceof Error) {

@@ -1,6 +1,9 @@
-# polymo
+<p align="center">
+  <img src="builder-ui/public/logo.png" alt="Polymo" width="220">
+</p>
 
-Python-first REST connector for the Spark 4.x Python Data Source API.
+Polymo makes it easy to read REST APIs into Spark DataFrames. 
+Just a config file and read it with Spark.
 
 ## Quick start
 
@@ -11,9 +14,6 @@ Python-first REST connector for the Spark 4.x Python Data Source API.
    source:
      type: rest
      base_url: https://api.github.com
-     auth:
-       type: bearer
-       token: ${env:GH_TOKEN}
    stream:
      name: repos
      path: /users/{user}/repos
@@ -38,35 +38,28 @@ Python-first REST connector for the Spark 4.x Python Data Source API.
    df = (
        spark.read.format("polymo")
        .option("config_path", "./github.yml")
-       .option("stream", "repos")
+       .option("token", "<YOUR_GITHUB_TOKEN>")  
        .load()
    )
    ```
 
-`polymo` handles config parsing, REST pagination (link headers today), simple schema inference.
-
 ## Builder UI
 
-Requires builder extra: `pip install 'polymo[builder]'`.
 Want a friendlier way to craft configs? Launch the local builder:
 
 ```bash
 polymo builder --port 9000
 ```
 
-## Smoke test
+# Installation
+Base version without spark and builder:
 
-Requires extra: `pip install 'polymo[smoke]'`.
+`pip install polymo`
 
-```bash
-polymo smoke --config examples/jsonplaceholder.yml --limit 3
-```
+For builder UI:
 
-It registers the `polymo.rest` source against a local Spark session, reads the sample JSONPlaceholder `posts` stream, prints the inferred schema, and shows the first few rows.
+`pip install polymo[builder]` 
 
-## Status
-
-- Supports Spark 4.x Python Data Source API (batch columnar reads).
 - Incremental cursors, partitioning, and advanced pagination strategies are on the roadmap.
 
 Contributions and early feedback welcome!

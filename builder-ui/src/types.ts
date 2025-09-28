@@ -72,3 +72,21 @@ export interface ConfigFormState {
   inferSchema: boolean;
   schema: string;
 }
+
+// Added interfaces used by atoms and components
+export interface StatusState {
+  tone: 'info' | 'success' | 'warn' | 'error';
+  message: string;
+}
+
+export interface SampleState {
+  data: Array<Record<string, any>>;
+  dtypes: Array<{ column: string; type: string }>;
+  stream: string;
+  limit: number;
+  view: 'table' | 'json';
+  wrap: boolean;
+  page: number;
+  pageSize: number;
+  loading: boolean;
+}

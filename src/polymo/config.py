@@ -68,7 +68,7 @@ class RestSourceConfig:
     stream: StreamConfig
 
 
-def load_config(path: str | Path) -> RestSourceConfig:
+def load_config(path: str | Path, token: str) -> RestSourceConfig:
     """Load and validate a REST source configuration from YAML."""
 
     config_path = Path(path)
@@ -76,10 +76,10 @@ def load_config(path: str | Path) -> RestSourceConfig:
         raise ConfigError(f"Configuration file not found: {config_path}")
 
     raw = yaml.safe_load(config_path.read_text())
-    return parse_config(raw)
+    return parse_config(raw, token)
 
 
-def parse_config(raw: Any) -> RestSourceConfig:
+def parse_config(raw: Any, token: str = None) -> RestSourceConfig:
     """Validate a configuration object previously parsed from YAML."""
 
     if not isinstance(raw, dict):
@@ -96,7 +96,7 @@ def parse_config(raw: Any) -> RestSourceConfig:
     if source.get("type") != "rest":
         raise ConfigError("Only REST sources are supported for now")
 
-    auth = _parse_auth(source.get("auth", {}))
+    auth = _parse_auth(source.get("auth", AuthConfig()))
     base_url = source.get("base_url")
     if not isinstance(base_url, str) or not base_url:
         raise ConfigError("'source.base_url' must be a non-empty string")
@@ -161,19 +161,13 @@ def dump_config(config: RestSourceConfig) -> str:
     return yaml.safe_dump(config_to_dict(config), sort_keys=False)
 
 
-def _parse_auth(raw: Any) -> AuthConfig:
-    if raw is None:
+def _parse_auth(auth: AuthConfig) -> AuthConfig:
+    if auth.token is None:
         return AuthConfig()
-    if not isinstance(raw, dict):
-        raise ConfigError("'auth' must be a mapping")
-
-    auth_type = raw.get("type", "none")
-    if auth_type == "none":
-        return AuthConfig(type="none")
-    if auth_type == "bearer":
-        return AuthConfig(type="bearer")
-
-    raise ConfigError(f"Unsupported auth type: {auth_type}")
+    if not isinstance(auth.token, str):
+        raise ConfigError("'token' must be a string")
+    auth_type = "bearer" if auth.token else "none"
+    return AuthConfig(type=auth_type, token=auth.token)
 
 
 def _parse_stream(raw: Any) -> StreamConfig:
