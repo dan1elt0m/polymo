@@ -1,0 +1,12 @@
+{
+	"extends": "./tsconfig.base.json",
+	"include": [
+		"builder-ui/src",
+		"builder-ui/tests",
+		"playwright.config.ts",
+		"vite.config.ts"
+	],
+	"compilerOptions": {
+		"noEmit": true
+	}
+}

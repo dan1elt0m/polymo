@@ -1,0 +1,11 @@
+version: 0.1
+source:
+  type: rest
+  base_url: https://jsonplaceholder.typicode.com
+stream:
+  name: posts
+  path: /posts
+  params:
+    _limit: 20
+  schema:
+    infer: true

@@ -1,0 +1,41 @@
+[project]
+name = "polymo"
+version = "0.1.0"
+description = "API ingestion for PySpark"
+readme = "README.md"
+authors = [
+    { name = "Daniel Tom", email = "d.e.tom89@gmail.com" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "httpx>=0.26",
+    "pyyaml>=6.0.1",
+]
+
+[project.optional-dependencies]
+builder = [
+    "fastapi>=0.110",
+    "uvicorn>=0.24",
+    "jinja2>=3.1.6",
+    "pyspark>=4",
+    "pyarrow>=13",
+]
+smoke = [
+    "pyspark>=4",
+    "pyarrow>=13",
+]
+all = [
+    "polymo[builder,smoke]",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+]
+
+[project.scripts]
+polymo = "polymo.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.8.17,<0.9.0"]
+build-backend = "uv_build"

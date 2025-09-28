@@ -1,0 +1,23 @@
+name: release
+on:
+  release:
+    types: [published]
+jobs:
+  publish:
+    environment:
+      name: release       # required for PyPI OIDC token exchange
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        name: checkout
+      - name: Install uv
+        uses: astral-sh/setup-uv@v2
+      - name: "Set up Python"
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: "pyproject.toml"
+      - name: Build distributions
+        run: uv build
+      - uses: pypa/gh-action-pypi-publish@release/v1    # publish

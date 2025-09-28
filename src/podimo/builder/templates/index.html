@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>polymo Connector Builder</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="/static/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/logo.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/static/logo192.png" />
+    <link rel="apple-touch-icon" href="/static/logo192.png" />
+    <link rel="stylesheet" href="/static/main.css" />
+    <script>
+      window.__polymo_INITIAL_CONFIG__ = {{ sample_config_dict | tojson }};
+      window.__polymo_SAMPLE_YAML__ = {{ sample_config | tojson }};
+    </script>
+    <script type="module" src="/static/main.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

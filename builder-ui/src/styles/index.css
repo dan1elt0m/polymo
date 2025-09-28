@@ -1,0 +1,104 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: light dark; }
+
+body { @apply bg-background text-background-foreground font-sans antialiased transition-colors; }
+
+/* THEME TRANSITION */
+.theme-fade { animation: theme-fade 240ms ease-out; }
+@keyframes theme-fade { from { opacity:.4; filter:saturate(.6) brightness(.9); } to { opacity:1; filter:none; } }
+
+/* PARAM ROW ANIMATION */
+.animate-param-enter { animation: param-enter 220ms ease-out; }
+@keyframes param-enter { 0% { opacity:0; transform:scale(.97) translateY(4px);} 100% { opacity:1; transform:scale(1) translateY(0);} }
+
+/* Modern select styling */
+.modern-select { @apply w-full appearance-none rounded-lg border border-border bg-background px-3 py-2 pr-9 text-sm text-slate-12 shadow-sm transition focus-visible:border-blue-7 focus-visible:outline-none dark:border-drac-border dark:bg-drac-surface dark:text-drac-foreground dark:focus-visible:border-drac-accent; }
+
+/* Inputs / form elements */
+.dark input:not([type=checkbox]), .dark textarea, .dark select { @apply bg-drac-surface border-drac-border text-drac-foreground placeholder-drac-muted; }
+.dark ::placeholder { @apply text-drac-muted; }
+
+/* Dracula surface overrides */
+.dark .bg-background { background-color: theme('colors.drac.base') !important; }
+.dark .bg-surface { background-color: theme('colors.drac.surface') !important; }
+.dark .border-border { border-color: theme('colors.drac.border') !important; }
+.dark .text-muted { color: theme('colors.drac.muted') !important; }
+.dark .shadow-soft { box-shadow: 0 10px 40px -15px rgba(0,0,0,0.65); }
+
+/* Force readable foreground on slate utility text in dark mode */
+.dark .text-slate-12, .dark .text-slate-11, .dark .text-slate-10 { color: theme('colors.drac.foreground') !important; }
+.dark .text-slate-9, .dark .text-slate-8 { color: theme('colors.drac.muted') !important; }
+
+/* Card hover subtle elevation in dark */
+.dark .group:hover.bg-background\/60 { background-color: rgba(72,76,94,0.55) !important; }
+
+.radix-scroll-area-scrollbar { @apply flex select-none touch-none p-0.5 bg-transparent transition-colors duration-150 ease-out; }
+.radix-scroll-area-thumb { @apply flex-1 rounded-full bg-mauve-8 hover:bg-mauve-9 dark:bg-drac-border dark:hover:bg-drac-muted; }
+
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { @apply outline-none ring-2 ring-blue-7 ring-offset-2 ring-offset-surface dark:ring-drac-accent dark:ring-offset-drac-surface; }
+
+[data-status="success"] { @apply text-success; }
+[data-status="warn"], [data-status="warning"] { @apply text-warning; }
+[data-status="error"] { @apply text-error; }
+[data-status="info"] { @apply text-blue-11 dark:text-drac-accent; }
+
+pre { @apply bg-slate-2 dark:bg-drac-surface rounded-lg p-4 text-sm overflow-x-auto text-slate-12 dark:text-drac-foreground; }
+
+/* TABLE header dark mode tweaks */
+.dark table thead tr { background-color: rgba(255,255,255,0.04) !important; }
+.dark table tbody tr.even\:bg-slate-2\/40 { background-color: rgba(255,255,255,0.02) !important; }
+.dark table tbody tr:hover { background-color: rgba(189,147,249,0.12) !important; }
+
+/* Prism (Dracula) minimal tokens */
+.prism-container { @apply relative h-full font-mono text-sm; }
+.prism-editor { @apply absolute inset-0 w-full h-full resize-none bg-transparent text-transparent caret-white outline-none leading-5; }
+.prism-highlight { @apply pointer-events-none whitespace-pre-wrap break-words font-mono leading-5 text-left; }
+.dark .prism-highlight { color: #f8f8f2; }
+.prism-highlight .token.comment { color:#6272a4; }
+.prism-highlight .token.key { color:#ff79c6; }
+.prism-highlight .token.punctuation { color:#f8f8f2; }
+.prism-highlight .token.string { color:#f1fa8c; }
+.prism-highlight .token.number { color:#bd93f9; }
+.prism-highlight .token.boolean { color:#ffb86c; }
+.prism-highlight .token.null { color:#ff5555; }
+.prism-highlight .token.directive { color:#8be9fd; }
+
+/* YAML Editor Enhancements */
+.prism-highlight { position: relative; --ch: 0.62ch; }
+.prism-highlight .editor-line { position: relative; padding-left: 0; }
+.prism-highlight .editor-line::before { content: attr(data-line); position: absolute; left: -0.75rem; transform: translateX(-100%); width: 3rem; text-align: right; padding-right: 0.75rem; color: #64748b; font-size: 0.75rem; line-height: 1.25rem; font-variant-numeric: tabular-nums; opacity: 0.65; }
+.dark .prism-highlight .editor-line::before { color: theme('colors.drac.muted'); opacity: 0.55; }
+.prism-highlight .editor-line.error { background: rgba(255,85,85,0.10); box-shadow: inset 0 0 0 1px rgba(255,85,85,0.35); }
+.dark .prism-highlight .editor-line.error { background: rgba(255,85,85,0.17); box-shadow: inset 0 0 0 1px rgba(255,85,85,0.45); }
+.prism-highlight .editor-line .col-marker { position: absolute; top: 0; bottom: 0; width: 2px; background: #ff5555; left: calc(var(--col) * var(--ch)); pointer-events: none; opacity: 0.4; }
+.dark .prism-highlight .editor-line .col-marker { background: #ff5555; opacity: 0.55; }
+.prism-highlight .editor-line .err-char { background: linear-gradient(transparent 70%, rgba(255,85,85,0.55) 70%); border-radius: 2px; }
+.dark .prism-highlight .editor-line .err-char { background: linear-gradient(transparent 65%, rgba(255,85,85,0.75) 65%); }
+/* Improve scrollbars inside editor */
+.prism-highlight::-webkit-scrollbar { width: 10px; height: 10px; }
+.prism-highlight::-webkit-scrollbar-track { background: transparent; }
+.prism-highlight::-webkit-scrollbar-thumb { background: rgba(100,116,139,0.35); border-radius: 6px; }
+.dark .prism-highlight::-webkit-scrollbar-thumb { background: rgba(248,248,242,0.20); }
+.prism-highlight::-webkit-scrollbar-thumb:hover { background: rgba(100,116,139,0.55); }
+.dark .prism-highlight::-webkit-scrollbar-thumb:hover { background: rgba(248,248,242,0.35); }
+/* Reduce pointer events on overlayed highlight so textarea captures clicks */
+.prism-highlight { pointer-events: none; }
+.prism-highlight .editor-line, .prism-highlight .line-content { pointer-events: none; }
+/* Ensure textarea text visible (transparent highlight text) */
+.prism-editor { color: transparent; text-shadow: none; }
+.dark .prism-editor { color: transparent; }
+/* Caret highly visible */
+.prism-editor { caret-color: #111; }
+.dark .prism-editor { caret-color: #f8f8f2; }
+
+/* Tooltip animation */
+[role=tooltip] { animation: fadeIn 120ms ease-out; }
+@keyframes fadeIn { from { opacity: 0; transform: translate(-50%, 4px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+/* Utility accents */
+.dark .btn-accent { @apply bg-drac-accent text-drac-foreground hover:bg-drac-accent2; }
+.dark .border-accent { @apply border-drac-accent; }

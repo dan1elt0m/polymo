@@ -1,0 +1,25 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# pycharm
+.idea/
+
+# scratch files
+scratches/
+
+# Node / frontend artifacts
+node_modules/
+playwright-report/
+test-results/
+builder-ui/node_modules/
+builder-ui/playwright-report/
+builder-ui/test-results/
+*.log
