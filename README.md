@@ -13,17 +13,12 @@ Just a config file and read it with Spark.
    version: 0.1
    source:
      type: rest
-     base_url: https://api.github.com
+     base_url: https://jsonplaceholder.typicode.com
    stream:
-     name: repos
-     path: /users/{user}/repos
+     path: /posts
      params:
-       user: octocat
-       per_page: 100
-     pagination:
-        type: link_header
-     schema:
-        infer: true
+       _limit: 20
+     infer_schema: true
    ```
 
 2. Register the source and read data:
@@ -37,8 +32,8 @@ Just a config file and read it with Spark.
 
    df = (
        spark.read.format("polymo")
-       .option("config_path", "./github.yml")
-       .option("token", "<YOUR_GITHUB_TOKEN>")  
+       .option("config_path", "./config.yml")
+       .option("token", "<YOUR_BEARER_TOKEN>")  
        .load()
    )
    ```
