@@ -45,10 +45,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     # Check Spark Version
     import pyspark
-    from packaging import version
-
-    if version.parse(pyspark.__version__) < version.parse("4.0.0"):
-        raise ImportError("pyspark>=4.0.0 is required: run pip install polymo[builder]")
+    if not pyspark.__version__.startswith('4.'):
+        raise ImportError("pyspark>=4.0.0 is required: run pip install 'polymo[builder]'")
 
     if args.command == "builder":
         import uvicorn

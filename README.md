@@ -53,7 +53,7 @@ Base version without spark and builder:
 
 For builder UI:
 
-`pip install polymo[builder]` 
+`pip install 'polymo[builder]'` 
 
 - Incremental cursors, partitioning, and advanced pagination strategies are on the roadmap.
 
