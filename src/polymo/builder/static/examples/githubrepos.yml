@@ -4,6 +4,12 @@ source:
   base_url: https://api.github.com/orgs/godatadriven
 stream:
   path: /repos
-  headers:
-    Accept: application/vnd.github+json
   infer_schema: true
+  schema: null
+  pagination:
+    type: none
+  record_selector:
+    field_path:
+      - owner
+    record_filter: null
+    cast_to_schema_types: false
