@@ -89,7 +89,40 @@ stream:
     config_dict = config_to_dict(config)
     assert config_dict["source"]["base_url"] == "https://api.test"
     assert config_dict["stream"]["params"]["limit"] == 10
+    assert config_dict["stream"]["record_selector"] == {
+        "field_path": [],
+        "record_filter": None,
+        "cast_to_schema_types": False,
+    }
 
     yaml_text = dump_config(config)
     assert "base_url: https://api.test" in yaml_text
     assert "limit: 10" in yaml_text
+
+
+def test_record_selector_round_trip(tmp_path: Path) -> None:
+    config_path = write_config(
+        tmp_path,
+        """
+version: 0.1
+source:
+  type: rest
+  base_url: https://api.test
+stream:
+  name: sample
+  path: /objects
+  record_selector:
+    field_path:
+      - response
+      - docs
+    record_filter: "{{ record.status == 'active' }}"
+    cast_to_schema_types: true
+  schema: id INT, status STRING
+""".strip(),
+    )
+
+    config = load_config(config_path)
+    selector = config.stream.record_selector
+    assert selector.field_path == ["response", "docs"]
+    assert selector.record_filter == "{{ record.status == 'active' }}"
+    assert selector.cast_to_schema_types is True

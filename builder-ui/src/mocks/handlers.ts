@@ -17,11 +17,30 @@ export const handlers = [
 				{ id: 1, name: "Example", status: "ok" },
 				{ id: 2, name: "Sample", status: "ok" },
 			],
-			dtypes: [
-				{ column: "id", type: "BIGINT" },
-				{ column: "name", type: "STRING" },
-				{ column: "status", type: "STRING" },
-			],
+		dtypes: [
+			{ column: "id", type: "BIGINT" },
+			{ column: "name", type: "STRING" },
+			{ column: "status", type: "STRING" },
+		],
+		raw_pages: [
+			{
+				page: 1,
+				url: "https://example.com/api/orders?page=1",
+				status_code: 200,
+				records: [
+					{ id: 1, name: "Example", status: "ok" },
+					{ id: 2, name: "Sample", status: "ok" },
+				],
+				headers: {},
+				payload: {
+					data: [
+						{ id: 1, name: "Example", status: "ok" },
+						{ id: 2, name: "Sample", status: "ok" },
+					],
+				},
+			},
+		],
+		rest_error: null,
 		});
 	}),
 ];

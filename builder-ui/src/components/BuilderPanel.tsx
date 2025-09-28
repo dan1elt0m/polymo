@@ -1,8 +1,190 @@
 import React from "react";
+import * as Tabs from "@radix-ui/react-tabs";
 import type { ConfigFormState } from "../types";
 import { InfoTooltip } from "./InfoTooltip";
-import { useSetAtom } from "jotai";
-import { bearerTokenAtom } from "../atoms";
+import { useAtom, useSetAtom } from "jotai";
+import { bearerTokenAtom, readerOptionsAtom } from "../atoms";
+import { InputWithCursorPosition } from "./InputWithCursorPosition";
+
+// Add row components that defer key renames until blur to avoid remounting each keystroke
+const ParamRow: React.FC<{
+	originalKey: string;
+	value: string;
+	onUpdateKey: (oldKey: string, newKey: string, value: string) => void;
+	onUpdateValue: (key: string, newKey: string, value: string) => void;
+	onRemove: (key: string) => void;
+}> = ({ originalKey, value, onUpdateKey, onUpdateValue, onRemove }) => {
+	const [tempKey, setTempKey] = React.useState(originalKey);
+	// Sync local state if the key changes externally (e.g. after commit)
+	React.useEffect(() => { setTempKey(originalKey); }, [originalKey]);
+
+	const commitIfChanged = React.useCallback(() => {
+		if (tempKey && tempKey !== originalKey) {
+			onUpdateKey(originalKey, tempKey, value);
+		}
+	}, [tempKey, originalKey, value, onUpdateKey]);
+
+	return (
+		<li className="group relative rounded-xl border border-border/60 dark:border-drac-border/60 bg-background/60 dark:bg-[#262c35] backdrop-blur-sm px-4 py-4 shadow-inner transition-all duration-200 hover:border-blue-7/60 dark:hover:border-drac-accent/60 hover:shadow-sm">
+			<div className="grid gap-4 md:grid-cols-2">
+				<div className="flex flex-col gap-1.5">
+					<label className="text-[11px] tracking-wide text-muted dark:text-drac-muted font-medium flex items-center gap-1">
+						Name <InfoTooltip text="Parameter key sent with request." />
+					</label>
+					<InputWithCursorPosition
+						type="text"
+						className="rounded-lg border border-border dark:border-drac-border bg-background/70 dark:bg-[#303745] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm transition-all focus-visible:border-blue-7 dark:focus-visible:border-drac-accent focus-visible:ring-1 focus-visible:ring-blue-5 dark:focus-visible:ring-drac-accent/40 group-hover:border-blue-7/50"
+						placeholder="param_name"
+						value={tempKey}
+						onChange={(e) => setTempKey(e.target.value)}
+						onBlur={commitIfChanged}
+						onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur(); } }}
+					/>
+				</div>
+				<div className="flex flex-col gap-1.5">
+					<label className="text-[11px] tracking-wide text-muted dark:text-drac-muted font-medium flex items-center gap-1">
+						Value <InfoTooltip text="Parameter value associated with the key." />
+					</label>
+					<InputWithCursorPosition
+						type="text"
+						className="rounded-lg border border-border dark:border-drac-border bg-background/70 dark:bg-[#303745] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm transition-all focus-visible:border-blue-7 dark:focus-visible:border-drac-accent focus-visible:ring-1 focus-visible:ring-blue-5 dark:focus-visible:ring-drac-accent/40 group-hover:border-blue-7/50"
+						placeholder="value"
+						value={value}
+						onValueChange={(newValue) => onUpdateValue(originalKey, originalKey, newValue)}
+					/>
+				</div>
+			</div>
+			<button
+				type="button"
+				className="absolute -right-2 -top-2 inline-flex h-8 w-8 items-center justify-center rounded-full border border-border/60 dark:border-drac-border bg-background/80 dark:bg-[#2d3541] text-slate-11 dark:text-drac-muted opacity-0 shadow-sm backdrop-blur transition-all duration-200
+																		 hover:text-red-10 hover:border-red-7 hover:bg-red-3/60 dark:hover:text-drac-red dark:hover:border-drac-red/80 dark:hover:bg-[#383f4c]
+																		 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-7"
+				onClick={() => onRemove(originalKey)}
+				aria-label={`Remove parameter ${originalKey}`}
+			>
+				<svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+					<path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+				</svg>
+			</button>
+		</li>
+	);
+};
+
+const HeaderRow: React.FC<{
+	originalKey: string;
+	value: string;
+	onUpdateKey: (oldKey: string, newKey: string, value: string) => void;
+	onUpdateValue: (key: string, newKey: string, value: string) => void;
+	onRemove: (key: string) => void;
+}> = ({ originalKey, value, onUpdateKey, onUpdateValue, onRemove }) => {
+	const [tempKey, setTempKey] = React.useState(originalKey);
+	React.useEffect(() => { setTempKey(originalKey); }, [originalKey]);
+	const commitIfChanged = React.useCallback(() => {
+		if (tempKey && tempKey !== originalKey) {
+			onUpdateKey(originalKey, tempKey, value);
+		}
+	}, [tempKey, originalKey, value, onUpdateKey]);
+	return (
+		<li className="group relative rounded-xl border border-border/60 dark:border-drac-border/60 bg-background/60 dark:bg-[#262c35] backdrop-blur-sm px-4 py-4 shadow-inner transition-all duration-200 hover:border-blue-7/60 dark:hover:border-drac-accent/60 hover:shadow-sm">
+			<div className="grid gap-4 md:grid-cols-2">
+				<div className="flex flex-col gap-1.5">
+					<label className="text-[11px] tracking-wide text-muted dark:text-drac-muted font-medium flex items-center gap-1">
+						Name <InfoTooltip text="Header key sent with request." />
+					</label>
+					<InputWithCursorPosition
+						type="text"
+						className="rounded-lg border border-border dark:border-drac-border bg-background/70 dark:bg-[#303745] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm transition-all focus-visible:border-blue-7 dark:focus-visible:border-drac-accent focus-visible:ring-1 focus-visible:ring-blue-5 dark:focus-visible:ring-drac-accent/40 group-hover:border-blue-7/50"
+						placeholder="header_name"
+						value={tempKey}
+						onChange={(e) => setTempKey(e.target.value)}
+						onBlur={commitIfChanged}
+						onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur(); } }}
+					/>
+				</div>
+				<div className="flex flex-col gap-1.5">
+					<label className="text-[11px] tracking-wide text-muted dark:text-drac-muted font-medium flex items-center gap-1">
+						Value <InfoTooltip text="Header value associated with the key." />
+					</label>
+					<InputWithCursorPosition
+						type="text"
+						className="rounded-lg border border-border dark:border-drac-border bg-background/70 dark:bg-[#303745] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm transition-all focus-visible:border-blue-7 dark:focus-visible:border-drac-accent focus-visible:ring-1 focus-visible:ring-blue-5 dark:focus-visible:ring-drac-accent/40 group-hover:border-blue-7/50"
+						placeholder="value"
+						value={value}
+						onValueChange={(newValue) => onUpdateValue(originalKey, originalKey, newValue)}
+					/>
+				</div>
+			</div>
+			<button
+				type="button"
+				className="absolute -right-2 -top-2 inline-flex h-8 w-8 items-center justify-center rounded-full border border-border/60 dark:border-drac-border bg-background/80 dark:bg-[#2d3541] text-slate-11 dark:text-drac-muted opacity-0 shadow-sm backdrop-blur transition-all duration-200 hover:text-red-10 hover:border-red-7 hover:bg-red-3/60 dark:hover:text-drac-red dark:hover:border-drac-red/80 dark:hover:bg-[#383f4c] group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-7"
+				onClick={() => onRemove(originalKey)}
+				aria-label={`Remove header ${originalKey}`}
+			>
+				<svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+					<path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+				</svg>
+			</button>
+		</li>
+	);
+};
+
+const ReaderOptionRow: React.FC<{
+	originalKey: string;
+	value: string;
+	onUpdateKey: (oldKey: string, newKey: string, value: string) => void;
+	onUpdateValue: (key: string, newKey: string, value: string) => void;
+	onRemove: (key: string) => void;
+}> = ({ originalKey, value, onUpdateKey, onUpdateValue, onRemove }) => {
+	const [tempKey, setTempKey] = React.useState(originalKey);
+	React.useEffect(() => { setTempKey(originalKey); }, [originalKey]);
+	const commitIfChanged = React.useCallback(() => {
+		if (tempKey && tempKey !== originalKey) {
+			onUpdateKey(originalKey, tempKey, value);
+		}
+	}, [tempKey, originalKey, value, onUpdateKey]);
+	return (
+		<li className="group relative rounded-xl border border-border/60 dark:border-drac-border/60 bg-background/60 dark:bg-[#262c35] backdrop-blur-sm px-4 py-4 shadow-inner transition-all duration-200 hover:border-blue-7/60 dark:hover:border-drac-accent/60 hover:shadow-sm">
+			<div className="grid gap-4 md:grid-cols-2">
+				<div className="flex flex-col gap-1.5">
+					<label className="text-[11px] tracking-wide text-muted dark:text-drac-muted font-medium flex items-center gap-1">
+						Option Key <InfoTooltip text="Name to reference via {{ options.key }} and pass to spark.read.option." />
+					</label>
+					<InputWithCursorPosition
+						type="text"
+						className="rounded-lg border border-border dark:border-drac-border bg-background/70 dark:bg-[#303745] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm transition-all focus-visible:border-blue-7 dark:focus-visible:border-drac-accent focus-visible:ring-1 focus-visible:ring-blue-5 dark:focus-visible:ring-drac-accent/40 group-hover:border-blue-7/50"
+						placeholder="api_key"
+						value={tempKey}
+						onChange={(e) => setTempKey(e.target.value)}
+						onBlur={commitIfChanged}
+						onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur(); } }}
+					/>
+				</div>
+				<div className="flex flex-col gap-1.5">
+					<label className="text-[11px] tracking-wide text-muted dark:text-drac-muted font-medium flex items-center gap-1">
+						Value <InfoTooltip text="Runtime value supplied to the Spark reader." />
+					</label>
+					<InputWithCursorPosition
+						type="text"
+						className="rounded-lg border border-border dark:border-drac-border bg-background/70 dark:bg-[#303745] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm transition-all focus-visible:border-blue-7 dark:focus-visible:border-drac-accent focus-visible:ring-1 focus-visible:ring-blue-5 dark:focus-visible:ring-drac-accent/40 group-hover:border-blue-7/50"
+						placeholder="value"
+						value={value}
+						onValueChange={(newValue) => onUpdateValue(originalKey, originalKey, newValue)}
+					/>
+				</div>
+			</div>
+			<button
+				type="button"
+				className="absolute -right-2 -top-2 inline-flex h-8 w-8 items-center justify-center rounded-full border border-border/60 dark:border-drac-border bg-background/80 dark:bg-[#2d3541] text-slate-11 dark:text-drac-muted opacity-0 shadow-sm backdrop-blur transition-all duration-200 hover:text-red-10 hover:border-red-7 hover:bg-red-3/60 dark:hover:text-drac-red dark:hover:border-drac-red/80 dark:hover:bg-[#383f4c] group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-7"
+				onClick={() => onRemove(originalKey)}
+				aria-label={`Remove spark option ${originalKey}`}
+			>
+				<svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+					<path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+				</svg>
+			</button>
+		</li>
+	);
+};
 
 interface BuilderPanelProps {
 	state: ConfigFormState;
@@ -20,6 +202,108 @@ export const BuilderPanel: React.FC<BuilderPanelProps> = ({
 	onUpdateParam,
 }) => {
 	const setBearerToken = useSetAtom(bearerTokenAtom);
+	const [readerOptions, setReaderOptions] = useAtom(readerOptionsAtom);
+	// All panels collapsed initially
+	const [showAuth, setShowAuth] = React.useState(false);
+	const [showPagination, setShowPagination] = React.useState(false);
+	const [showParams, setShowParams] = React.useState(false);
+	const [showHeaders, setShowHeaders] = React.useState(false);
+	const [showRecordSelector, setShowRecordSelector] = React.useState(false);
+	const [showReaderOptions, setShowReaderOptions] = React.useState(false);
+
+	// Initialize headers if not present
+	React.useEffect(() => {
+		if (!state.headers) {
+			onUpdateState({ headers: {} });
+		}
+	}, [state.headers, onUpdateState]);
+
+	React.useEffect(() => {
+		if ((state.recordFieldPath?.length ?? 0) > 0 || state.recordFilter.trim() || state.castToSchemaTypes) {
+			setShowRecordSelector(true);
+		}
+	}, [state.recordFieldPath, state.recordFilter, state.castToSchemaTypes]);
+
+	React.useEffect(() => {
+		if (Object.keys(readerOptions).length > 0) {
+			setShowReaderOptions(true);
+		}
+	}, [readerOptions]);
+
+	// Handle header add/remove/update
+	const onAddHeader = React.useCallback(() => {
+		const headers = { ...state.headers };
+		let key = "header";
+		let i = 1;
+		while (headers[key]) {
+			key = `header${i++}`;
+		}
+		headers[key] = "";
+		onUpdateState({ headers });
+	}, [state.headers, onUpdateState]);
+
+	const onRemoveHeader = React.useCallback((key: string) => {
+		const headers = { ...state.headers };
+		delete headers[key];
+		onUpdateState({ headers });
+	}, [state.headers, onUpdateState]);
+
+	const onUpdateHeader = React.useCallback((key: string, newKey: string, value: string) => {
+		const headers = { ...state.headers };
+		delete headers[key];
+		headers[newKey] = value;
+		onUpdateState({ headers });
+	}, [state.headers, onUpdateState]);
+
+	const handleAddReaderOption = React.useCallback(() => {
+		setReaderOptions((prev) => {
+			const next = { ...prev };
+			let index = 1;
+			let key = "option";
+			while (key in next) {
+				key = `option${index++}`;
+			}
+			next[key] = "";
+			return next;
+		});
+		setShowReaderOptions(true);
+	}, [setReaderOptions]);
+
+	const handleRemoveReaderOption = React.useCallback((key: string) => {
+		setReaderOptions((prev) => {
+			const next = { ...prev };
+			delete next[key];
+			return next;
+		});
+	}, [setReaderOptions]);
+
+	const handleUpdateReaderOption = React.useCallback((key: string, newKey: string, value: string) => {
+		setReaderOptions((prev) => {
+			const next = { ...prev };
+			delete next[key];
+			next[newKey] = value;
+			return { ...next };
+		});
+	}, [setReaderOptions]);
+
+	React.useEffect(() => { if (state.authType === 'bearer') setShowAuth(true); }, [state.authType]);
+
+	const handleAddFieldPathSegment = React.useCallback(() => {
+		const next = [...(state.recordFieldPath || []), ""];
+		onUpdateState({ recordFieldPath: next });
+	}, [state.recordFieldPath, onUpdateState]);
+
+	const handleUpdateFieldPathSegment = React.useCallback((index: number, value: string) => {
+		const current = state.recordFieldPath || [];
+		const next = current.map((segment, idx) => (idx === index ? value : segment));
+		onUpdateState({ recordFieldPath: next });
+	}, [state.recordFieldPath, onUpdateState]);
+
+	const handleRemoveFieldPathSegment = React.useCallback((index: number) => {
+		const current = state.recordFieldPath || [];
+		const next = current.filter((_, idx) => idx !== index);
+		onUpdateState({ recordFieldPath: next });
+	}, [state.recordFieldPath, onUpdateState]);
 
 	return (
 		<div className="h-full p-6">
@@ -27,224 +311,485 @@ export const BuilderPanel: React.FC<BuilderPanelProps> = ({
 				<section className="space-y-4">
 					<div>
 						<h2 className="text-lg font-semibold text-slate-12">Stream Configuration</h2>
-						<p className="text-sm text-muted">Configure your REST API stream endpoint and authentication.</p>
+						<p className="text-sm text-muted">Configure your REST API stream and authentication.</p>
 					</div>
 
-					<div className="space-y-6 rounded-2xl border border-border bg-background p-6">
-						{/* API Configuration */}
-						<div className="space-y-4">
-							<h3 className="text-base font-semibold text-slate-12">API Settings</h3>
-							<div className="grid gap-4 md:grid-cols-2">
-								<label className="flex flex-col gap-2">
-									<div className="flex items-center gap-1"><span className="text-sm font-medium text-slate-11">Base URL</span><InfoTooltip text="Root HTTPS endpoint of the API. Exclude the trailing slash." /></div>
-									<input
-										type="url"
-										className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-slate-12 shadow-sm focus-visible:border-blue-7 dark:border-slate-6 dark:bg-slate-2"
-										placeholder="https://api.example.com"
-										value={state.baseUrl}
-										onChange={(event) => onUpdateState({ baseUrl: event.target.value })}
-									/>
-								</label>
-								<label className="flex flex-col gap-2">
-									<div className="flex items-center gap-1"><span className="text-sm font-medium text-slate-11">Stream Name</span><InfoTooltip text="Internal name for this stream. Lowercase, no spaces." /></div>
-									<input
-										type="text"
-										className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-slate-12 shadow-sm focus-visible:border-blue-7 dark:border-slate-6 dark:bg-slate-2"
-										placeholder="orders"
-										value={state.streamName}
-										onChange={(event) => onUpdateState({ streamName: event.target.value })}
-									/>
-								</label>
-							</div>
-							<div className="grid gap-4 md:grid-cols-2">
-								<label className="flex flex-col gap-2">
-									<div className="flex items-center gap-1"><span className="text-sm font-medium text-slate-11">Stream Path</span><InfoTooltip text="Endpoint path appended to the base URL. Must start with /" /></div>
-									<input
-										type="text"
-										className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-slate-12 shadow-sm focus-visible:border-blue-7 dark:border-slate-6 dark:bg-slate-2"
-										placeholder="/v1/orders"
-										value={state.streamPath}
-										onChange={(event) => onUpdateState({ streamPath: event.target.value })}
-									/>
-								</label>
-								<label className="flex flex-col gap-2">
-									<div className="flex items-center gap-1"><span className="text-sm font-medium text-slate-11">Pagination Type</span><InfoTooltip text="Strategy for requesting additional pages (none or RFC5988 Link)." /></div>
-									<div className="relative">
-										<select
-											className="modern-select pr-9"
-											value={state.paginationType}
-											onChange={(event) => onUpdateState({ paginationType: event.target.value as 'none' | 'link_header' })}
-										>
-											<option value="none">None</option>
-											<option value="link_header">Link Header</option>
-										</select>
-										<span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-10 dark:text-slate-11"><svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4"><path d="M5.8 7.5a.75.75 0 0 1 1.05-.2L10 9.2l3.15-1.9a.75.75 0 0 1 .75 1.3l-3.5 2.11a.75.75 0 0 1-.76 0L5.99 8.6a.75.75 0 0 1-.2-1.1Z" /></svg></span>
-									</div>
-								</label>
-							</div>
-						</div>
+					<Tabs.Root defaultValue="configuration" className="rounded-2xl border border-border bg-background overflow-hidden">
+						<Tabs.List className="flex border-b border-border/70 bg-surface/80 dark:bg-[#1f232b]/60">
+							<Tabs.Trigger
+								value="configuration"
+								className="flex-1 px-6 py-4 text-sm font-medium text-slate-11 dark:text-drac-foreground/80 hover:text-slate-12 dark:hover:text-drac-foreground data-[state=active]:text-blue-11 data-[state=active]:border-b-2 data-[state=active]:border-blue-9 dark:data-[state=active]:border-drac-accent dark:data-[state=active]:text-drac-accent outline-none transition-colors"
+							>
+								Configuration
+							</Tabs.Trigger>
+							<Tabs.Trigger
+								value="schema"
+								className="flex-1 px-6 py-4 text-sm font-medium text-slate-11 dark:text-drac-foreground/80 hover:text-slate-12 dark:hover:text-drac-foreground data-[state=active]:text-blue-11 data-[state=active]:border-b-2 data-[state=active]:border-blue-9 dark:data-[state=active]:border-drac-accent dark:data-[state=active]:text-drac-accent outline-none transition-colors"
+							>
+								Schema
+							</Tabs.Trigger>
+						</Tabs.List>
 
-						{/* Authentication */}
-						<div className="space-y-4">
-							<h3 className="text-base font-semibold text-slate-12">Authentication</h3>
-							<div className="grid gap-4 md:grid-cols-2">
-								<label className="flex flex-col gap-2">
-									<div className="flex items-center gap-1"><span className="text-sm font-medium text-slate-11">Auth Type</span><InfoTooltip text="Authentication method applied to each request. Only for previewing data: Auth details aren't stored in YAML file, but should be provided as options to the reader" /></div>
-									<div className="relative">
-										<select
-											className="modern-select pr-9"
-											value={state.authType}
-											onChange={(event) => {
-												const authType = event.target.value as 'none' | 'bearer';
-												const patch: Partial<ConfigFormState> = { authType };
-												if (authType === 'none') {
-													patch.authToken = '';
-													setBearerToken('');
-												}
-												onUpdateState(patch);
-											}}
-										>
-											<option value="none">None</option>
-											<option value="bearer">Bearer Token</option>
-										</select>
-										<span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-10 dark:text-slate-11"><svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4"><path d="M5.8 7.5a.75.75 0 0 1 1.05-.2L10 9.2l3.15-1.9a.75.75 0 0 1 .75 1.3l-3.5 2.11a.75.75 0 0 1-.76 0L5.99 8.6a.75.75 0 0 1-.2-1.1Z" /></svg></span>
-									</div>
-								</label>
-								{state.authType === 'bearer' && (
-									<label className="flex flex-col gap-2">
-										<div className="flex items-center gap-1"><span className="text-sm font-medium text-slate-11">Bearer Token</span><InfoTooltip text="Secret token sent as Authorization header." /></div>
+						<Tabs.Content value="configuration" className="p-8 outline-none">
+							<div className="space-y-8">
+								{/* Base URL & Path */}
+								<div className="space-y-4">
+									<label className="flex flex-col gap-2 w-full">
+										<div className="flex items-center gap-1">
+											<span className="text-sm font-medium text-slate-11">Base URL</span>
+											<InfoTooltip text="Root HTTPS endpoint of the API. Exclude the trailing slash." />
+										</div>
 										<input
-											type="password"
-											className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-slate-12 shadow-sm focus-visible:border-blue-7 dark:border-slate-6 dark:bg-slate-2"
-											placeholder="your-token-here"
-											value={state.authToken}
-											onChange={(event) => { const value = event.target.value; onUpdateState({ authToken: value }); setBearerToken(value); }}
+											type="url"
+											className="w-full rounded-lg border border-border bg-background px-4 py-3 text-sm text-slate-12 shadow-sm focus-visible:border-blue-7 dark:border-slate-6 dark:bg-slate-2 transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
+											placeholder="https://api.example.com"
+											value={state.baseUrl}
+											onChange={(e) => onUpdateState({ baseUrl: e.target.value })}
 										/>
 									</label>
-								)}
-							</div>
-						</div>
 
-						{/* Incremental Configuration */}
-						<div className="space-y-4">
-							<h3 className="text-base font-semibold text-slate-12">Incremental Loading</h3>
-							<div className="grid gap-4 md:grid-cols-3">
-								<label className="flex flex-col gap-2">
-									<div className="flex items-center gap-1"><span className="text-sm font-medium text-slate-11">Mode</span><InfoTooltip text="Incremental strategy, e.g. append." /></div>
-									<input
-										type="text"
-										className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-slate-12 shadow-sm focus-visible:border-blue-7 dark:border-slate-6 dark:bg-slate-2"
-										placeholder="append"
-										value={state.incrementalMode}
-										onChange={(event) => onUpdateState({ incrementalMode: event.target.value })}
-									/>
-								</label>
-								<label className="flex flex-col gap-2">
-									<div className="flex items-center gap-1"><span className="text-sm font-medium text-slate-11">Cursor Param</span><InfoTooltip text="Query parameter that advances the cursor." /></div>
-									<input
-										type="text"
-										className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-slate-12 shadow-sm focus-visible:border-blue-7 dark:border-slate-6 dark:bg-slate-2"
-										placeholder="since"
-										value={state.incrementalCursorParam}
-										onChange={(event) => onUpdateState({ incrementalCursorParam: event.target.value })}
-									/>
-								</label>
-								<label className="flex flex-col gap-2">
-									<div className="flex items-center gap-1"><span className="text-sm font-medium text-slate-11">Cursor Field</span><InfoTooltip text="Field in responses used to resume later requests." /></div>
-									<input
-										type="text"
-										className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-slate-12 shadow-sm focus-visible:border-blue-7 dark:border-slate-6 dark:bg-slate-2"
-										placeholder="updated_at"
-										value={state.incrementalCursorField}
-										onChange={(event) => onUpdateState({ incrementalCursorField: event.target.value })}
-									/>
-								</label>
-							</div>
-						</div>
-
-						{/* Schema Configuration */}
-						<div className="space-y-4">
-							<h3 className="text-base font-semibold text-slate-12">Schema</h3>
-							<div className="space-y-4">
-								<label className="flex items-center gap-2">
-									<input
-										type="checkbox"
-										className="rounded border-border"
-										checked={state.inferSchema}
-										onChange={(event) => onUpdateState({ inferSchema: event.target.checked })}
-									/>
-									<span className="text-sm font-medium text-slate-11 flex items-center gap-1">Infer schema automatically<InfoTooltip text="Automatically infer columns and types from sample data." /></span>
-								</label>
-								{!state.inferSchema && (
 									<label className="flex flex-col gap-2">
-										<div className="flex items-center gap-1"><span className="text-sm font-medium text-slate-11">Schema DDL</span><InfoTooltip text="Explicit schema when inference is disabled. Format: name TYPE, ..." /></div>
-										<textarea
-											className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-slate-12 shadow-sm focus-visible:border-blue-7 dark:border-slate-6 dark:bg-slate-2"
-											placeholder="id INT, name STRING, created_at TIMESTAMP"
-											rows={3}
-											value={state.schema}
-											onChange={(event) => onUpdateState({ schema: event.target.value })}
+										<div className="flex items-center gap-1">
+											<span className="text-sm font-medium text-slate-11">Stream Path</span>
+											<InfoTooltip text="Endpoint path appended to the base URL. Must start with /" />
+										</div>
+										<input
+											type="text"
+											className="rounded-lg border border-border bg-background px-4 py-3 text-sm text-slate-12 shadow-sm focus-visible:border-blue-7 dark:border-slate-6 dark:bg-slate-2 transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
+											placeholder="/v1/orders"
+											value={state.streamPath}
+											onChange={(e) => onUpdateState({ streamPath: e.target.value })}
 										/>
 									</label>
-								)}
-							</div>
-						</div>
+								</div>
 
-						{/* Parameters */}
-						<div className="space-y-4">
-							<div className="flex items-center justify-between">
-								<h3 className="text-base font-semibold text-slate-12 flex items-center gap-2">Query Parameters <InfoTooltip text="Key/value query string arguments included with every request." /></h3>
-								<button
-									type="button"
-									className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-3 py-1.5 text-sm font-medium text-slate-11 shadow-sm transition hover:border-blue-7 hover:text-blue-11 focus-visible:ring-2 focus-visible:ring-blue-7"
-									onClick={onAddParam}
-								>
-									<svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4"><path d="M10 4a1 1 0 0 1 1 1v4h4a1 1 0 1 1 0 2h-4v4a1 1 0 1 1-2 0v-4H5a1 1 0 1 1 0-2h4V5a1 1 0 0 1 1-1Z" /></svg>
-									<span>Add</span>
-								</button>
-							</div>
-							{Object.entries(state.params).length > 0 ? (
-								<ul className="flex flex-col gap-2">
-									{Object.entries(state.params).map(([key, value]) => (
-										<li key={key} className="group relative rounded-xl border border-border/70 bg-background/60 backdrop-blur-sm px-3 py-3 shadow-inner transition hover:border-blue-7/60 hover:bg-background/80 dark:border-drac-border/50 dark:bg-drac-surface/40 dark:hover:bg-drac-surface/60 dark:shadow-none">
-											<div className="grid gap-3 md:grid-cols-2">
-												<div className="flex flex-col gap-1.5">
-													<label className="text-[11px] tracking-wide text-muted font-medium flex items-center gap-1">Name <InfoTooltip text="Parameter key sent with request." /></label>
-													<input
-														type="text"
-														className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-slate-12 shadow-sm transition focus-visible:border-blue-7 group-hover:border-blue-7/50 dark:border-slate-6 dark:bg-slate-2"
-														placeholder="param_name"
-														value={key}
-														onChange={(event) => onUpdateParam(key, event.target.value, value)}
-													/>
+								{/* Authentication */}
+								<div className="space-y-3">
+									<button
+										type="button"
+										className="flex w-full items-center justify-between rounded-lg border border-border bg-background px-4 py-3 text-left text-sm font-medium text-slate-12 hover:border-blue-7 hover:bg-blue-3/20 dark:hover:bg-drac-selection/40 transition-colors duration-200"
+										onClick={() => setShowAuth(v => !v)}
+										aria-expanded={showAuth}
+										aria-controls="auth-section"
+									>
+										<span className="flex items-center gap-2">
+											Authentication
+											<span className="text-xs font-normal text-muted">(optional{state.authType !== 'none' ? `: ${state.authType}` : ''})</span>
+										</span>
+										<span className={"transition-transform duration-200 " + (showAuth ? 'rotate-90' : '')}>
+											<svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+												<path d="M7.25 3.75a.75.75 0 0 1 1.06 0l5 5a.75.75 0 0 1 0 1.06l-5 5a.75.75 0 1 1-1.06-1.06L11.69 10 7.25 5.56a.75.75 0 0 1 0-1.06Z" />
+											</svg>
+										</span>
+									</button>
+									{showAuth && (
+										<div
+											id="auth-section"
+											className="space-y-5 rounded-xl border border-border/60 dark:border-drac-border/60 bg-surface/70 dark:bg-[#1f232b]/80 backdrop-blur-sm p-5 shadow-inner transition ring-1 ring-border/40 dark:ring-drac-border/30 animate-in fade-in duration-200"
+										>
+											<div className="grid gap-5 md:grid-cols-2">
+												<label className="flex flex-col gap-2">
+													<div className="flex items-center gap-1">
+														<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Auth Type</span>
+														<InfoTooltip text="Authentication method applied to each request. Not stored in YAML." />
+													</div>
+													<div className="relative">
+														<select
+															className="w-full rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm appearance-none pr-9 transition-all focus:border-blue-7 dark:focus:border-drac-accent focus:outline-none"
+															value={state.authType}
+															onChange={(e) => {
+																const authType = e.target.value as 'none' | 'bearer';
+																const patch: Partial<ConfigFormState> = { authType };
+																if (authType === 'none') { patch.authToken = ''; setBearerToken(''); }
+																onUpdateState(patch);
+															}}
+														>
+															<option value="none">None</option>
+															<option value="bearer">Bearer Token</option>
+														</select>
+														<span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-10 dark:text-drac-muted">
+															<svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+																<path d="M5.8 7.5a.75.75 0 0 1 1.05-.2L10 9.2l3.15-1.9a.75.75 0 0 1 .75 1.3l-3.5 2.11a.75.75 0 0 1-.76 0L5.99 8.6a.75.75 0 0 1-.2-1.1Z" />
+															</svg>
+														</span>
+													</div>
+												</label>
+												{state.authType === 'bearer' && (
+													<label className="flex flex-col gap-2">
+														<div className="flex items-center gap-1">
+															<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Bearer Token</span>
+															<InfoTooltip text="Secret token sent as Authorization header." />
+														</div>
+														<input
+															type="password"
+															className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
+															placeholder="your-token-here"
+															value={state.authToken}
+															onChange={(e) => {
+																const value = e.target.value;
+																onUpdateState({ authToken: value });
+																setBearerToken(value);
+															}}
+														/>
+													</label>
+												)}
+											</div>
+										</div>
+									)}
+								</div>
+
+								{/* Headers */}
+								<div className="space-y-3">
+									<button
+										type="button"
+										className="flex w-full items-center justify-between rounded-lg border border-border bg-background px-4 py-3 text-left text-sm font-medium text-slate-12 hover:border-blue-7 hover:bg-blue-3/20 dark:hover:bg-drac-selection/40 transition-colors duration-200"
+										onClick={() => setShowHeaders(v => !v)}
+										aria-expanded={showHeaders}
+										aria-controls="headers-section"
+									>
+										<span className="flex items-center gap-2">
+											Headers
+											<span className="text-xs font-normal text-muted">({Object.keys(state.headers).length || 'none'})</span>
+										</span>
+										<span className={"transition-transform duration-200 " + (showHeaders ? 'rotate-90' : '')}>
+											<svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+												<path d="M7.25 3.75a.75.75 0 0 1 1.06 0l5 5a.75.75 0 0 1 0 1.06l-5 5a.75.75 0 1 1-1.06-1.06L11.69 10 7.25 5.56a.75.75 0 0 1 0-1.06Z" />
+											</svg>
+										</span>
+									</button>
+									{showHeaders && (
+										<div
+											id="headers-section"
+											className="space-y-4 rounded-xl border border-border/60 dark:border-drac-border/60 bg-surface/70 dark:bg-[#1f232b]/80 backdrop-blur-sm p-5 shadow-inner transition ring-1 ring-border/40 dark:ring-drac-border/30 animate-in fade-in duration-200"
+										>
+											<div className="flex items-center justify-between">
+												<h4 className="text-sm font-semibold text-slate-12 dark:text-drac-foreground">Headers</h4>
+												<button
+													type="button"
+													className="inline-flex items-center gap-1.5 rounded-full border border-border/60 dark:border-drac-border bg-background/70 dark:bg-[#242a33] px-4 py-1.5 text-xs font-medium text-slate-11 dark:text-drac-foreground shadow-sm transition-all duration-200
+													hover:border-blue-7 hover:text-blue-11 dark:hover:border-drac-accent dark:hover:text-drac-accent
+													hover:scale-105 hover:shadow-md dark:hover:shadow-[0_0_8px_rgba(80,250,123,0.15)] hover:bg-blue-3/50 dark:hover:bg-[#273242]
+													focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-7 dark:focus-visible:ring-drac-accent"
+													onClick={onAddHeader}
+												>
+													<svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+														<path d="M10 4a1 1 0 0 1 1 1v4h4a1 1 0 1 1 0 2h-4v4a1 1 0 1 1-2 0v-4H5a1 1 0 1 1 0-2h4V5a1 1 0 0 1 1-1Z" />
+													</svg>
+													<span>Add Header</span>
+												</button>
+											</div>
+											{Object.entries(state.headers).length > 0 ? (
+												<ul className="flex flex-col gap-2">
+													{Object.entries(state.headers).map(([key, value]) => (
+														<HeaderRow key={key} originalKey={key} value={value} onUpdateKey={onUpdateHeader} onUpdateValue={onUpdateHeader} onRemove={onRemoveHeader} />
+													))}
+												</ul>
+											) : (
+												<p className="text-sm text-muted dark:text-drac-muted">No headers configured.</p>
+											)}
+										</div>
+									)}
+								</div>
+
+								{/* Query Parameters */}
+								<div className="space-y-3">
+									<button
+										type="button"
+										className="flex w-full items-center justify-between rounded-lg border border-border bg-background px-4 py-3 text-left text-sm font-medium text-slate-12 hover:border-blue-7 hover:bg-blue-3/20 dark:hover:bg-drac-selection/40 transition-colors duration-200"
+										onClick={() => setShowParams(v => !v)}
+										aria-expanded={showParams}
+										aria-controls="params-section"
+									>
+										<span className="flex items-center gap-2">
+											Query Parameters
+											<span className="text-xs font-normal text-muted">({Object.keys(state.params).length || 'none'})</span>
+										</span>
+										<span className={"transition-transform duration-200 " + (showParams ? 'rotate-90' : '')}>
+                                            <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                                                <path d="M7.25 3.75a.75.75 0 0 1 1.06 0l5 5a.75.75 0 0 1 0 1.06l-5 5a.75.75 0 1 1-1.06-1.06L11.69 10 7.25 5.56a.75.75 0 0 1 0-1.06Z" />
+                                            </svg>
+                                        </span>
+									</button>
+									{showParams && (
+										<div
+											id="params-section"
+											className="space-y-4 rounded-xl border border-border/60 dark:border-drac-border/60 bg-surface/70 dark:bg-[#1f232b]/80 backdrop-blur-sm p-5 shadow-inner transition ring-1 ring-border/40 dark:ring-drac-border/30 animate-in fade-in duration-200"
+										>
+											<div className="flex items-center justify-between">
+												<h4 className="text-sm font-semibold text-slate-12 dark:text-drac-foreground">Parameters</h4>
+												<button
+													type="button"
+													className="inline-flex items-center gap-1.5 rounded-full border border-border/60 dark:border-drac-border bg-background/70 dark:bg-[#242a33] px-4 py-1.5 text-xs font-medium text-slate-11 dark:text-drac-foreground shadow-sm transition-all duration-200 hover:border-blue-7 hover:text-blue-11 dark:hover:border-drac-accent dark:hover:text-drac-accent hover:scale-105 hover:shadow-md dark:hover:shadow-[0_0_8px_rgba(80,250,123,0.15)] hover:bg-blue-3/50 dark:hover:bg-[#273242] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-7 dark:focus-visible:ring-drac-accent"
+													onClick={() => { onAddParam(); setShowParams(true); }}
+												>
+													<svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+														<path d="M10 4a1 1 0 0 1 1 1v4h4a1 1 0 1 1 0 2h-4v4a1 1 0 1 1-2 0v-4H5a1 1 0 1 1 0-2h4V5a1 1 0 0 1 1-1Z" />
+													</svg>
+													<span>Add</span>
+												</button>
+											</div>
+											{Object.entries(state.params).length > 0 ? (
+												<ul className="flex flex-col gap-2">
+													{Object.entries(state.params).map(([key, value]) => (
+														<ParamRow key={key} originalKey={key} value={value} onUpdateKey={onUpdateParam} onUpdateValue={onUpdateParam} onRemove={onRemoveParam} />
+													))}
+												</ul>
+											) : (
+												<p className="text-sm text-muted dark:text-drac-muted">No parameters configured.</p>
+											)}
+										</div>
+									)}
+								</div>
+
+								{/* Pagination */}
+								<div className="space-y-3">
+									<button
+										type="button"
+										className="flex w-full items-center justify-between rounded-lg border border-border bg-background px-4 py-3 text-left text-sm font-medium text-slate-12 hover:border-blue-7 hover:bg-blue-3/20 dark:hover:bg-drac-selection/40 transition-colors duration-200"
+										onClick={() => setShowPagination(v => !v)}
+										aria-expanded={showPagination}
+										aria-controls="pagination-section"
+									>
+										<span className="flex items-center gap-2">
+											Pagination
+											<span className="text-xs font-normal text-muted">({state.paginationType === 'none' ? 'disabled' : state.paginationType})</span>
+										</span>
+										<span className={"transition-transform duration-200 " + (showPagination ? 'rotate-90' : '')}>
+                                            <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                                                <path d="M7.25 3.75a.75.75 0 0 1 1.06 0l5 5a.75.75 0 0 1 0 1.06l-5 5a.75.75 0 1 1-1.06-1.06L11.69 10 7.25 5.56a.75.75 0 0 1 0-1.06Z" />
+                                            </svg>
+                                        </span>
+									</button>
+									{showPagination && (
+										<div
+											id="pagination-section"
+											className="rounded-xl border border-border/60 dark:border-drac-border/60 bg-surface/70 dark:bg-[#1f232b]/80 backdrop-blur-sm p-5 shadow-inner transition ring-1 ring-border/40 dark:ring-drac-border/30 animate-in fade-in duration-200"
+										>
+											<label className="flex flex-col gap-2 max-w-xs">
+												<div className="flex items-center gap-1">
+													<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Pagination Type</span>
+													<InfoTooltip text="Strategy for requesting additional pages." />
 												</div>
-												<div className="flex flex-col gap-1.5">
-													<label className="text-[11px] tracking-wide text-muted font-medium flex items-center gap-1">Value <InfoTooltip text="Parameter value associated with the key." /></label>
-													<input
-														type="text"
-														className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-slate-12 shadow-sm transition focus-visible:border-blue-7 group-hover:border-blue-7/50 dark:border-slate-6 dark:bg-slate-2"
-														placeholder="value"
-														value={value}
-														onChange={(event) => onUpdateParam(key, key, event.target.value)}
-													/>
+												<div className="relative">
+													<select
+														className="w-full rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm appearance-none pr-9 transition-all focus:border-blue-7 dark:focus:border-drac-accent focus:outline-none"
+														value={state.paginationType}
+														onChange={(e) => onUpdateState({ paginationType: e.target.value as 'none' | 'link_header' })}
+													>
+														<option value="none">None</option>
+														<option value="link_header">Link Header</option>
+													</select>
+													<span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-10 dark:text-drac-muted">
+														<svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+															<path d="M5.8 7.5a.75.75 0 0 1 1.05-.2L10 9.2l3.15-1.9a.75.75 0 0 1 .75 1.3l-3.5 2.11a.75.75 0 0 1-.76 0L5.99 8.6a.75.75 0 0 1-.2-1.1Z" />
+														</svg>
+													</span>
+												</div>
+											</label>
+										</div>
+									)}
+								</div>
+
+								{/* Record Selector */}
+								<div className="space-y-3">
+									<button
+										type="button"
+										className="flex w-full items-center justify-between rounded-lg border border-border bg-background px-4 py-3 text-left text-sm font-medium text-slate-12 hover:border-blue-7 hover:bg-blue-3/20 dark:hover:bg-drac-selection/40 transition-colors duration-200"
+										onClick={() => setShowRecordSelector(v => !v)}
+										aria-expanded={showRecordSelector}
+										aria-controls="record-selector-section"
+									>
+										<span className="flex items-center gap-2">
+											Record Selector
+											<span className="text-xs font-normal text-muted">
+												{(state.recordFieldPath?.length ?? 0) > 0 ? state.recordFieldPath.join(' › ') : 'root'}
+												{state.recordFilter.trim() ? ' · filter' : ''}
+												{state.castToSchemaTypes ? ' · cast' : ''}
+											</span>
+										</span>
+										<span className={"transition-transform duration-200 " + (showRecordSelector ? 'rotate-90' : '')}>
+                                            <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                                                <path d="M7.25 3.75a.75.75 0 0 1 1.06 0l5 5a.75.75 0 0 1 0 1.06l-5 5a.75.75 0 1 1-1.06-1.06L11.69 10 7.25 5.56a.75.75 0 0 1 0-1.06Z" />
+                                            </svg>
+                                        </span>
+									</button>
+									{showRecordSelector && (
+										<div
+											id="record-selector-section"
+											className="space-y-5 rounded-xl border border-border/60 dark:border-drac-border/60 bg-surface/70 dark:bg-[#1f232b]/80 backdrop-blur-sm p-5 shadow-inner transition ring-1 ring-border/40 dark:ring-drac-border/30 animate-in fade-in duration-200"
+										>
+											<div className="space-y-3">
+												<div className="flex items-center gap-1">
+													<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Field Path</span>
+													<InfoTooltip text="List the keys leading to the array of records. Use * to follow all children." />
+												</div>
+												<div className="space-y-2">
+													{(state.recordFieldPath?.length ?? 0) > 0 ? (
+														<div className="space-y-2">
+															{(state.recordFieldPath || []).map((segment, index) => (
+																<div key={index} className="flex items-center gap-2">
+																	<input
+																		type="text"
+																		className="flex-1 rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-3 py-2 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border focus-visible:ring-1 focus-visible:ring-blue-5"
+																		placeholder={index === 0 ? 'data' : index === (state.recordFieldPath?.length ?? 0) - 1 ? 'items' : 'segment'}
+																		value={segment}
+																		onChange={(e) => handleUpdateFieldPathSegment(index, e.target.value)}
+																	/>
+																	<button
+																		type="button"
+																		className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border/60 dark:border-drac-border bg-background/70 dark:bg-[#2d3541] text-slate-11 dark:text-drac-muted hover:text-red-10 hover:border-red-7 hover:bg-red-3/60 dark:hover:text-drac-red dark:hover:border-drac-red/80 dark:hover:bg-[#383f4c] transition-colors"
+																		onClick={() => handleRemoveFieldPathSegment(index)}
+																		aria-label={`Remove path segment ${segment || index + 1}`}
+																	>
+																		<svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+																			<path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+																		</svg>
+																	</button>
+																</div>
+															))}
+														</div>
+													) : (
+														<p className="text-sm text-muted dark:text-drac-muted">Selecting records from the response root.</p>
+													)}
+													<div>
+														<button
+															type="button"
+															className="inline-flex items-center gap-1.5 rounded-full border border-border/60 dark:border-drac-border bg-background/70 dark:bg-[#242a33] px-3 py-1.5 text-xs font-medium text-slate-11 dark:text-drac-foreground shadow-sm transition-all duration-200 hover:border-blue-7 hover:text-blue-11 dark:hover:border-drac-accent dark:hover:text-drac-accent"
+															onClick={handleAddFieldPathSegment}
+														>
+															<svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+																<path d="M10 4a1 1 0 0 1 1 1v4h4a1 1 0 1 1 0 2h-4v4a1 1 0 1 1-2 0v-4H5a1 1 0 1 1 0-2h4V5a1 1 0 0 1 1-1Z" />
+															</svg>
+															Add path segment
+														</button>
+													</div>
 												</div>
 											</div>
-											<button
-												type="button"
-												className="absolute -right-2 -top-2 inline-flex h-7 w-7 items-center justify-center rounded-full border border-border/60 bg-background/80 text-slate-11 opacity-0 shadow-sm backdrop-blur transition hover:text-red-10 hover:border-red-7 hover:bg-red-3/60 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-red-7"
-												onClick={() => onRemoveParam(key)}
-												aria-label={`Remove parameter ${key}`}
-											>
-												<svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4"><path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" /></svg>
-											</button>
-										</li>
-									))}
-								</ul>
-							) : (
-								<p className="text-sm text-muted">No parameters configured.</p>
-							)}
-						</div>
-					</div>
+
+											<div className="space-y-2">
+												<div className="flex items-center gap-1">
+													<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Record Filter</span>
+													<InfoTooltip text="Keep only records where this Jinja expression evaluates to true." />
+												</div>
+												<textarea
+													className="w-full rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-3 py-2 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border focus-visible:ring-1 focus-visible:ring-blue-5 min-h-[96px]"
+													placeholder="{{ record.status != 'expired' }}"
+													value={state.recordFilter}
+													onChange={(e) => onUpdateState({ recordFilter: e.target.value })}
+												/>
+													<p className="text-xs text-muted dark:text-drac-muted">
+														Expressions can be wrapped in <code>{'{{'}</code>&nbsp;expression&nbsp;<code>{'}}'}</code> or entered directly.
+													</p>
+											</div>
+
+											<label className="flex items-start gap-3 rounded-xl border border-border/60 dark:border-drac-border bg-background/70 dark:bg-[#272d38] px-4 py-3 text-left">
+												<input
+													type="checkbox"
+													className="mt-1 h-4 w-4 rounded border border-border accent-blue-9"
+													checked={state.castToSchemaTypes}
+													onChange={(e) => onUpdateState({ castToSchemaTypes: e.target.checked })}
+												/>
+												<div className="space-y-1">
+													<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Cast record fields to schema types</span>
+													<p className="text-xs text-muted dark:text-drac-muted">Applies declared schema types to each record before ingestion.</p>
+												</div>
+											</label>
+										</div>
+									)}
+								</div>
+
+								{/* Spark Reader Options */}
+								<div className="space-y-3">
+									<button
+										type="button"
+										className="flex w-full items-center justify-between rounded-lg border border-border bg-background px-4 py-3 text-left text-sm font-medium text-slate-12 hover:border-blue-7 hover:bg-blue-3/20 dark:hover:bg-drac-selection/40 transition-colors duration-200"
+										onClick={() => setShowReaderOptions((v) => !v)}
+										aria-expanded={showReaderOptions}
+										aria-controls="reader-options-section"
+									>
+										<span className="flex items-center gap-2">
+											Spark Reader Options
+											<span className="text-xs font-normal text-muted">({Object.keys(readerOptions).length || 'none'})</span>
+										</span>
+										<span className={"transition-transform duration-200 " + (showReaderOptions ? 'rotate-90' : '')}>
+                                            <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                                                <path d="M7.25 3.75a.75.75 0 0 1 1.06 0l5 5a.75.75 0 0 1 0 1.06l-5 5a.75.75 0 1 1-1.06-1.06L11.69 10 7.25 5.56a.75.75 0 0 1 0-1.06Z" />
+                                            </svg>
+                                        </span>
+									</button>
+									{showReaderOptions && (
+										<div
+											id="reader-options-section"
+											className="space-y-4 rounded-xl border border-border/60 dark:border-drac-border/60 bg-surface/70 dark:bg-[#1f232b]/80 backdrop-blur-sm p-5 shadow-inner transition ring-1 ring-border/40 dark:ring-drac-border/30 animate-in fade-in duration-200"
+										>
+											<div className="flex items-center justify-between">
+												<h4 className="text-sm font-semibold text-slate-12 dark:text-drac-foreground">Runtime Options</h4>
+												<button
+													type="button"
+													className="inline-flex items-center gap-1.5 rounded-full border border-border/60 dark:border-drac-border bg-background/70 dark:bg-[#242a33] px-4 py-1.5 text-xs font-medium text-slate-11 dark:text-drac-foreground shadow-sm transition-all duration-200 hover:border-blue-7 hover:text-blue-11 dark:hover:border-drac-accent dark:hover:text-drac-accent hover:scale-105 hover:shadow-md dark:hover:shadow-[0_0_8px_rgba(80,250,123,0.15)] hover:bg-blue-3/50 dark:hover:bg-[#273242]
+													focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-7 dark:focus-visible:ring-drac-accent"
+													onClick={handleAddReaderOption}
+												>
+													<svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+														<path d="M10 4a1 1 0 0 1 1 1v4h4a1 1 0 1 1 0 2h-4v4a1 1 0 1 1-2 0v-4H5a1 1 0 1 1 0-2h4V5a1 1 0 0 1 1-1Z" />
+													</svg>
+													<span>Add Option</span>
+												</button>
+											</div>
+											<p className="text-xs text-muted dark:text-drac-muted">Provide values for Jinja references like <code>{"{{ options.api_key }}"}</code>. These keys are passed to <code>spark.read.option()</code> during preview.</p>
+											{Object.entries(readerOptions).length > 0 ? (
+												<ul className="flex flex-col gap-2">
+													{Object.entries(readerOptions).map(([key, value]) => (
+														<ReaderOptionRow key={key} originalKey={key} value={value} onUpdateKey={handleUpdateReaderOption} onUpdateValue={handleUpdateReaderOption} onRemove={handleRemoveReaderOption} />
+													))}
+												</ul>
+											) : (
+												<p className="text-sm text-muted dark:text-drac-muted">No runtime options defined.</p>
+											)}
+										</div>
+									)}
+								</div>
+							</div>
+						</Tabs.Content>
+
+						<Tabs.Content value="schema" className="p-8 outline-none">
+							<div className="space-y-8">
+								<div className="space-y-4">
+									<label className="flex items-center gap-2">
+										<input
+											type="checkbox"
+											className="rounded border-border h-5 w-5 accent-blue-9 dark:accent-drac-accent focus:ring-blue-7 dark:focus:ring-drac-accent"
+											checked={state.inferSchema}
+											onChange={(e) => onUpdateState({ inferSchema: e.target.checked })}
+										/>
+										<span className="text-sm font-medium text-slate-11 flex items-center gap-1">
+											Infer schema automatically
+											<InfoTooltip text="Automatically infer columns and types from sample data." />
+										</span>
+									</label>
+
+									{!state.inferSchema && (
+										<label className="flex flex-col gap-2 mt-4">
+											<div className="flex items-center gap-1">
+												<span className="text-sm font-medium text-slate-11">Schema DDL</span>
+												<InfoTooltip text="Explicit schema when inference is disabled. Format: name TYPE, ..." />
+											</div>
+											<textarea
+												className="w-full rounded-lg border border-border bg-background px-4 py-3 text-sm text-slate-12 shadow-sm focus-visible:border-blue-7 dark:border-slate-6 dark:bg-slate-2 transition-all focus-visible:ring-1 focus-visible:ring-blue-5 font-mono"
+												placeholder="id INT, name STRING, created_at TIMESTAMP"
+												rows={8}
+												value={state.schema}
+												onChange={(e) => onUpdateState({ schema: e.target.value })}
+											/>
+											<p className="text-xs text-muted dark:text-drac-muted mt-1">
+												Example: <code>id INTEGER, name STRING, created_at TIMESTAMP</code>
+											</p>
+										</label>
+									)}
+								</div>
+							</div>
+						</Tabs.Content>
+					</Tabs.Root>
 				</section>
 			</div>
 		</div>

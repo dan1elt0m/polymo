@@ -3,7 +3,7 @@ import * as Select from "@radix-ui/react-select";
 import { clsx } from "clsx";
 import { collectColumns, formatCell, truncate } from "../lib/table";
 import { PAGE_SIZE_OPTIONS, SAMPLE_VIEWS } from "../lib/constants";
-import type { StatusState } from "../types";
+import type { RawPagePayload, StatusState } from "../types";
 
 interface SamplePreviewProps {
 	status: StatusState;
@@ -11,8 +11,8 @@ interface SamplePreviewProps {
 	onLimitChange: (value: number) => void;
 	onPreview: () => void;
 	isBusy: boolean;
-	view: "table" | "json";
-	onViewChange: (value: "table" | "json") => void;
+	view: "table" | "json" | "raw";
+	onViewChange: (value: "table" | "json" | "raw") => void;
 	wrap: boolean;
 	onWrapToggle: () => void;
 	page: number;
@@ -21,6 +21,8 @@ interface SamplePreviewProps {
 	onPageChange: (value: number) => void;
 	data: Array<Record<string, unknown>>;
 	dtypes: Array<{ column: string; type: string }>;
+	rawPages: RawPagePayload[];
+	restError: string | null;
 	onCopySchema: () => void; // new
 }
 
@@ -40,16 +42,19 @@ export const SamplePreview: React.FC<SamplePreviewProps> = ({
 	onPageChange,
 	data,
 	dtypes,
+	rawPages,
+	restError,
 	onCopySchema,
 }) => {
-	const hasData = data.length > 0;
-	const totalPages = hasData ? Math.max(1, Math.ceil(data.length / pageSize)) : 0;
-	const safePage = hasData ? Math.min(Math.max(page, 1), totalPages) : 1;
+	const hasTableData = data.length > 0;
+	const hasRawData = rawPages.length > 0 || Boolean(restError);
+	const totalPages = hasTableData ? Math.max(1, Math.ceil(data.length / pageSize)) : 0;
+	const safePage = hasTableData ? Math.min(Math.max(page, 1), totalPages) : 1;
 	const rows =
-		hasData && view === SAMPLE_VIEWS.TABLE
+		hasTableData && view === SAMPLE_VIEWS.TABLE
 			? data.slice((safePage - 1) * pageSize, safePage * pageSize)
 			: [];
-	const columns = hasData && view === SAMPLE_VIEWS.TABLE ? collectColumns(rows) : [];
+	const columns = hasTableData && view === SAMPLE_VIEWS.TABLE ? collectColumns(rows) : [];
 
 	return (
 		<div className="flex h-full flex-col gap-4 min-w-0 w-full max-w-full">
@@ -108,7 +113,7 @@ export const SamplePreview: React.FC<SamplePreviewProps> = ({
 								view === SAMPLE_VIEWS.TABLE ? "bg-blue-9 text-white" : "text-slate-11",
 							)}
 							onClick={() => onViewChange(SAMPLE_VIEWS.TABLE)}
-							disabled={!hasData || isBusy}
+							disabled={!hasTableData || isBusy}
 						>
 							DataFrame
 						</button>
@@ -119,9 +124,20 @@ export const SamplePreview: React.FC<SamplePreviewProps> = ({
 								view === SAMPLE_VIEWS.JSON ? "bg-blue-9 text-white" : "text-slate-11",
 							)}
 							onClick={() => onViewChange(SAMPLE_VIEWS.JSON)}
-							disabled={!hasData || isBusy}
+							disabled={!hasTableData || isBusy}
 						>
 							Records
+						</button>
+						<button
+							type="button"
+							className={clsx(
+								"rounded-full px-3 py-1 transition",
+								view === SAMPLE_VIEWS.RAW ? "bg-blue-9 text-white" : "text-slate-11",
+							)}
+							onClick={() => onViewChange(SAMPLE_VIEWS.RAW)}
+							disabled={!hasRawData || isBusy}
+						>
+							Raw API
 						</button>
 						<button
 							type="button"
@@ -130,7 +146,7 @@ export const SamplePreview: React.FC<SamplePreviewProps> = ({
 								wrap && view === SAMPLE_VIEWS.TABLE ? "bg-blue-9 text-white" : "text-slate-11",
 							)}
 							onClick={onWrapToggle}
-							disabled={!hasData || view !== SAMPLE_VIEWS.TABLE}
+							disabled={!hasTableData || view !== SAMPLE_VIEWS.TABLE || isBusy}
 						>
 							Wrap Text
 						</button>
@@ -139,14 +155,14 @@ export const SamplePreview: React.FC<SamplePreviewProps> = ({
 						<SelectPageSize
 							value={pageSize}
 							onValueChange={onPageSizeChange}
-							disabled={!hasData || isBusy}
+							disabled={!hasTableData || isBusy}
 						/>
 						<div className="flex items-center gap-1">
 							<button
 								type="button"
 								className="rounded-full border border-border px-2 py-1 text-xs font-semibold text-slate-12 transition hover:border-blue-7 hover:text-blue-11 disabled:opacity-50"
 								onClick={() => onPageChange(Math.max(1, safePage - 1))}
-								disabled={!hasData || safePage <= 1 || isBusy}
+								disabled={!hasTableData || safePage <= 1 || isBusy}
 							>
 								Prev
 							</button>
@@ -157,7 +173,7 @@ export const SamplePreview: React.FC<SamplePreviewProps> = ({
 								type="button"
 								className="rounded-full border border-border px-2 py-1 text-xs font-semibold text-slate-12 transition hover:border-blue-7 hover:text-blue-11 disabled:opacity-50"
 								onClick={() => onPageChange(Math.min(totalPages, safePage + 1))}
-								disabled={!hasData || safePage >= totalPages || isBusy}
+								disabled={!hasTableData || safePage >= totalPages || isBusy}
 							>
 								Next
 							</button>
@@ -166,15 +182,15 @@ export const SamplePreview: React.FC<SamplePreviewProps> = ({
 				</div>
 
 				<div className="min-h-[260px] rounded-2xl border border-border bg-background overflow-hidden w-full">
-					{hasData && view === SAMPLE_VIEWS.TABLE ? (
+					{hasTableData && view === SAMPLE_VIEWS.TABLE ? (
 						<div className="w-full h-full overflow-auto relative">
 							<div className="p-4 w-max min-w-full">
-								{renderOutput({ view, data, rows, columns, dtypes, wrap })}
+								{renderOutput({ view, data, rows, columns, dtypes, wrap, rawPages, restError })}
 							</div>
 						</div>
 					) : (
 						<div className="p-4 overflow-x-auto w-full">
-							{renderOutput({ view, data, rows, columns, dtypes, wrap })}
+							{renderOutput({ view, data, rows, columns, dtypes, wrap, rawPages, restError })}
 						</div>
 					)}
 				</div>
@@ -266,14 +282,44 @@ function renderOutput({
 	columns,
 	dtypes,
 	wrap,
+	rawPages,
+	restError,
 }: {
-	view: "table" | "json";
+	view: "table" | "json" | "raw";
 	data: Array<Record<string, unknown>>;
 	rows: Array<Record<string, unknown>>;
 	columns: string[];
 	dtypes: Array<{ column: string; type: string }>;
 	wrap: boolean;
+	rawPages: RawPagePayload[];
+	restError: string | null;
 }) {
+	if (view === SAMPLE_VIEWS.RAW) {
+		if (!rawPages.length && !restError) {
+			return (
+				<p className="text-sm text-muted" data-status="info">
+					REST client did not return any data.
+				</p>
+			);
+		}
+
+		return (
+			<div className="space-y-3">
+				{restError && (
+					<p className="text-sm font-medium text-red-11" data-status="error">
+						{restError}
+					</p>
+				)}
+				<pre
+					data-status={restError ? "error" : "info"}
+					className="whitespace-pre-wrap break-words text-xs"
+				>
+					{JSON.stringify({ pages: rawPages }, null, 2)}
+				</pre>
+			</div>
+		);
+	}
+
 	if (!data.length) {
 		return (
 			<p className="text-sm text-muted" data-status="info">

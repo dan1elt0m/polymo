@@ -5,7 +5,8 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vite",
-		"build": "vite build",
+		"copy-examples": "cp -r examples src/polymo/builder/static/",
+		"build": "vite build && npm run copy-examples",
 		"preview": "vite preview",
 		"lint": "eslint builder-ui/src builder-ui/tests --ext .ts,.tsx",
 		"format": "biome format --write builder-ui",

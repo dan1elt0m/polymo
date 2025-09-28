@@ -102,3 +102,38 @@ pre { @apply bg-slate-2 dark:bg-drac-surface rounded-lg p-4 text-sm overflow-x-a
 /* Utility accents */
 .dark .btn-accent { @apply bg-drac-accent text-drac-foreground hover:bg-drac-accent2; }
 .dark .border-accent { @apply border-drac-accent; }
+
+/* Validate button flash animations */
+.validate-flash-success { animation: validateFlashSuccess 4000ms ease-in-out forwards; }
+.validate-flash-error { animation: validateFlashError 4000ms ease-in-out forwards; }
+@keyframes validateFlashSuccess { 0%, 85% { background: theme('colors.success'); color:#fff; } 100% { background: transparent; color: inherit; } }
+@keyframes validateFlashError { 0%, 85% { background: theme('colors.error'); color:#fff; } 100% { background: transparent; color: inherit; } }
+
+/* Dark mode override animations for validate flashes */
+.dark button.validate-flash-success,
+.dark .validate-flash-success { animation: darkValidateFlashSuccess 4000ms ease-in-out forwards; position: relative; }
+.dark button.validate-flash-error,
+.dark .validate-flash-error { animation: darkValidateFlashError 4000ms ease-in-out forwards; position: relative; }
+
+.dark button.validate-flash-success::after,
+.dark .validate-flash-success::after,
+.dark button.validate-flash-error::after,
+.dark .validate-flash-error::after { content:''; position:absolute; inset:0; border-radius:inherit; pointer-events:none; }
+
+.dark button.validate-flash-success::after,
+.dark .validate-flash-success::after { background: radial-gradient(circle at 30% 30%, rgba(80,250,123,0.35), rgba(80,250,123,0.05)); }
+.dark button.validate-flash-error::after,
+.dark .validate-flash-error::after { background: radial-gradient(circle at 30% 30%, rgba(255,85,85,0.40), rgba(255,85,85,0.06)); }
+
+@keyframes darkValidateFlashSuccess {
+  0%,85% { background-color: rgba(80,250,123,0.25) !important; color:#fff !important; border-color: rgba(80,250,123,0.55) !important; box-shadow:0 0 0 0 rgba(80,250,123,0.6),0 0 16px 4px rgba(80,250,123,0.35); }
+  100% { background-color: transparent !important; color: inherit !important; border-color: var(--border-color,rgba(100,100,120,0.4)) !important; box-shadow:none; }
+}
+@keyframes darkValidateFlashError {
+  0%,85% { background-color: rgba(255,85,85,0.28) !important; color:#fff !important; border-color: rgba(255,85,85,0.55) !important; box-shadow:0 0 0 0 rgba(255,85,85,0.6),0 0 16px 4px rgba(255,85,85,0.38); }
+  100% { background-color: transparent !important; color: inherit !important; border-color: var(--border-color,rgba(100,100,120,0.4)) !important; box-shadow:none; }
+}
+
+/* Subtle dark mode hover pulse for primary action buttons */
+.dark .bg-blue-9 { transition: background-color .3s ease, box-shadow .4s ease; }
+.dark .bg-blue-9:hover { box-shadow: 0 0 0 0 rgba(189,147,249,0.0), 0 0 12px 2px rgba(189,147,249,0.35); }

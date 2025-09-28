@@ -16,13 +16,15 @@ export interface IncrementalConfig {
 }
 
 export interface StreamConfig {
-  name: string;
+  // name removed from persisted config; backend derives internally
   path: string;
   params: Record<string, any>;
+  headers?: Record<string, any>;
   pagination: PaginationConfig;
   incremental: IncrementalConfig;
   infer_schema: boolean;
   schema?: string | null;
+  record_selector: RecordSelectorConfig;
 }
 
 export interface SourceConfig {
@@ -37,6 +39,12 @@ export interface RestSourceConfig {
   stream: StreamConfig;
 }
 
+export interface RecordSelectorConfig {
+  field_path: string[];
+  record_filter?: string | null;
+  cast_to_schema_types: boolean;
+}
+
 // API response types
 export interface ValidationResponse {
   valid: boolean;
@@ -46,14 +54,23 @@ export interface ValidationResponse {
   yaml?: string;
 }
 
-export interface SampleResponse {
+// Payload aliases used by api.ts
+export type ValidationPayload = ValidationResponse;
+export interface SamplePayload {
   stream: string;
   records: Record<string, any>[];
   dtypes: Array<{ column: string; type: string }>;
+  raw_pages: RawPagePayload[];
+  rest_error?: string | null;
 }
 
-export interface FormatResponse {
-  yaml: string;
+export interface RawPagePayload {
+  page: number;
+  url: string;
+  status_code: number;
+  headers?: Record<string, string>;
+  records: Record<string, any>[];
+  payload: unknown;
 }
 
 // Form state types for the builder UI
@@ -62,7 +79,6 @@ export interface ConfigFormState {
   baseUrl: string;
   authType: 'none' | 'bearer';
   authToken: string;
-  streamName: string;
   streamPath: string;
   params: Record<string, string>;
   paginationType: 'none' | 'link_header';
@@ -71,6 +87,10 @@ export interface ConfigFormState {
   incrementalCursorField: string;
   inferSchema: boolean;
   schema: string;
+  headers: Record<string, string>;
+  recordFieldPath: string[];
+  recordFilter: string;
+  castToSchemaTypes: boolean;
 }
 
 // Added interfaces used by atoms and components
@@ -84,9 +104,11 @@ export interface SampleState {
   dtypes: Array<{ column: string; type: string }>;
   stream: string;
   limit: number;
-  view: 'table' | 'json';
+  view: 'table' | 'json' | 'raw';
   wrap: boolean;
   page: number;
   pageSize: number;
   loading: boolean;
+  rawPages: RawPagePayload[];
+  restError: string | null;
 }

@@ -50,6 +50,11 @@ class ApiReader(DataSource):
     def reader(self, schema: StructType) -> DataSourceReader:
         return RestDataSourceReader(self._config, self.schema())
 
+class RestInputPartition(InputPartition):
+    def __init__(self, config: RestSourceConfig) -> None:
+        super().__init__(value=None)
+        self.config = config
+
 
 class RestDataSourceReader(DataSourceReader):
     """Materialises REST API responses as Arrow record batches."""
@@ -69,19 +74,19 @@ class RestDataSourceReader(DataSourceReader):
         yield from _read_partition(partition.config, self._schema)
 
 
-class RestInputPartition(InputPartition):
-    def __init__(self, config: RestSourceConfig) -> None:
-        super().__init__(value=None)
-        self.config = config
-
-
 def _load_source_config(options: Mapping[str, str]) -> RestSourceConfig:
     config_path = options.get("config_path")
     token = options.get("token")
     if not config_path:
         raise ConfigError("Option 'config_path' is required")
 
-    return load_config(config_path, token)
+    runtime_options = {
+        key: value
+        for key, value in options.items()
+        if key not in {"config_path", "token"}
+    }
+
+    return load_config(config_path, token, runtime_options)
 
 
 def _infer_schema(config: RestSourceConfig) -> StructType:
@@ -106,7 +111,7 @@ def _infer_schema(config: RestSourceConfig) -> StructType:
 
 
 def _sample_stream(config: RestSourceConfig) -> List[Mapping[str, Any]]:
-    with RestClient(base_url=config.base_url, auth=config.auth) as client:
+    with RestClient(base_url=config.base_url, auth=config.auth, options=config.options) as client:
         iterator = client.fetch_records(config.stream)
         first_page = next(iterator, [])
         if isinstance(first_page, list):
@@ -116,7 +121,7 @@ def _sample_stream(config: RestSourceConfig) -> List[Mapping[str, Any]]:
 
 def _read_partition(config: RestSourceConfig, schema: StructType) -> Iterator[pa.RecordBatch]:
     """Read data from the stream."""
-    with RestClient(base_url=config.base_url, auth=config.auth) as client:
+    with RestClient(base_url=config.base_url, auth=config.auth, options=config.options) as client:
         for page in client.fetch_records(config.stream):
             if not page:
                 continue

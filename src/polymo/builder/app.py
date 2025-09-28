@@ -21,6 +21,7 @@ from ..config import (
     dump_config,
     parse_config,
 )
+from ..rest_client import RestClient
 
 PACKAGE_ROOT = resources.files(__package__)
 TEMPLATES = Jinja2Templates(directory=str(PACKAGE_ROOT.joinpath("templates")))
@@ -56,6 +57,10 @@ class ValidationRequest(BaseModel):
     config_dict: Optional[Dict[str, Any]] = Field(
         None, description="Configuration provided as a dictionary"
     )
+    token: Optional[str] = Field(None, description="Bearer token supplied separately (not stored)")
+    options: Optional[Dict[str, Any]] = Field(
+        default=None, description="Spark reader options provided alongside the config"
+    )
 
     model_config = ConfigDict(extra="ignore")
 
@@ -79,6 +84,9 @@ class SampleRequest(BaseModel):
     config_dict: Optional[Dict[str, Any]] = None
     token: Optional[str] = None
     limit: int = Field(20, ge=1, le=500, description="Maximum records to preview")
+    options: Optional[Dict[str, Any]] = Field(
+        default=None, description="Spark reader options provided alongside the config"
+    )
 
     model_config = ConfigDict(extra="ignore")
 
@@ -93,6 +101,10 @@ class SampleResponse(BaseModel):
     stream: str
     records: List[Dict[str, Any]]
     dtypes: List[Dict[str, str]] = Field(default_factory=list, description="Spark column data types")
+    raw_pages: List[Dict[str, Any]] = Field(
+        default_factory=list, description="Raw REST API responses captured per page"
+    )
+    rest_error: Optional[str] = None
 
 
 class FormatRequest(BaseModel):
@@ -132,7 +144,9 @@ def create_app() -> FastAPI:
     @app.post("/api/validate", response_model=ValidationResponse)
     async def validate_config(payload: ValidationRequest) -> ValidationResponse:
         try:
-            config = _load_config_payload(payload.config, payload.config_dict)
+            config = _load_config_payload(
+                payload.config, payload.config_dict, payload.token, payload.options
+            )
         except ConfigError as exc:
             return ValidationResponse(valid=False, stream=None, message=str(exc))
         except ValueError as exc:
@@ -150,13 +164,28 @@ def create_app() -> FastAPI:
     @app.post("/api/sample", response_model=SampleResponse)
     async def sample_records(payload: SampleRequest) -> SampleResponse:
         try:
-            config = _load_config_payload(payload.config, payload.config_dict)
+            config = _load_config_payload(
+                payload.config, payload.config_dict, payload.token, payload.options
+            )
         except ConfigError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         stream_config = config.stream
+
+        raw_pages, rest_error = await run_in_threadpool(
+            partial(_collect_rest_preview, config, payload.limit)
+        )
+
+        if rest_error:
+            return SampleResponse(
+                stream=stream_config.name,
+                records=[],
+                dtypes=[],
+                raw_pages=raw_pages,
+                rest_error=rest_error,
+            )
 
         try:
             records, dtypes = await run_in_threadpool(
@@ -165,7 +194,13 @@ def create_app() -> FastAPI:
         except Exception as exc:  # pragma: no cover - surfaced to UI
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-        return SampleResponse(stream=stream_config.name, records=records, dtypes=dtypes)
+        return SampleResponse(
+            stream=stream_config.name,
+            records=records,
+            dtypes=dtypes,
+            raw_pages=raw_pages,
+            rest_error=None,
+        )
 
     @app.post("/api/format", response_model=FormatResponse)
     async def format_config(payload: FormatRequest) -> FormatResponse:
@@ -179,21 +214,63 @@ def create_app() -> FastAPI:
 
 
 def _load_config_payload(
-    config_text: Optional[str], config_dict: Optional[Dict[str, Any]]
+    config_text: Optional[str],
+    config_dict: Optional[Dict[str, Any]],
+    token: Optional[str] = None,
+    options: Optional[Dict[str, Any]] = None,
 ) -> RestSourceConfig:
     if config_dict is not None:
-        return parse_config(config_dict)
+        return parse_config(config_dict, token=token, options=options)
     if config_text is None:
         raise ConfigError("Configuration payload is missing")
-    return _parse_yaml(config_text)
+    return _parse_yaml(config_text, token=token, options=options)
 
 
-def _parse_yaml(text: str) -> RestSourceConfig:
+def _parse_yaml(
+    text: str,
+    token: Optional[str] = None,
+    options: Optional[Dict[str, Any]] = None,
+) -> RestSourceConfig:
     try:
         parsed = yaml.safe_load(text)
     except yaml.YAMLError as exc:
         raise ConfigError(f"Invalid YAML: {exc}") from exc
-    return parse_config(parsed)
+    return parse_config(parsed, token=token, options=options)
+
+
+def _collect_rest_preview(config: RestSourceConfig, limit: int) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    pages: List[Dict[str, Any]] = []
+    total_records = 0
+
+    try:
+        with RestClient(base_url=config.base_url, auth=config.auth, options=config.options) as client:
+            for index, page in enumerate(client.fetch_pages(config.stream), start=1):
+                remaining = max(0, limit - total_records)
+                if remaining <= 0:
+                    break
+
+                page_records = list(page.records)
+                if remaining < len(page_records):
+                    page_records = page_records[:remaining]
+
+                total_records += len(page_records)
+
+                pages.append(
+                    {
+                        "page": index,
+                        "url": page.url,
+                        "status_code": page.status_code,
+                        "headers": dict(page.headers),
+                        "records": page_records,
+                        "payload": page.payload,
+                    }
+                )
+
+                if total_records >= limit:
+                    break
+        return pages, None
+    except Exception as exc:
+        return pages, str(exc)
 
 
 def _collect_records(config: RestSourceConfig, token: str | None, limit: int) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
@@ -210,17 +287,26 @@ def _collect_records(config: RestSourceConfig, token: str | None, limit: int) ->
 
     spark = _get_or_create_spark()
     try:
-        df = _get_preview_df(config_path, token, spark)
+        df = _get_preview_df(config_path, token, spark, config.options)
         records = df.limit(limit).collect()
         dtypes = df.dtypes
         record_dicts = [row.asDict(recursive=True) for row in records]
-        dtype_dicts = [{"column": dtype[0], "type": str(dtype[1])} for dtype in dtypes if dtype[0] in record_dicts[0]]
+        dtype_dicts: List[Dict[str, str]] = []
+        sample_row = record_dicts[0] if record_dicts else {}
+        for column, dtype in dtypes:
+            if sample_row and column in sample_row:
+                dtype_dicts.append({"column": column, "type": str(dtype)})
         return record_dicts, dtype_dicts
     finally:
         spark.stop()
         os.unlink(config_path)
 
-def _get_preview_df(config_path: str, token: str | None, spark: "SparkSession"):
+def _get_preview_df(
+    config_path: str,
+    token: str | None,
+    spark: "SparkSession",
+    reader_options: Dict[str, Any],
+):
     """Get a Spark DataFrame for previewing data from the specified stream."""
 
     from polymo import ApiReader
@@ -232,8 +318,13 @@ def _get_preview_df(config_path: str, token: str | None, spark: "SparkSession"):
     # Create the DataSource instance manually
     options = {
         "config_path": config_path,
-        "token": token,
     }
+    if token is not None:
+        options["token"] = token
+    for key, value in reader_options.items():
+        if key in {"config_path", "token"}:
+            continue
+        options[key] = value
     return spark.read.format("polymo").options(**options).load()
 
 def _get_or_create_spark() -> Any:

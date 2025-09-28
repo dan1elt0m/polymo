@@ -14,22 +14,30 @@ export function formStateToConfig(formState: ConfigFormState): RestSourceConfig 
     }
   });
 
+  // Clean up headers - remove empty values
+  const cleanHeaders: Record<string, any> = {};
+  Object.entries(formState.headers || {}).forEach(([key, value]) => {
+    if (key.trim() && value.trim()) {
+      cleanHeaders[key] = value;
+    }
+  });
+
+  const fieldPathSegments = (formState.recordFieldPath || [])
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0);
+  const recordFilter = formState.recordFilter.trim();
+
   return {
     version: formState.version,
     source: {
       type: 'rest',
       base_url: formState.baseUrl,
-      ...(formState.authType !== 'none' && {
-        auth: {
-          type: formState.authType,
-          ...(formState.authToken && { token: formState.authToken }),
-        },
-      }),
+      // Auth intentionally excluded from persisted config (token supplied separately)
     },
     stream: {
-      name: formState.streamName,
       path: formState.streamPath,
       params: cleanParams,
+      headers: cleanHeaders,
       pagination: {
         type: formState.paginationType,
       },
@@ -40,8 +48,13 @@ export function formStateToConfig(formState: ConfigFormState): RestSourceConfig 
       },
       infer_schema: formState.inferSchema,
       schema: formState.schema || null,
+      record_selector: {
+        field_path: fieldPathSegments,
+        record_filter: recordFilter ? recordFilter : null,
+        cast_to_schema_types: formState.castToSchemaTypes,
+      },
     },
-  };
+  } as any; // backend ignores missing name
 }
 
 /**
@@ -54,20 +67,37 @@ export function configToFormState(config: RestSourceConfig): ConfigFormState {
     stringParams[key] = String(value);
   });
 
+  // Convert headers to string values for form inputs - safely handle undefined headers
+  const stringHeaders: Record<string, string> = {};
+  if (config.stream.headers) {
+    Object.entries(config.stream.headers).forEach(([key, value]) => {
+      stringHeaders[key] = String(value);
+    });
+  }
+
+  const recordSelector = config.stream.record_selector ?? {
+    field_path: [],
+    record_filter: null,
+    cast_to_schema_types: false,
+  };
+
   return {
     version: config.version,
     baseUrl: config.source.base_url,
-    authType: config.source.auth?.type || 'none',
-    authToken: config.source.auth?.token || '',
-    streamName: config.stream.name,
-    streamPath: config.stream.path,
+    authType: (config.source as any).auth?.type || 'none',
+    authToken: '', // token never returned by API
+    streamPath: (config.stream as any).path,
     params: stringParams,
+    headers: stringHeaders,
     paginationType: config.stream.pagination?.type || 'none',
     incrementalMode: config.stream.incremental?.mode || '',
     incrementalCursorParam: config.stream.incremental?.cursor_param || '',
     incrementalCursorField: config.stream.incremental?.cursor_field || '',
     inferSchema: config.stream.infer_schema ?? true,
     schema: config.stream.schema || '',
+    recordFieldPath: Array.isArray(recordSelector.field_path) ? recordSelector.field_path.map(String) : [],
+    recordFilter: recordSelector.record_filter || '',
+    castToSchemaTypes: Boolean(recordSelector.cast_to_schema_types),
   };
 }
 
@@ -81,10 +111,6 @@ export function validateFormState(formState: ConfigFormState): string[] {
     errors.push('Base URL is required');
   } else if (!isValidUrl(formState.baseUrl)) {
     errors.push('Base URL must be a valid HTTP/HTTPS URL');
-  }
-
-  if (!formState.streamName.trim()) {
-    errors.push('Stream name is required');
   }
 
   if (!formState.streamPath.trim()) {

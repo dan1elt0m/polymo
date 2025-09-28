@@ -45,7 +45,7 @@ Just a config file and read it with Spark.
 
 ## Builder UI
 
-Want a friendlier way to craft configs? Launch the local builder:
+Want a friendly way to craft configs? Launch the local builder:
 
 ```bash
 polymo builder --port 9000

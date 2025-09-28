@@ -4,18 +4,16 @@ export const INITIAL_CONFIG: RestSourceConfig = {
   version: '0.1',
   source: {
     type: 'rest',
-    base_url: 'https://jsonplaceholder.typicode.com',
+    base_url: '',
     auth: {
       type: 'none',
       token: null,
     },
   },
   stream: {
-    name: 'posts',
-    path: '/posts',
-    params: {
-      _limit: '25',
-    },
+    path: '',
+    params: {},
+    headers: {},
     pagination: {
       type: 'none',
     },
@@ -26,25 +24,31 @@ export const INITIAL_CONFIG: RestSourceConfig = {
     },
     infer_schema: true,
     schema: null,
+    record_selector: {
+      field_path: [],
+      record_filter: null,
+      cast_to_schema_types: false,
+    },
   },
 };
 
 export const INITIAL_FORM_STATE: ConfigFormState = {
   version: '0.1',
-  baseUrl: 'https://jsonplaceholder.typicode.com',
+  baseUrl: '',
   authType: 'none',
   authToken: '',
-  streamName: 'posts',
-  streamPath: '/posts',
-  params: {
-    _limit: '25',
-  },
+  streamPath: '',
+  params: {},
+  headers: {},
   paginationType: 'none',
   incrementalMode: '',
   incrementalCursorParam: '',
   incrementalCursorField: '',
   inferSchema: true,
   schema: '',
+  recordFieldPath: [],
+  recordFilter: '',
+  castToSchemaTypes: false,
 };
 
 export const PAGINATION_TYPES = [

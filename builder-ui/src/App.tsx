@@ -15,6 +15,7 @@ import {
 	configPayloadAtom,
 	formStateToYamlAtom,
 	bearerTokenAtom,
+	readerOptionsAtom,
 } from "./atoms";
 import { configToFormState } from "./lib/transform";
 import { validateConfigRequest, sampleRequest } from "./lib/api";
@@ -22,11 +23,13 @@ import { BuilderPanel } from "./components/BuilderPanel";
 import { YamlEditor } from "./components/YamlEditor";
 import { SamplePreview } from "./components/SamplePreview";
 import { ThemeMenu } from "./components/ThemeMenu";
+import { LandingScreen } from "./components/LandingScreen";
 import type { ConfigFormState, ValidationResponse, RestSourceConfig } from "./types";
 import { MAX_SAMPLE_ROWS, SAMPLE_VIEWS } from "./lib/constants";
 import yaml from 'js-yaml';
 
 const App: React.FC = () => {
+	const [showLandingScreen, setShowLandingScreen] = React.useState(true);
 	const [configFormState, setConfigFormState] = useAtom(configFormStateAtom);
 	const [builderView, setBuilderView] = useAtom(builderViewAtom);
 	const [yamlText, setYamlText] = useAtom(yamlTextAtom);
@@ -40,11 +43,19 @@ const App: React.FC = () => {
 	const configPayload = useAtomValue(configPayloadAtom);
 	const formStateYaml = useAtomValue(formStateToYamlAtom);
 	const bearerToken = useAtomValue(bearerTokenAtom); // moved from inside handlePreview
+	const readerOptions = useAtomValue(readerOptionsAtom);
 	const [yamlErrorLine, setYamlErrorLine] = React.useState<number | null>(null);
 	const [yamlErrorCol, setYamlErrorCol] = React.useState<number | null>(null);
 	const [yamlSnapshot, setYamlSnapshot] = React.useState<string | null>(null);
 	const [formSnapshot, setFormSnapshot] = React.useState<ConfigFormState | null>(null);
 	const [showYamlInvalidModal, setShowYamlInvalidModal] = React.useState(false);
+	const [showSaveModal, setShowSaveModal] = React.useState(false);
+	const [saveFileName, setSaveFileName] = React.useState('config.yml');
+	const [saveDirHandle, setSaveDirHandle] = React.useState<any | null>(null); // directory handle
+	const [saveDirName, setSaveDirName] = React.useState<string | null>(null);
+
+	// feature detection for directory picker
+	const dirPickerSupported = typeof window !== 'undefined' && 'showDirectoryPicker' in window;
 
 	// sync form state -> yaml when UI edits
 	React.useEffect(() => {
@@ -86,6 +97,15 @@ const App: React.FC = () => {
 	}, [yamlText, lastEdited, setConfigFormState, setStatus, setYamlError]);
 
 	const busy = sample.loading || isValidating;
+	const [validateFlashClass, setValidateFlashClass] = React.useState('');
+	React.useEffect(() => {
+		let timeoutId: number | undefined;
+		if (!isValidating && (status.tone === 'success' || status.tone === 'error')) {
+			setValidateFlashClass(status.tone === 'success' ? 'validate-flash-success' : 'validate-flash-error');
+			timeoutId = window.setTimeout(() => setValidateFlashClass(''), 700);
+		}
+		return () => { if (timeoutId) window.clearTimeout(timeoutId); };
+	}, [isValidating, status.tone]);
 
 	const handleUpdateFormState = React.useCallback(
 		(patch: Partial<ConfigFormState>) => {
@@ -132,17 +152,26 @@ const App: React.FC = () => {
 				setYamlText(payload.yaml);
 			} else {
 				const nextState = configToFormState(payload.config);
+				// Preserve existing auth token & type since backend strips secrets.
+				if (configFormState.authType !== 'none') {
+					nextState.authType = configFormState.authType;
+					nextState.authToken = configFormState.authToken; // keep token in form state
+				}
 				setConfigFormState(nextState);
 			}
 		},
-		[builderView, setConfigFormState, setYamlText],
+		[builderView, setConfigFormState, setYamlText, configFormState]
 	);
 
 	const runValidation = React.useCallback(
 		async ({ updateYaml = false, applyResponse = true }: { updateYaml?: boolean; applyResponse?: boolean } = {}) => {
 			setIsValidating(true);
 			try {
-				const payload = await validateConfigRequest(configPayload);
+				const payload = await validateConfigRequest({
+					...configPayload,
+					token: bearerToken,
+					options: readerOptions,
+				});
 
 				if (applyResponse) {
 					applyValidationPayload(payload);
@@ -157,7 +186,7 @@ const App: React.FC = () => {
 				setIsValidating(false);
 			}
 		},
-		[applyValidationPayload, configPayload, setIsValidating, setYamlText],
+		[applyValidationPayload, configPayload, setIsValidating, setYamlText, bearerToken, readerOptions]
 	);
 
 	const handleValidate = React.useCallback(async () => {
@@ -189,6 +218,8 @@ const App: React.FC = () => {
 			loading: true,
 			view: SAMPLE_VIEWS.TABLE,
 			page: 1,
+			rawPages: [],
+			restError: null,
 		}));
 		setStatus({ tone: "info", message: "Validating configuration…" });
 
@@ -196,30 +227,40 @@ const App: React.FC = () => {
 			// Don't apply the validation response to form state during preview
 			await runValidation({ updateYaml: builderView === "yaml", applyResponse: false });
 			setStatus({ tone: "info", message: "Fetching sample..." });
-			const payload = await sampleRequest({
-				...configPayload,
-				token: bearerToken,
-				limit: nextLimit,
-			});
+				const payload = await sampleRequest({
+					...configPayload,
+					token: bearerToken,
+					limit: nextLimit,
+					options: readerOptions,
+				});
 			const records = Array.isArray(payload.records) ? payload.records : [];
 			const truncated = records.slice(0, MAX_SAMPLE_ROWS);
 			const rowCount = truncated.length;
+			const rawPages = Array.isArray(payload.raw_pages) ? payload.raw_pages : [];
+			const restError = payload.rest_error ?? null;
 			setSample((prev) => ({
 				...prev,
 				data: truncated,
 				dtypes: payload.dtypes || [],
+				rawPages,
+				restError,
 				loading: false,
+				view: restError ? SAMPLE_VIEWS.RAW : SAMPLE_VIEWS.TABLE,
 			}));
 
-			setStatus({
-				tone: "success",
-				message: `Fetched ${rowCount} sample record${rowCount === 1 ? "" : "s"}`,
-			});
+			if (restError) {
+				setStatus({ tone: "error", message: restError });
+			} else {
+				setStatus({
+					tone: "success",
+					message: `Fetched ${rowCount} sample record${rowCount === 1 ? "" : "s"}`,
+				});
+			}
 		} catch (error) {
 			setSample((prev) => ({ ...prev, loading: false }));
 			setStatus({ tone: "error", message: formatError(error) });
 		}
-	}, [builderView, configPayload, runValidation, sample.limit, sample.stream, setSample, setStatus, streamOptions, bearerToken]);
+	}, [builderView, configPayload, runValidation, sample.limit, sample.stream, setSample, setStatus, streamOptions, bearerToken, readerOptions]);
 
 	const handleYamlChange = React.useCallback(
 		(value: string) => {
@@ -244,9 +285,18 @@ const App: React.FC = () => {
 				(async () => {
 					setStatus({ tone: "info", message: "Validating YAML before switching…" });
 					try {
-						const payload = await validateConfigRequest({ config: yamlText });
+					const payload = await validateConfigRequest({
+						config: yamlText,
+						token: bearerToken,
+						options: readerOptions,
+					});
 						if (payload.valid && payload.config) {
 							const nextState = configToFormState(payload.config as any);
+							// Preserve current auth settings
+							if (configFormState.authType !== 'none') {
+								nextState.authType = configFormState.authType;
+								nextState.authToken = configFormState.authToken;
+							}
 							setConfigFormState(nextState);
 							setBuilderView("ui");
 							setLastEdited("ui");
@@ -268,11 +318,11 @@ const App: React.FC = () => {
 				return;
 			}
 		},
-		[builderView, configFormState, formStateYaml, setBuilderView, setConfigFormState, setLastEdited, setStatus, yamlText, setYamlError]
+		[builderView, configFormState, formStateYaml, setBuilderView, setConfigFormState, setLastEdited, setStatus, yamlText, setYamlError, bearerToken, readerOptions]
 	);
 
 	const handleSampleViewChange = React.useCallback(
-		(value: "table" | "json") => {
+		(value: "table" | "json" | "raw") => {
 			setSample((prev) => ({ ...prev, view: value }));
 		},
 		[setSample],
@@ -303,16 +353,29 @@ const App: React.FC = () => {
 		[setSample],
 	);
 
-	const handleSave = React.useCallback(async () => {
-		if (isSaving) return;
-		setIsSaving(true);
-		setStatus({ tone: "info", message: "Saving configuration…" });
+	// Directory chooser (added)
+	const handleChooseDirectory = React.useCallback(async () => {
+		if (!dirPickerSupported) return; // silent no-op if unsupported
 		try {
-			// Don't apply the validation response to form state during save
+			const w: any = window as any;
+			const dir = await w.showDirectoryPicker({ mode: 'readwrite' });
+			setSaveDirHandle(dir);
+			setSaveDirName(dir.name || 'selected');
+		} catch {
+			/* user cancelled */
+		}
+	}, [dirPickerSupported]);
+
+	const handleSave = React.useCallback(async (explicitName?: string) => {
+		if (isSaving) return;
+		const targetName = (explicitName || saveFileName || 'config.yml').trim() || 'config.yml';
+		setIsSaving(true);
+		setStatus({ tone: "info", message: "Validating & saving…" });
+		try {
 			await runValidation({ updateYaml: builderView === "yaml", applyResponse: false });
 			const yamlToDownload = builderView === "yaml" ? yamlText : formStateYaml;
-			downloadYaml(yamlToDownload);
-			setStatus({ tone: "success", message: "Configuration saved successfully." });
+			await downloadYaml(yamlToDownload, targetName, saveDirHandle);
+			setStatus({ tone: "success", message: `Saved ${saveDirName ? saveDirName + '/' : ''}${targetName}` });
 			window.setTimeout(() => {
 				setStatus({ tone: "info", message: "Ready to configure" });
 			}, 3000);
@@ -321,18 +384,23 @@ const App: React.FC = () => {
 		} finally {
 			setIsSaving(false);
 		}
-	}, [builderView, formStateYaml, isSaving, runValidation, setIsSaving, setStatus, yamlText]);
+	}, [builderView, formStateYaml, isSaving, runValidation, saveFileName, saveDirHandle, saveDirName, setIsSaving, setStatus, yamlText]);
 
 	React.useEffect(() => {
 		const handler = (event: KeyboardEvent) => {
 			if ((event.metaKey || event.ctrlKey) && event.key === "s") {
 				event.preventDefault();
-				handleSave();
+				setShowSaveModal(true);
 			}
 		};
 		window.addEventListener("keydown", handler);
 		return () => window.removeEventListener("keydown", handler);
-	}, [handleSave]);
+	}, []);
+
+	// Handle the completion of the landing screen
+	const handleLandingComplete = React.useCallback(() => {
+		setShowLandingScreen(false);
+	}, []);
 
 	// Theme management (light/dark/system)
 	const getSystemDark = () => (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches);
@@ -366,7 +434,7 @@ const App: React.FC = () => {
 	}, [themeMode]);
 
 	const handleCopySchema = React.useCallback(() => {
-		let ddl = '';
+		let ddl: string;
 		if (sample.dtypes && sample.dtypes.length) {
 			// Single-line comma separated DDL
 			ddl = sample.dtypes.map((d: { column: string; type: string }) => `${d.column} ${d.type}`).join(', ');
@@ -410,76 +478,97 @@ const App: React.FC = () => {
 					</div>
 					<div className="flex items-center gap-3">
 						<ThemeMenu mode={themeMode} effective={effectiveTheme} onChange={setThemeMode} />
-						<button
-							type="button"
-							className="rounded-full border border-border dark:border-drac-border px-4 py-2 text-sm font-medium text-slate-12 dark:text-drac-foreground transition hover:bg-blue-9/90 hover:text-white dark:hover:bg-blue-9 dark:hover:text-white disabled:opacity-50"
-							onClick={handleValidate}
-							disabled={busy}
-						>
-							Validate
-						</button>
-						<button
-							type="button"
-							className="rounded-full bg-blue-9 px-4 py-2 text-sm font-semibold text-white shadow-soft transition hover:bg-blue-10 disabled:opacity-50 dark:shadow-[0_0_0_1px_rgba(255,255,255,0.05)]"
-							onClick={handleSave}
-							disabled={busy}
-						>
-							Save
-						</button>
+						{!showLandingScreen && (
+							<button
+								type="button"
+								className="rounded-full px-3 py-1.5 text-xs font-medium border border-border text-slate-12 hover:bg-blue-3/40 dark:border-drac-border/50 dark:text-drac-foreground dark:hover:bg-blue-9/20 transition"
+								onClick={() => setShowLandingScreen(true)}
+							>
+								New Connector
+							</button>
+						)}
 					</div>
 				</div>
 			</header>
 			<main className="flex-1 flex w-full gap-6 px-4 py-8 lg:px-6 items-stretch">
-				<section className="w-full max-w-2xl flex flex-col gap-4 rounded-2xl border border-border bg-surface p-6 shadow-soft h-full">
-					<Tabs.Root value={builderView} onValueChange={handleViewChange}>
-						<Tabs.List className="mb-4 inline-flex rounded-full border border-border bg-background p-1 text-sm font-medium">
-							<Tabs.Trigger
-								value="ui"
-								className="rounded-full px-4 py-1.5 transition text-slate-11 dark:text-drac-foreground/80 hover:text-slate-12 dark:hover:text-drac-foreground data-[state=active]:bg-blue-9 data-[state=active]:text-white data-[state=active]:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-7"
-							>
-								UI Builder
-							</Tabs.Trigger>
-							<Tabs.Trigger
-								value="yaml"
-								className="rounded-full px-4 py-1.5 transition text-slate-11 dark:text-drac-foreground/80 hover:text-slate-12 dark:hover:text-drac-foreground data-[state=active]:bg-blue-9 data-[state=active]:text-white data-[state=active]:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-7"
-							>
-								YAML Editor
-							</Tabs.Trigger>
-						</Tabs.List>
-						<Tabs.Content value="ui" className="outline-none">
-							<BuilderPanel
-								state={configFormState}
-								onUpdateState={handleUpdateFormState}
-								onAddParam={handleAddParam}
-								onRemoveParam={handleRemoveParam}
-								onUpdateParam={handleUpdateParam}
-							/>
-						</Tabs.Content>
-						<Tabs.Content value="yaml" className="outline-none">
-							<YamlEditor value={yamlText} onChange={handleYamlChange} error={yamlError} errorLine={yamlErrorLine} errorCol={yamlErrorCol} />
-						</Tabs.Content>
-					</Tabs.Root>
-				</section>
-				<section className="flex-1 min-w-0 flex flex-col gap-4 rounded-2xl border border-border bg-surface p-6 shadow-soft h-full">
-					<SamplePreview
-						status={status}
-						limit={sample.limit}
-						onLimitChange={handleLimitChange}
-						onPreview={handlePreview}
-						isBusy={busy}
-						view={sample.view}
-						onViewChange={handleSampleViewChange}
-						wrap={sample.wrap}
-						onWrapToggle={handleWrapToggle}
-						page={sample.page}
-						pageSize={sample.pageSize}
-						onPageSizeChange={handlePageSizeChange}
-						onPageChange={handlePageChange}
-						data={sample.data}
-						dtypes={sample.dtypes}
-						onCopySchema={handleCopySchema}
-					/>
-				</section>
+				{showLandingScreen ? (
+					<LandingScreen onComplete={handleLandingComplete} />
+				) : (
+					<>
+						<section className="w-full max-w-2xl flex flex-col gap-4 rounded-2xl border border-border bg-surface p-6 shadow-soft h-full">
+							<Tabs.Root value={builderView} onValueChange={handleViewChange}>
+								<div className="flex items-center justify-between mb-4 gap-4 flex-wrap">
+									<Tabs.List className="inline-flex rounded-full border border-border bg-background p-1 text-sm font-medium">
+										<Tabs.Trigger
+											value="ui"
+											className="rounded-full px-4 py-1.5 transition text-slate-11 dark:text-drac-foreground/80 hover:text-slate-12 dark:hover:text-drac-foreground data-[state=active]:bg-blue-9 data-[state=active]:text-white data-[state=active]:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-7"
+										>
+											UI Builder
+										</Tabs.Trigger>
+										<Tabs.Trigger
+											value="yaml"
+											className="rounded-full px-4 py-1.5 transition text-slate-11 dark:text-drac-foreground/80 hover:text-slate-12 dark:hover:text-drac-foreground data-[state=active]:bg-blue-9 data-[state=active]:text-white data-[state=active]:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-7"
+										>
+											YAML Editor
+										</Tabs.Trigger>
+									</Tabs.List>
+									<div className="flex items-center gap-3">
+										<button
+											type="button"
+											className={"inline-flex items-center gap-1 rounded-full border border-border bg-background px-4 py-2 text-sm font-medium text-slate-12 hover:border-blue-7 hover:text-blue-11 disabled:opacity-50 disabled:cursor-not-allowed transition " + validateFlashClass}
+											onClick={handleValidate}
+											disabled={busy}
+										>
+											{isValidating ? 'Validating…' : 'Validate'}
+										</button>
+										<button
+											type="button"
+											className="inline-flex items-center gap-1 rounded-full bg-blue-9 px-5 py-2 text-sm font-semibold text-white shadow-soft transition hover:bg-blue-10 disabled:opacity-50 disabled:cursor-not-allowed"
+											onClick={() => setShowSaveModal(true)}
+											disabled={busy}
+										>
+											Save
+										</button>
+									</div>
+								</div>
+								<Tabs.Content value="ui" className="outline-none">
+									<BuilderPanel
+										state={configFormState}
+										onUpdateState={handleUpdateFormState}
+										onAddParam={handleAddParam}
+										onRemoveParam={handleRemoveParam}
+										onUpdateParam={handleUpdateParam}
+									/>
+								</Tabs.Content>
+								<Tabs.Content value="yaml" className="outline-none">
+									<YamlEditor value={yamlText} onChange={handleYamlChange} error={yamlError} errorLine={yamlErrorLine} errorCol={yamlErrorCol} />
+								</Tabs.Content>
+							</Tabs.Root>
+						</section>
+						<section className="flex-1 min-w-0 flex flex-col gap-4 rounded-2xl border border-border bg-surface p-6 shadow-soft h-full">
+											<SamplePreview
+												status={status}
+												limit={sample.limit}
+												onLimitChange={handleLimitChange}
+												onPreview={handlePreview}
+												isBusy={busy}
+												view={sample.view}
+												onViewChange={handleSampleViewChange}
+												wrap={sample.wrap}
+												onWrapToggle={handleWrapToggle}
+												page={sample.page}
+												pageSize={sample.pageSize}
+												onPageSizeChange={handlePageSizeChange}
+												onPageChange={handlePageChange}
+												data={sample.data}
+												dtypes={sample.dtypes}
+												rawPages={sample.rawPages}
+												restError={sample.restError}
+												onCopySchema={handleCopySchema}
+											/>
+						</section>
+					</>
+				)}
 			</main>
 			{showYamlInvalidModal && (
 				<div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -522,11 +611,65 @@ const App: React.FC = () => {
 					</div>
 				</div>
 			)}
+			{showSaveModal && (
+				<div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+					<div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => !isSaving && setShowSaveModal(false)} />
+					<div role="dialog" aria-modal="true" className="relative z-10 w-full max-w-md rounded-2xl border border-border bg-surface dark:bg-drac-surface shadow-soft p-6 flex flex-col gap-5">
+						<header className="flex items-start justify-between gap-4">
+							<h2 className="text-lg font-semibold text-slate-12 dark:text-drac-foreground">Save Configuration</h2>
+						</header>
+						<div className="space-y-4">
+							<label className="flex flex-col gap-2">
+								<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/80">File Name</span>
+								<input
+									type="text"
+									className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-slate-12 shadow-sm focus-visible:border-blue-7 dark:border-drac-border dark:bg-drac-surface dark:text-drac-foreground"
+									value={saveFileName}
+									onChange={(e) => setSaveFileName(e.target.value)}
+									placeholder="config.yml"
+								/>
+							</label>
+							<div className="flex items-center gap-3">
+								<button
+									type="button"
+									className="rounded-full px-3 py-1.5 text-xs font-medium border border-border bg-background hover:border-blue-7 hover:text-blue-11 transition disabled:opacity-50"
+									onClick={handleChooseDirectory}
+									disabled={isSaving || !dirPickerSupported}
+								>
+									{dirPickerSupported ? (saveDirName ? 'Change Folder' : 'Choose Folder') : 'Folder Unsupported'}
+								</button>
+								{saveDirName && dirPickerSupported && <span className="text-xs text-muted truncate max-w-[140px]" title={saveDirName}>{saveDirName}/</span>}
+							</div>
+							<p className="text-xs text-muted dark:text-drac-muted">
+								{dirPickerSupported
+									? (saveDirName ? 'Will write directly into the selected folder (if permissions granted).' : 'Select a folder for direct write or leave blank to download.')
+									: 'This browser does not support selecting a target folder; the file will download normally.'}
+							</p>
+						</div>
+						<div className="flex justify-end gap-3 pt-2">
+							<button
+								type="button"
+								className="rounded-full px-4 py-2 text-sm font-medium border border-border dark:border-drac-border text-slate-12 dark:text-drac-foreground hover:bg-blue-3/40 dark:hover:bg-blue-9/25 transition disabled:opacity-50"
+								onClick={() => !isSaving && setShowSaveModal(false)}
+								disabled={isSaving}
+							>
+								Cancel
+							</button>
+							<button
+								type="button"
+								className="rounded-full px-5 py-2 text-sm font-semibold bg-blue-9 text-white hover:bg-blue-10 shadow-soft transition disabled:opacity-50"
+								onClick={() => { setShowSaveModal(false); handleSave(saveFileName); }}
+								disabled={isSaving || !saveFileName.trim()}
+							>
+								{isSaving ? 'Saving…' : 'Save File'}
+							</button>
+						</div>
+					</div>
+				</div>
+			)}
 			<footer className="mt-auto border-t border-border bg-surface/80 py-4 dark:bg-[#1d2026] dark:border-[#2c313a] transition-colors">
 				<div className="mx-auto flex w-full max-w-7xl items-center justify-between px-4 text-sm text-muted">
 					<span>
-						Need Spark? Run{" "}
-						<code className="rounded bg-slate-3 px-1.5 py-0.5 text-xs">pip install 'polymo[spark]'</code>
 					</span>
 				</div>
 			</footer>
@@ -542,16 +685,59 @@ function formatError(error: unknown): string {
 	return String(error ?? "Unknown error");
 }
 
-function downloadYaml(contents: string) {
-	const blob = new Blob([contents], { type: "text/yaml" });
-	const url = URL.createObjectURL(blob);
-	const anchor = document.createElement("a");
-	anchor.href = url;
-	anchor.download = "config.yml";
-	document.body.appendChild(anchor);
-	anchor.click();
-	document.body.removeChild(anchor);
-	URL.revokeObjectURL(url);
+function downloadYaml(contents: string, fileName = 'config.yml', directoryHandle?: any) {
+	const writeToDirectory = async () => {
+		if (!directoryHandle) return false;
+		try {
+			// Ensure permission
+			if (directoryHandle.queryPermission) {
+				let perm = await directoryHandle.queryPermission({ mode: 'readwrite' });
+				if (perm === 'prompt' && directoryHandle.requestPermission) {
+					perm = await directoryHandle.requestPermission({ mode: 'readwrite' });
+				}
+				if (perm !== 'granted') return false;
+			}
+			const fileHandle = await directoryHandle.getFileHandle(fileName, { create: true });
+			const writable = await fileHandle.createWritable();
+			await writable.write(contents);
+			await writable.close();
+			return true;
+		} catch (e) {
+			return false;
+		}
+	};
+	const saveWithPicker = async () => {
+		try {
+			const w: any = window as any;
+			if (w.showSaveFilePicker) {
+				const handle = await w.showSaveFilePicker({
+					suggestedName: fileName,
+					types: [{ description: 'YAML Files', accept: { 'text/yaml': ['.yml', '.yaml'] } }],
+				});
+				const writable = await handle.createWritable();
+				await writable.write(contents);
+				await writable.close();
+				return true;
+			}
+		} catch (e) {
+			// user may have cancelled
+		}
+		return false;
+	};
+	void (async () => {
+		if (await writeToDirectory()) return;
+		if (await saveWithPicker()) return;
+		// Fallback anchor download
+		const blob = new Blob([contents], { type: 'text/yaml' });
+		const url = URL.createObjectURL(blob);
+		const anchor = document.createElement('a');
+		anchor.href = url;
+		anchor.download = fileName;
+		document.body.appendChild(anchor);
+		anchor.click();
+		document.body.removeChild(anchor);
+		URL.revokeObjectURL(url);
+	})();
 }
 
 export default App;

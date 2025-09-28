@@ -5,4 +5,5 @@ export const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
 export const SAMPLE_VIEWS = {
 	TABLE: "table" as const,
 	JSON: "json" as const,
+	RAW: "raw" as const,
 };

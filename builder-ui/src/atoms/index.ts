@@ -28,13 +28,17 @@ const defaultSampleState: SampleState = {
 	page: 1,
 	pageSize: DEFAULT_PAGE_SIZE,
 	loading: false,
+	rawPages: [],
+	restError: null,
 };
 export const sampleAtom = atom<SampleState>(defaultSampleState);
 
 export const streamOptionsAtom = atom((get) => {
 	const state = get(configFormStateAtom);
-	const name = state.streamName.trim();
-	return name ? [name] : [];
+	const path = state.streamPath.trim();
+	if (!path) return [] as string[];
+	const derived = (path.startsWith('/') ? path.slice(1) : path).replace(/\/+/, '_') || 'stream';
+	return [derived];
 });
 
 export const configPayloadAtom = atom((get) => {
@@ -50,8 +54,7 @@ export const configPayloadAtom = atom((get) => {
 // Derived atom to convert form state to YAML
 export const formStateToYamlAtom = atom((get) => {
   const formState = get(configFormStateAtom);
-  const cfg = formStateToConfig(formState);
-  // Build ordered object to preserve desired key ordering
+  const cfg = formStateToConfig(formState) as any;
   const ordered: any = {
     version: cfg.version,
     source: {
@@ -59,7 +62,7 @@ export const formStateToYamlAtom = atom((get) => {
       base_url: cfg.source.base_url,
     },
     stream: {
-      name: cfg.stream.name,
+      // name omitted intentionally
       path: cfg.stream.path,
       infer_schema: cfg.stream.infer_schema,
       schema: cfg.stream.schema || null,
@@ -70,11 +73,23 @@ export const formStateToYamlAtom = atom((get) => {
         cursor_param: cfg.stream.incremental.cursor_param,
         cursor_field: cfg.stream.incremental.cursor_field,
       },
+      record_selector: {
+        field_path: cfg.stream.record_selector?.field_path || [],
+        record_filter: cfg.stream.record_selector?.record_filter ?? null,
+        cast_to_schema_types: !!cfg.stream.record_selector?.cast_to_schema_types,
+      },
     },
   };
   if (!Object.keys(ordered.stream.params).length) delete ordered.stream.params;
   if (!ordered.stream.schema) ordered.stream.schema = null;
-  // Auth optional
+  if (
+    ordered.stream.record_selector &&
+    !ordered.stream.record_selector.field_path.length &&
+    ordered.stream.record_selector.record_filter == null &&
+    !ordered.stream.record_selector.cast_to_schema_types
+  ) {
+    delete ordered.stream.record_selector;
+  }
   if (cfg.source.auth) {
     ordered.source.auth = { ...cfg.source.auth };
   }
@@ -83,3 +98,4 @@ export const formStateToYamlAtom = atom((get) => {
 
 
 export const bearerTokenAtom = atom<string>('');
+export const readerOptionsAtom = atom<Record<string, string>>({});
