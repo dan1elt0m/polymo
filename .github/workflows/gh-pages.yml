@@ -35,10 +35,10 @@ jobs:
 
       - name: Build documentation
         run: |
-          mkdocs build --site-dir site
+          uv run mkdocs build --site-dir site
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v2
+        uses: actions/upload-pages-artifact@v4
         with:
           path: site
 
