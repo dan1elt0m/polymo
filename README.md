@@ -72,6 +72,6 @@ Polymo requires PySpark 4.x. The CLI enforces this requirement before launching 
 - `examples/` – Ready-to-run connector samples used by the smoke test and the builder landing screen.
 
 ## Where to Next
-Read the [API reference](docs/api.md), [CLI documentation](docs/cli.md), or [dive into the builder UI](docs/index.md).
+Read the docs [here](dan1elt0m.github.io/polymo/)
 
 Contributions and early feedback welcome!
