@@ -53,11 +53,6 @@ Polymo requires PySpark 4.x. The CLI enforces this requirement before launching 
     spark.read.format("polymo")
     .option("config_path", "./config.yml")
     .option("token", "<YOUR_BEARER_TOKEN>")
-    # Optional incremental sync settings
-    # .option("incremental_state_path", "s3://team-bucket/polymo/state.json")
-    # .option("incremental_start_value", "2024-01-01T00:00:00Z")
-    # .option("incremental_state_key", "orders-prod")
-    # .option("incremental_memory_state", "false")
     .load()
    
    df.show()
