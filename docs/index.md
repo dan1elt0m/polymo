@@ -53,9 +53,43 @@ df.show()
 - Override the stored entry name with `.option("incremental_state_key", "...")` if you share a state file across connectors.
 - Skip the state path to keep cursors only in memory during the Spark session, or disable that cache with `.option("incremental_memory_state", "false")` if you always want a cold start.
 
+### Handling flaky APIs with retries
+- Add an `error_handler` block under `stream:` when you want to customise retries. By default Polymo retries 5× on HTTP `5XX` and `429` responses with exponential backoff.
+- Override the defaults to catch extra status codes or adjust the timing:
+
+```yaml
+stream:
+  path: /orders
+  error_handler:
+    max_retries: 6
+    retry_statuses:
+      - 5XX
+      - 429
+      - 404
+    retry_on_timeout: true
+    retry_on_connection_errors: true
+    backoff:
+      initial_delay_seconds: 1
+      max_delay_seconds: 60
+      multiplier: 1.8
+```
+
+- Omit the block to keep the safe defaults. The Builder UI exposes the same fields if you prefer toggles over YAML edits.
+
 ## What’s inside this project
 - `src/polymo/` keeps the logic that speaks to APIs and hands data to Spark.
 - `polymo builder` is a small web app (FastAPI + React) that guides you through every step.
 - `examples/` contains ready-made configs you can copy, tweak, and use for smoke tests.
 
-Whenever you see an unfamiliar term, look for a tooltip or note in the docs—we try to link jargon to plain explanations. Have fun building connectors!
+## Run the Builder in Docker
+- Build the dev-friendly image and launch the Builder with hot reload:
+
+```bash
+docker compose up --build builder
+```
+
+- The service listens on port `8000`; open <http://localhost:8000> once Uvicorn reports it is running.
+- The image already bundles PySpark and OpenJDK 21;
+- Stop with `docker compose down` and restart quickly using the cached image via `docker compose up builder`.
+
+Have fun building connectors!
