@@ -49,7 +49,7 @@ Polymo requires PySpark 4.x. The CLI enforces this requirement before launching 
    spark = SparkSession.builder.getOrCreate()
    spark.dataSource.register(ApiReader)
 
-df = (
+   df = (
     spark.read.format("polymo")
     .option("config_path", "./config.yml")
     .option("token", "<YOUR_BEARER_TOKEN>")
@@ -59,8 +59,7 @@ df = (
     # .option("incremental_state_key", "orders-prod")
     # .option("incremental_memory_state", "false")
     .load()
-)
-
+   
    df.show()
    ```
 
