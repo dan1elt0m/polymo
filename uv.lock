@@ -550,7 +550,7 @@ wheels = [
 
 [[package]]
 name = "polymo"
-version = "0.1.2"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "fsspec" },
