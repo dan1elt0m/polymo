@@ -1,6 +1,6 @@
 import { atom } from "jotai";
 import type { ConfigFormState, SampleState, StatusState } from "../types";
-import { INITIAL_FORM_STATE } from "../lib/initial-data";
+import { DEFAULT_ERROR_HANDLER, INITIAL_FORM_STATE } from "../lib/initial-data";
 import { formStateToConfig } from "../lib/transform";
 import {
 	DEFAULT_PAGE_SIZE,
@@ -77,6 +77,23 @@ export const formStateToYamlAtom = atom((get) => {
         field_path: cfg.stream.record_selector?.field_path || [],
         record_filter: cfg.stream.record_selector?.record_filter ?? null,
         cast_to_schema_types: !!cfg.stream.record_selector?.cast_to_schema_types,
+      },
+      error_handler: {
+        max_retries: cfg.stream.error_handler?.max_retries ?? DEFAULT_ERROR_HANDLER.max_retries,
+        retry_statuses: Array.isArray(cfg.stream.error_handler?.retry_statuses)
+          ? cfg.stream.error_handler.retry_statuses
+          : [...DEFAULT_ERROR_HANDLER.retry_statuses],
+        retry_on_timeout: cfg.stream.error_handler?.retry_on_timeout ?? DEFAULT_ERROR_HANDLER.retry_on_timeout,
+        retry_on_connection_errors:
+          cfg.stream.error_handler?.retry_on_connection_errors ?? DEFAULT_ERROR_HANDLER.retry_on_connection_errors,
+        backoff: {
+          initial_delay_seconds:
+            cfg.stream.error_handler?.backoff?.initial_delay_seconds ?? DEFAULT_ERROR_HANDLER.backoff.initial_delay_seconds,
+          max_delay_seconds:
+            cfg.stream.error_handler?.backoff?.max_delay_seconds ?? DEFAULT_ERROR_HANDLER.backoff.max_delay_seconds,
+          multiplier:
+            cfg.stream.error_handler?.backoff?.multiplier ?? DEFAULT_ERROR_HANDLER.backoff.multiplier,
+        },
       },
     },
   };

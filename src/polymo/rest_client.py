@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import posixpath
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -33,6 +34,7 @@ from pyspark.sql.types import (
 
 from .config import (
     AuthConfig,
+    ErrorHandlerConfig,
     PaginationConfig,
     RecordSelectorConfig,
     StreamConfig,
@@ -60,9 +62,56 @@ class RestPage:
     headers: Mapping[str, str]
 
 
+class _RetryPolicy:
+    """Evaluate retry behaviour for HTTP responses and request errors."""
+
+    def __init__(self, config: ErrorHandlerConfig) -> None:
+        self._config = config
+        self._status_ranges: List[tuple[int, int]] = []
+        self._status_exact: set[int] = set()
+
+        for spec in config.retry_statuses:
+            if spec.endswith("XX"):
+                bucket = int(spec[0])
+                start = bucket * 100
+                self._status_ranges.append((start, start + 99))
+            else:
+                try:
+                    code = int(spec)
+                except ValueError:
+                    continue
+                self._status_exact.add(code)
+
+    def can_retry(self, retries_attempted: int) -> bool:
+        return retries_attempted < self._config.max_retries
+
+    def should_retry_status(self, status_code: int) -> bool:
+        if status_code in self._status_exact:
+            return True
+        for start, end in self._status_ranges:
+            if start <= status_code <= end:
+                return True
+        return False
+
+    def should_retry_exception(self, exc: Exception) -> bool:
+        if isinstance(exc, httpx.TimeoutException):
+            return self._config.retry_on_timeout
+        if isinstance(exc, httpx.RequestError):
+            return self._config.retry_on_connection_errors
+        return False
+
+    def next_delay(self, retries_attempted: int) -> float:
+        base = self._config.backoff.initial_delay_seconds
+        multiplier = self._config.backoff.multiplier
+        delay = base * (multiplier ** retries_attempted)
+        max_delay = self._config.backoff.max_delay_seconds
+        if max_delay > 0:
+            delay = min(delay, max_delay)
+        return max(delay, 0.0)
+
 @dataclass
 class RestClient:
-    """Thin HTTP client tailored for REST-to-DataFrame ingestion."""
+    """HTTP client tailored for REST-to-DataFrame ingestion."""
 
     base_url: str
     auth: AuthConfig
@@ -147,16 +196,22 @@ class RestClient:
         tracker.apply_to_params(query_params)
 
         next_url: Optional[str] = initial_path
+        retry_policy = _RetryPolicy(stream.error_handler)
 
         try:
             while next_url:
-                response = self._client.get(
-                    next_url,
-                    params=query_params if next_url == initial_path else None,
-                    headers=request_headers,
+                response = self._request_with_retries(
+                    url=next_url,
+                    query_params=query_params,
+                    include_params=next_url == initial_path,
+                    request_headers=request_headers,
+                    policy=retry_policy,
                 )
-                response.raise_for_status()
-                payload = response.json()
+
+                try:
+                    payload = response.json()
+                except json.JSONDecodeError as exc:
+                    raise ValueError("Expected API response to be valid JSON") from exc
 
                 records = _extract_records(payload, stream.record_selector, declared_schema)
                 if not isinstance(records, list):
@@ -181,6 +236,50 @@ class RestClient:
 
     def __exit__(self, *_: object) -> None:
         self.close()
+
+    def _request_with_retries(
+        self,
+        *,
+        url: str,
+        query_params: Dict[str, Any],
+        include_params: bool,
+        request_headers: Optional[Dict[str, str]],
+        policy: _RetryPolicy,
+    ) -> httpx.Response:
+        retries_attempted = 0
+        while True:
+            try:
+                response = self._client.get(
+                    url,
+                    params=query_params if include_params else None,
+                    headers=request_headers,
+                )
+            except (httpx.TimeoutException, httpx.RequestError) as exc:
+                if policy.should_retry_exception(exc) and policy.can_retry(retries_attempted):
+                    delay = policy.next_delay(retries_attempted)
+                    retries_attempted += 1
+                    if delay > 0:
+                        time.sleep(delay)
+                    continue
+                raise RuntimeError(f"Request to {url} failed: {exc}") from exc
+
+            status_code = response.status_code
+            if status_code >= 400:
+                if policy.should_retry_status(status_code) and policy.can_retry(retries_attempted):
+                    delay = policy.next_delay(retries_attempted)
+                    retries_attempted += 1
+                    response.close()
+                    if delay > 0:
+                        time.sleep(delay)
+                    continue
+
+                message = _summarise_response_error(response)
+                response.close()
+                raise RuntimeError(
+                    f"Request to {response.url} failed with status {status_code}: {message}"
+                )
+
+            return response
 
 
 def _render_template(value: Any, context: Mapping[str, Any]) -> Any:
@@ -669,3 +768,33 @@ def _get_remote_filesystem(path: str):
 
     fs, remote_path = fsspec.core.url_to_fs(path)
     return fs, remote_path
+
+
+def _summarise_response_error(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+    except (json.JSONDecodeError, ValueError):
+        payload = None
+
+    if isinstance(payload, Mapping):
+        for key in ("detail", "message", "error"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        errors = payload.get("errors")
+        if isinstance(errors, list) and errors:
+            first = errors[0]
+            if isinstance(first, str) and first.strip():
+                return first.strip()
+            if isinstance(first, Mapping):
+                nested = first.get("message") or first.get("detail")
+                if isinstance(nested, str) and nested.strip():
+                    return nested.strip()
+
+    text = response.text.strip()
+    if text:
+        first_line = text.splitlines()[0]
+        if len(first_line) > 200:
+            return first_line[:197] + "..."
+        return first_line
+    return "no details provided"

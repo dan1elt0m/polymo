@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Mapping
+from typing import Any, Dict, List, Literal, Optional, Mapping, Tuple
 import re
 
 import yaml
@@ -71,6 +71,30 @@ class RecordSelectorConfig:
 
 
 @dataclass(frozen=True)
+class BackoffConfig:
+    """Retry backoff configuration for the REST error handler."""
+
+    initial_delay_seconds: float = 1.0
+    max_delay_seconds: float = 30.0
+    multiplier: float = 2.0
+
+
+def _default_retry_statuses() -> Tuple[str, ...]:
+    return ("5XX", "429")
+
+
+@dataclass(frozen=True)
+class ErrorHandlerConfig:
+    """Controls how HTTP and network errors are handled."""
+
+    max_retries: int = 5
+    retry_statuses: Tuple[str, ...] = field(default_factory=_default_retry_statuses)
+    retry_on_timeout: bool = True
+    retry_on_connection_errors: bool = True
+    backoff: BackoffConfig = field(default_factory=BackoffConfig)
+
+
+@dataclass(frozen=True)
 class StreamConfig:
     """Definition of a logical stream within the REST connector."""
 
@@ -83,6 +107,7 @@ class StreamConfig:
     infer_schema: bool = True
     schema: str | None = None
     record_selector: RecordSelectorConfig = field(default_factory=RecordSelectorConfig)
+    error_handler: ErrorHandlerConfig = field(default_factory=ErrorHandlerConfig)
 
 
 @dataclass(frozen=True)
@@ -210,6 +235,19 @@ def config_to_dict(config: RestSourceConfig) -> Dict[str, Any]:
         "cast_to_schema_types": selector.cast_to_schema_types,
     }
 
+    error_handler = stream.error_handler
+    stream_dict["error_handler"] = {
+        "max_retries": error_handler.max_retries,
+        "retry_statuses": list(error_handler.retry_statuses),
+        "retry_on_timeout": error_handler.retry_on_timeout,
+        "retry_on_connection_errors": error_handler.retry_on_connection_errors,
+        "backoff": {
+            "initial_delay_seconds": error_handler.backoff.initial_delay_seconds,
+            "max_delay_seconds": error_handler.backoff.max_delay_seconds,
+            "multiplier": error_handler.backoff.multiplier,
+        },
+    }
+
     return {
         "version": config.version,
         "source": source,
@@ -271,6 +309,7 @@ def _parse_stream(raw: Any) -> StreamConfig:
     pagination = _parse_pagination(raw.get("pagination"))
     incremental = _parse_incremental(raw.get("incremental"))
     record_selector = _parse_record_selector(raw.get("record_selector"))
+    error_handler = _parse_error_handler(raw.get("error_handler"))
     infer_schema = raw.get("infer_schema")
     schema = raw.get("schema")
     if not infer_schema and not schema:
@@ -297,6 +336,7 @@ def _parse_stream(raw: Any) -> StreamConfig:
         infer_schema=infer_schema,
         schema=schema,
         record_selector=record_selector,
+        error_handler=error_handler,
     )
 
 
@@ -361,6 +401,123 @@ def _parse_record_selector(raw: Any) -> RecordSelectorConfig:
         record_filter=record_filter,
         cast_to_schema_types=cast_to_schema_types,
     )
+
+
+def _parse_error_handler(raw: Any) -> ErrorHandlerConfig:
+    if raw is None:
+        return ErrorHandlerConfig()
+    if not isinstance(raw, dict):
+        raise ConfigError("'error_handler' must be a mapping when provided")
+
+    max_retries = raw.get("max_retries", 5)
+    if not isinstance(max_retries, int) or max_retries < 0:
+        raise ConfigError("'error_handler.max_retries' must be a non-negative integer")
+
+    retry_statuses_raw = raw.get("retry_statuses")
+    if retry_statuses_raw is None:
+        retry_statuses = _default_retry_statuses()
+    else:
+        if not isinstance(retry_statuses_raw, list):
+            raise ConfigError("'error_handler.retry_statuses' must be a list when provided")
+        retry_statuses = tuple(_normalize_status_spec(value) for value in retry_statuses_raw)
+
+    retry_on_timeout = raw.get("retry_on_timeout", True)
+    if not isinstance(retry_on_timeout, bool):
+        raise ConfigError("'error_handler.retry_on_timeout' must be a boolean when provided")
+
+    retry_on_connection_errors = raw.get("retry_on_connection_errors", True)
+    if not isinstance(retry_on_connection_errors, bool):
+        raise ConfigError("'error_handler.retry_on_connection_errors' must be a boolean when provided")
+
+    backoff_raw = raw.get("backoff")
+    if backoff_raw is None:
+        backoff = BackoffConfig()
+    else:
+        if not isinstance(backoff_raw, dict):
+            raise ConfigError("'error_handler.backoff' must be a mapping when provided")
+
+        defaults = BackoffConfig()
+        initial = _ensure_non_negative_float(
+            backoff_raw.get("initial_delay_seconds", defaults.initial_delay_seconds),
+            "error_handler.backoff.initial_delay_seconds",
+        )
+        max_delay = _ensure_non_negative_float(
+            backoff_raw.get("max_delay_seconds", defaults.max_delay_seconds),
+            "error_handler.backoff.max_delay_seconds",
+        )
+        multiplier = _ensure_positive_float(
+            backoff_raw.get("multiplier", defaults.multiplier),
+            "error_handler.backoff.multiplier",
+        )
+
+        if max_delay and max_delay < initial:
+            raise ConfigError(
+                "'error_handler.backoff.max_delay_seconds' must be greater than or equal to initial_delay_seconds"
+            )
+
+        backoff = BackoffConfig(
+            initial_delay_seconds=initial,
+            max_delay_seconds=max_delay,
+            multiplier=multiplier,
+        )
+
+    return ErrorHandlerConfig(
+        max_retries=max_retries,
+        retry_statuses=retry_statuses,
+        retry_on_timeout=retry_on_timeout,
+        retry_on_connection_errors=retry_on_connection_errors,
+        backoff=backoff,
+    )
+
+
+def _normalize_status_spec(value: Any) -> str:
+    if isinstance(value, int):
+        code = value
+        if code < 100 or code > 599:
+            raise ConfigError("HTTP status codes must be between 100 and 599")
+        return str(code)
+
+    if isinstance(value, str):
+        text = value.strip().upper()
+        if not text:
+            raise ConfigError("HTTP status code entries cannot be empty")
+        if text.endswith("XX"):
+            if len(text) != 3 or not text[0].isdigit():
+                raise ConfigError("Pattern status codes must look like '5XX'")
+            bucket = int(text[0])
+            if bucket < 1 or bucket > 5:
+                raise ConfigError("Pattern status codes must be between '1XX' and '5XX'")
+            return f"{bucket}XX"
+        if text.isdigit():
+            code = int(text)
+            if code < 100 or code > 599:
+                raise ConfigError("HTTP status codes must be between 100 and 599")
+            return str(code)
+        raise ConfigError("Status codes must be integers or patterns like '5XX'")
+
+    raise ConfigError("Status codes must be integers or strings")
+
+
+def _ensure_non_negative_float(value: Any, field_name: str) -> float:
+    if isinstance(value, bool):
+        raise ConfigError(f"'{field_name}' must be a number")
+    if not isinstance(value, (int, float)):
+        raise ConfigError(f"'{field_name}' must be a number")
+    result = float(value)
+    if result < 0:
+        raise ConfigError(f"'{field_name}' must be greater than or equal to 0")
+    return result
+
+
+def _ensure_positive_float(value: Any, field_name: str) -> float:
+    if isinstance(value, bool):
+        raise ConfigError(f"'{field_name}' must be a number")
+    if not isinstance(value, (int, float)):
+        raise ConfigError(f"'{field_name}' must be a number")
+    result = float(value)
+    if result <= 0:
+        raise ConfigError(f"'{field_name}' must be greater than 0")
+    return result
 
 
 def _validate_ddl(ddl: str) -> None:

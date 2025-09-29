@@ -5,6 +5,7 @@ import { InfoTooltip } from "./InfoTooltip";
 import { useAtom, useSetAtom, useAtomValue } from "jotai";
 import { bearerTokenAtom, readerOptionsAtom, runtimeOptionsAtom } from "../atoms";
 import { InputWithCursorPosition } from "./InputWithCursorPosition";
+import { DEFAULT_ERROR_HANDLER } from "../lib/initial-data";
 
 // Add row components that defer key renames until blur to avoid remounting each keystroke
 const ParamRow: React.FC<{
@@ -218,6 +219,7 @@ export const BuilderPanel: React.FC<BuilderPanelProps> = ({
 	const [showRecordSelector, setShowRecordSelector] = React.useState(false);
 	const [showReaderOptions, setShowReaderOptions] = React.useState(false);
 	const [showIncremental, setShowIncremental] = React.useState(false);
+	const [showErrorHandling, setShowErrorHandling] = React.useState(false);
 	const incrementalAutoOpenRef = React.useRef(false);
 
 	const incrementalSummary = React.useMemo(() => {
@@ -246,6 +248,20 @@ export const BuilderPanel: React.FC<BuilderPanelProps> = ({
 		return parts.length ? parts.join(' · ') : 'disabled';
 	}, [state.incrementalMode, state.incrementalCursorParam, state.incrementalCursorField, state.incrementalStatePath, state.incrementalStartValue, state.incrementalStateKey, state.incrementalMemoryEnabled]);
 
+	const errorHandlerSummary = React.useMemo(() => {
+		const retries = state.errorHandlerMaxRetries.trim() || String(DEFAULT_ERROR_HANDLER.max_retries);
+		const statuses = (state.errorHandlerRetryStatuses || [])
+			.map((status) => status.trim())
+			.filter((status) => status.length > 0);
+		const multiplier = state.errorHandlerBackoffMultiplier.trim() || String(DEFAULT_ERROR_HANDLER.backoff.multiplier);
+		const parts = [
+			`${retries} retries`,
+			`statuses: ${statuses.length ? statuses.join(', ') : 'none'}`,
+			`backoff ×${multiplier}`,
+		];
+		return parts.join(' · ');
+	}, [state.errorHandlerMaxRetries, state.errorHandlerRetryStatuses, state.errorHandlerBackoffMultiplier]);
+
 	// Initialize headers if not present
 	React.useEffect(() => {
 		if (!state.headers) {
@@ -264,6 +280,35 @@ export const BuilderPanel: React.FC<BuilderPanelProps> = ({
 			setShowReaderOptions(true);
 		}
 	}, [readerOptions]);
+
+	React.useEffect(() => {
+		const defaultStatuses = DEFAULT_ERROR_HANDLER.retry_statuses.map((status) => status.toUpperCase());
+		const currentStatuses = (state.errorHandlerRetryStatuses || [])
+			.map((status) => status.trim().toUpperCase())
+			.filter((status) => status.length > 0);
+		const statusesMatch =
+			currentStatuses.length === defaultStatuses.length &&
+			currentStatuses.every((status, index) => status === defaultStatuses[index]);
+		const matchesDefaults =
+			state.errorHandlerMaxRetries.trim() === String(DEFAULT_ERROR_HANDLER.max_retries) &&
+			statusesMatch &&
+			state.errorHandlerInitialDelaySeconds.trim() === String(DEFAULT_ERROR_HANDLER.backoff.initial_delay_seconds) &&
+			state.errorHandlerMaxDelaySeconds.trim() === String(DEFAULT_ERROR_HANDLER.backoff.max_delay_seconds) &&
+			state.errorHandlerBackoffMultiplier.trim() === String(DEFAULT_ERROR_HANDLER.backoff.multiplier) &&
+			state.errorHandlerRetryOnTimeout === DEFAULT_ERROR_HANDLER.retry_on_timeout &&
+			state.errorHandlerRetryOnConnectionErrors === DEFAULT_ERROR_HANDLER.retry_on_connection_errors;
+		if (!matchesDefaults) {
+			setShowErrorHandling(true);
+		}
+	}, [
+		state.errorHandlerMaxRetries,
+		state.errorHandlerRetryStatuses,
+		state.errorHandlerInitialDelaySeconds,
+		state.errorHandlerMaxDelaySeconds,
+		state.errorHandlerBackoffMultiplier,
+		state.errorHandlerRetryOnTimeout,
+		state.errorHandlerRetryOnConnectionErrors,
+	]);
 
 	React.useEffect(() => {
 		const hasIncrementalValues = Boolean(
@@ -346,6 +391,23 @@ export const BuilderPanel: React.FC<BuilderPanelProps> = ({
 		headers[newKey] = value;
 		onUpdateState({ headers });
 	}, [state.headers, onUpdateState]);
+
+	const handleAddRetryStatus = React.useCallback(() => {
+		const next = [...(state.errorHandlerRetryStatuses || []), ""];
+		onUpdateState({ errorHandlerRetryStatuses: next });
+	}, [state.errorHandlerRetryStatuses, onUpdateState]);
+
+	const handleUpdateRetryStatus = React.useCallback((index: number, value: string) => {
+		const current = [...(state.errorHandlerRetryStatuses || [])];
+		current[index] = value;
+		onUpdateState({ errorHandlerRetryStatuses: current });
+	}, [state.errorHandlerRetryStatuses, onUpdateState]);
+
+	const handleRemoveRetryStatus = React.useCallback((index: number) => {
+		const current = state.errorHandlerRetryStatuses || [];
+		const next = current.filter((_, idx) => idx !== index);
+		onUpdateState({ errorHandlerRetryStatuses: next });
+	}, [state.errorHandlerRetryStatuses, onUpdateState]);
 
 	const handleAddReaderOption = React.useCallback(() => {
 		setReaderOptions((prev) => {
@@ -629,6 +691,158 @@ export const BuilderPanel: React.FC<BuilderPanelProps> = ({
 											) : (
 												<p className="text-sm text-muted dark:text-drac-muted">No parameters configured.</p>
 											)}
+										</div>
+									)}
+								</div>
+
+								{/* Error handling */}
+								<div className="space-y-3">
+									<button
+										type="button"
+										className="flex w-full items-center justify-between rounded-lg border border-border bg-background px-4 py-3 text-left text-sm font-medium text-slate-12 hover:border-blue-7 hover:bg-blue-3/20 dark:hover:bg-drac-selection/40 transition-colors duration-200"
+										onClick={() => setShowErrorHandling((v) => !v)}
+										aria-expanded={showErrorHandling}
+										aria-controls="error-handler-section"
+									>
+										<span className="flex items-center gap-2">
+											Error handling
+											<span className="text-xs font-normal text-muted">({errorHandlerSummary})</span>
+										</span>
+										<span className={"transition-transform duration-200 " + (showErrorHandling ? 'rotate-90' : '')}>
+											<svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+												<path d="M7.25 3.75a.75.75 0 0 1 1.06 0l5 5a.75.75 0 0 1 0 1.06l-5 5a.75.75 0 1 1-1.06-1.06L11.69 10 7.25 5.56a.75.75 0 0 1 0-1.06Z" />
+											</svg>
+										</span>
+									</button>
+									{showErrorHandling && (
+										<div
+											id="error-handler-section"
+											className="space-y-6 rounded-xl border border-border/60 dark:border-drac-border/60 bg-surface/70 dark:bg-[#1f232b]/80 backdrop-blur-sm p-5 shadow-inner transition ring-1 ring-border/40 dark:ring-drac-border/30 animate-in fade-in duration-200"
+										>
+											<div className="grid gap-5 md:grid-cols-2">
+												<label className="flex flex-col gap-2">
+													<div className="flex items-center gap-1">
+														<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Max retries</span>
+														<InfoTooltip text="Number of times a request is retried after the first attempt." />
+													</div>
+													<input
+														type="number"
+														min={0}
+														className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
+														value={state.errorHandlerMaxRetries}
+														onChange={(e) => onUpdateState({ errorHandlerMaxRetries: e.target.value })}
+													/>
+												</label>
+												<div className="flex flex-col gap-2">
+													<div className="flex items-center gap-1">
+														<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Retry status codes</span>
+														<InfoTooltip text="HTTP codes or patterns (e.g. 429, 5XX) that should be retried." />
+													</div>
+													{(state.errorHandlerRetryStatuses || []).length > 0 ? (
+														<ul className="flex flex-col gap-2">
+															{state.errorHandlerRetryStatuses.map((status, index) => (
+																<li key={`retry-status-${index}`} className="flex items-center gap-2">
+																	<input
+																		type="text"
+																		className="flex-1 rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-3 py-2 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border focus-visible:ring-1 focus-visible:ring-blue-5"
+																		placeholder="5XX"
+																		value={status}
+																		onChange={(e) => handleUpdateRetryStatus(index, e.target.value)}
+																	/>
+																	<button
+																		type="button"
+																		className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border/60 dark:border-drac-border bg-background/70 dark:bg-[#2d3541] text-slate-11 dark:text-drac-muted hover:border-red-7 hover:text-red-9 hover:bg-red-3/40 dark:hover:border-drac-red/80 dark:hover:text-drac-red dark:hover:bg-[#3a3f4b] transition"
+																		onClick={() => handleRemoveRetryStatus(index)}
+																		aria-label={`Remove retry status ${status || index + 1}`}
+																	>
+																		<svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+																			<path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+																		</svg>
+																	</button>
+																</li>
+															))}
+														</ul>
+													) : (
+														<p className="text-sm text-muted dark:text-drac-muted">No overrides configured. Defaults to retrying 5XX and 429 responses.</p>
+													)}
+													<button
+														type="button"
+														className="inline-flex w-fit items-center gap-2 rounded-md border border-border bg-background/70 dark:bg-[#272d38] px-3 py-1.5 text-xs font-medium text-blue-11 hover:bg-blue-3/40 dark:border-drac-border dark:text-drac-accent dark:hover:bg-[#283546] transition"
+														onClick={handleAddRetryStatus}
+													>
+														<svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5">
+															<path d="M10 4a1 1 0 0 1 1 1v4h4a1 1 0 1 1 0 2h-4v4a1 1 0 1 1-2 0v-4H5a1 1 0 1 1 0-2h4V5a1 1 0 0 1 1-1Z" />
+														</svg>
+														<span>Add status</span>
+													</button>
+												</div>
+											</div>
+
+											<div className="grid gap-5 md:grid-cols-3">
+												<label className="flex flex-col gap-2">
+													<div className="flex items-center gap-1">
+														<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Initial delay (s)</span>
+														<InfoTooltip text="Delay before the first retry attempt." />
+													</div>
+													<input
+														type="number"
+														min={0}
+														step="0.1"
+														className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
+														value={state.errorHandlerInitialDelaySeconds}
+														onChange={(e) => onUpdateState({ errorHandlerInitialDelaySeconds: e.target.value })}
+													/>
+												</label>
+												<label className="flex flex-col gap-2">
+													<div className="flex items-center gap-1">
+														<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Max delay (s)</span>
+														<InfoTooltip text="Upper bound for exponential backoff. Use 0 to disable the cap." />
+													</div>
+													<input
+														type="number"
+														min={0}
+														step="0.1"
+														className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
+														value={state.errorHandlerMaxDelaySeconds}
+														onChange={(e) => onUpdateState({ errorHandlerMaxDelaySeconds: e.target.value })}
+													/>
+												</label>
+												<label className="flex flex-col gap-2">
+													<div className="flex items-center gap-1">
+														<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Backoff multiplier</span>
+														<InfoTooltip text="Each retry delay is multiplied by this factor (exponential backoff)." />
+													</div>
+													<input
+														type="number"
+														min={0}
+														step="0.1"
+														className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
+														value={state.errorHandlerBackoffMultiplier}
+														onChange={(e) => onUpdateState({ errorHandlerBackoffMultiplier: e.target.value })}
+													/>
+												</label>
+											</div>
+
+											<div className="flex flex-col gap-3 md:flex-row md:items-center md:gap-6">
+												<label className="flex items-center gap-3 rounded-lg border border-border/60 dark:border-drac-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground">
+													<input
+														type="checkbox"
+														className="h-4 w-4 rounded border border-border accent-blue-9"
+														checked={state.errorHandlerRetryOnTimeout}
+														onChange={(e) => onUpdateState({ errorHandlerRetryOnTimeout: e.target.checked })}
+													/>
+													<span>Retry on timeouts</span>
+												</label>
+												<label className="flex items-center gap-3 rounded-lg border border-border/60 dark:border-drac-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground">
+													<input
+														type="checkbox"
+														className="h-4 w-4 rounded border border-border accent-blue-9"
+														checked={state.errorHandlerRetryOnConnectionErrors}
+														onChange={(e) => onUpdateState({ errorHandlerRetryOnConnectionErrors: e.target.checked })}
+													/>
+													<span>Retry on network failures</span>
+												</label>
+											</div>
 										</div>
 									)}
 								</div>

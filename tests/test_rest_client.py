@@ -9,6 +9,8 @@ import pytest
 
 from polymo.config import (
     AuthConfig,
+    BackoffConfig,
+    ErrorHandlerConfig,
     IncrementalConfig,
     PaginationConfig,
     RecordSelectorConfig,
@@ -18,6 +20,11 @@ from polymo.rest_client import RestClient
 import polymo.rest_client as rest_client_module
 
 Handler = Callable[[httpx.Request], httpx.Response]
+
+
+@pytest.fixture(autouse=True)
+def disable_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(rest_client_module.time, "sleep", lambda _: None)
 
 
 @pytest.fixture
@@ -428,6 +435,87 @@ def test_incremental_memory_can_be_disabled(
     list(second_client.fetch_records(stream))
 
     assert observed == ["baseline", None]
+
+
+def test_error_handler_retries_server_error(
+    install_transport: Callable[[Handler], List[httpx.Request]]
+) -> None:
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(500, json={"detail": "temporary"})
+        return httpx.Response(200, json=[{"ok": True}])
+
+    install_transport(handler)
+
+    stream = StreamConfig(name="sample", path="/data")
+    client = RestClient(base_url="https://example.com", auth=AuthConfig())
+
+    pages = list(client.fetch_records(stream))
+
+    assert attempts == 2
+    assert pages == [[{"ok": True}]]
+
+
+def test_error_handler_can_retry_custom_status(
+    install_transport: Callable[[Handler], List[httpx.Request]]
+) -> None:
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 2:
+            return httpx.Response(404, json={"detail": "not ready"})
+        return httpx.Response(200, json=[{"ok": True}])
+
+    install_transport(handler)
+
+    stream = StreamConfig(
+        name="sample",
+        path="/data",
+        error_handler=ErrorHandlerConfig(
+            retry_statuses=("404",),
+            max_retries=3,
+            backoff=BackoffConfig(initial_delay_seconds=0.0, max_delay_seconds=0.0, multiplier=1.0),
+        ),
+    )
+
+    client = RestClient(base_url="https://example.com", auth=AuthConfig())
+
+    pages = list(client.fetch_records(stream))
+
+    assert attempts == 2
+    assert pages == [[{"ok": True}]]
+
+
+def test_error_handler_exhausts_retries(
+    install_transport: Callable[[Handler], List[httpx.Request]]
+) -> None:
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(503, json={"message": "unavailable"})
+
+    install_transport(handler)
+
+    stream = StreamConfig(
+        name="sample",
+        path="/data",
+        error_handler=ErrorHandlerConfig(max_retries=2),
+    )
+
+    client = RestClient(base_url="https://example.com", auth=AuthConfig())
+
+    with pytest.raises(RuntimeError, match="503"):
+        list(client.fetch_records(stream))
+
+    assert attempts == 3
 
 
 def test_incremental_remote_state_path(

@@ -1,4 +1,5 @@
-import type { RestSourceConfig, ConfigFormState } from '../types';
+import type { RestSourceConfig, ConfigFormState, ErrorHandlerConfig } from '../types';
+import { DEFAULT_ERROR_HANDLER } from './initial-data';
 
 /**
  * Convert form state to API configuration format
@@ -27,6 +28,41 @@ export function formStateToConfig(formState: ConfigFormState): RestSourceConfig 
     .filter((segment) => segment.length > 0);
   const recordFilter = formState.recordFilter.trim();
 
+  const parseIntOrDefault = (value: string, fallback: number): number => {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
+  };
+  const parseFloatOrDefault = (value: string, fallback: number): number => {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+  };
+
+  const sanitizedRetryStatuses = (formState.errorHandlerRetryStatuses || [])
+    .map((status) => status.trim().toUpperCase())
+    .filter((status) => status.length > 0);
+
+  const fallbackHandler = DEFAULT_ERROR_HANDLER;
+  const errorHandler = {
+    max_retries: parseIntOrDefault(formState.errorHandlerMaxRetries, fallbackHandler.max_retries),
+    retry_statuses: sanitizedRetryStatuses,
+    retry_on_timeout: formState.errorHandlerRetryOnTimeout,
+    retry_on_connection_errors: formState.errorHandlerRetryOnConnectionErrors,
+    backoff: {
+      initial_delay_seconds: parseFloatOrDefault(
+        formState.errorHandlerInitialDelaySeconds,
+        fallbackHandler.backoff.initial_delay_seconds,
+      ),
+      max_delay_seconds: parseFloatOrDefault(
+        formState.errorHandlerMaxDelaySeconds,
+        fallbackHandler.backoff.max_delay_seconds,
+      ),
+      multiplier: parseFloatOrDefault(
+        formState.errorHandlerBackoffMultiplier,
+        fallbackHandler.backoff.multiplier,
+      ) || fallbackHandler.backoff.multiplier,
+    },
+  } satisfies ErrorHandlerConfig;
+
   return {
     version: formState.version,
     source: {
@@ -53,6 +89,7 @@ export function formStateToConfig(formState: ConfigFormState): RestSourceConfig 
         record_filter: recordFilter ? recordFilter : null,
         cast_to_schema_types: formState.castToSchemaTypes,
       },
+      error_handler: errorHandler,
     },
   } as any; // backend ignores missing name
 }
@@ -81,6 +118,20 @@ export function configToFormState(config: RestSourceConfig): ConfigFormState {
     cast_to_schema_types: false,
   };
 
+  const upstreamErrorHandler = config.stream.error_handler as Partial<ErrorHandlerConfig> | undefined;
+  const effectiveMaxRetries = upstreamErrorHandler?.max_retries ?? DEFAULT_ERROR_HANDLER.max_retries;
+  const effectiveRetryStatuses = Array.isArray(upstreamErrorHandler?.retry_statuses)
+    ? upstreamErrorHandler!.retry_statuses.map((status) => String(status))
+    : [...DEFAULT_ERROR_HANDLER.retry_statuses];
+  const upstreamBackoff = upstreamErrorHandler?.backoff ?? DEFAULT_ERROR_HANDLER.backoff;
+  const effectiveBackoff = {
+    initial_delay_seconds: upstreamBackoff?.initial_delay_seconds ?? DEFAULT_ERROR_HANDLER.backoff.initial_delay_seconds,
+    max_delay_seconds: upstreamBackoff?.max_delay_seconds ?? DEFAULT_ERROR_HANDLER.backoff.max_delay_seconds,
+    multiplier: upstreamBackoff?.multiplier ?? DEFAULT_ERROR_HANDLER.backoff.multiplier,
+  };
+  const effectiveRetryOnTimeout = upstreamErrorHandler?.retry_on_timeout ?? DEFAULT_ERROR_HANDLER.retry_on_timeout;
+  const effectiveRetryOnConnectionErrors = upstreamErrorHandler?.retry_on_connection_errors ?? DEFAULT_ERROR_HANDLER.retry_on_connection_errors;
+
   return {
     version: config.version,
     baseUrl: config.source.base_url,
@@ -102,6 +153,13 @@ export function configToFormState(config: RestSourceConfig): ConfigFormState {
     recordFieldPath: Array.isArray(recordSelector.field_path) ? recordSelector.field_path.map(String) : [],
     recordFilter: recordSelector.record_filter || '',
     castToSchemaTypes: Boolean(recordSelector.cast_to_schema_types),
+    errorHandlerMaxRetries: String(effectiveMaxRetries),
+    errorHandlerRetryStatuses: effectiveRetryStatuses,
+    errorHandlerInitialDelaySeconds: String(effectiveBackoff.initial_delay_seconds),
+    errorHandlerMaxDelaySeconds: String(effectiveBackoff.max_delay_seconds),
+    errorHandlerBackoffMultiplier: String(effectiveBackoff.multiplier),
+    errorHandlerRetryOnTimeout: effectiveRetryOnTimeout,
+    errorHandlerRetryOnConnectionErrors: effectiveRetryOnConnectionErrors,
   };
 }
 

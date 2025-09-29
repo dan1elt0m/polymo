@@ -15,6 +15,20 @@ export interface IncrementalConfig {
   cursor_field?: string | null;
 }
 
+export interface BackoffConfig {
+  initial_delay_seconds: number;
+  max_delay_seconds: number;
+  multiplier: number;
+}
+
+export interface ErrorHandlerConfig {
+  max_retries: number;
+  retry_statuses: string[];
+  retry_on_timeout: boolean;
+  retry_on_connection_errors: boolean;
+  backoff: BackoffConfig;
+}
+
 export interface StreamConfig {
   // name removed from persisted config; backend derives internally
   path: string;
@@ -25,6 +39,7 @@ export interface StreamConfig {
   infer_schema: boolean;
   schema?: string | null;
   record_selector: RecordSelectorConfig;
+  error_handler?: ErrorHandlerConfig;
 }
 
 export interface SourceConfig {
@@ -95,6 +110,13 @@ export interface ConfigFormState {
   recordFieldPath: string[];
   recordFilter: string;
   castToSchemaTypes: boolean;
+  errorHandlerMaxRetries: string;
+  errorHandlerRetryStatuses: string[];
+  errorHandlerInitialDelaySeconds: string;
+  errorHandlerMaxDelaySeconds: string;
+  errorHandlerBackoffMultiplier: string;
+  errorHandlerRetryOnTimeout: boolean;
+  errorHandlerRetryOnConnectionErrors: boolean;
 }
 
 // Added interfaces used by atoms and components
