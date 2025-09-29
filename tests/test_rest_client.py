@@ -1,12 +1,21 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any, Callable, List
 
 import httpx
 import pytest
 
-from polymo.config import AuthConfig, PaginationConfig, RecordSelectorConfig, StreamConfig
+from polymo.config import (
+    AuthConfig,
+    IncrementalConfig,
+    PaginationConfig,
+    RecordSelectorConfig,
+    StreamConfig,
+)
 from polymo.rest_client import RestClient
+import polymo.rest_client as rest_client_module
 
 Handler = Callable[[httpx.Request], httpx.Response]
 
@@ -216,3 +225,266 @@ def test_fetch_records_missing_option_raises(
 
     with pytest.raises(ValueError, match="Error rendering template"):
         list(client.fetch_records(stream))
+
+
+def test_incremental_uses_state_value_for_query(
+    install_transport: Callable[[Handler], List[httpx.Request]],
+    tmp_path: Path,
+) -> None:
+    rest_client_module._MEMORY_STATE.clear()
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    state_path = state_dir / "cursor.json"
+    state_payload = {
+        "streams": {
+            "sample@https://example.com": {
+                "cursor_value": "2024-01-01T00:00:00Z",
+            }
+        }
+    }
+    state_path.write_text(json.dumps(state_payload))
+
+    observed_params: List[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_params.append(request.url.params.get("since"))
+        return httpx.Response(200, json=[{"id": 1, "updated_at": "2024-01-02T00:00:00Z"}])
+
+    install_transport(handler)
+
+    stream = StreamConfig(
+        name="sample",
+        path="/records",
+        incremental=IncrementalConfig(
+            mode="updated_at",
+            cursor_param="since",
+            cursor_field="updated_at",
+        ),
+    )
+
+    client = RestClient(
+        base_url="https://example.com",
+        auth=AuthConfig(),
+        options={"incremental_state_path": str(state_path)},
+    )
+
+    list(client.fetch_records(stream))
+
+    assert observed_params == ["2024-01-01T00:00:00Z"]
+
+
+def test_incremental_persists_latest_value(
+    install_transport: Callable[[Handler], List[httpx.Request]],
+    tmp_path: Path,
+) -> None:
+    rest_client_module._MEMORY_STATE.clear()
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    state_path = state_dir / "cursor.json"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = [
+            {"id": 1, "updated_at": "2024-01-01T08:00:00Z"},
+            {"id": 2, "updated_at": "2024-01-03T12:30:00Z"},
+        ]
+        return httpx.Response(200, json=payload)
+
+    install_transport(handler)
+
+    stream = StreamConfig(
+        name="sample",
+        path="/records",
+        incremental=IncrementalConfig(
+            mode="updated_at",
+            cursor_param="since",
+            cursor_field="updated_at",
+        ),
+    )
+
+    client = RestClient(
+        base_url="https://example.com",
+        auth=AuthConfig(),
+        options={"incremental_state_path": str(state_path)},
+    )
+
+    list(client.fetch_records(stream))
+
+    saved = json.loads(state_path.read_text())
+    entry = saved["streams"]["sample@https://example.com"]
+    assert entry["cursor_value"] == "2024-01-03T12:30:00Z"
+    assert entry["cursor_field"] == "updated_at"
+    assert entry["cursor_param"] == "since"
+
+
+def test_incremental_start_value_option(
+    install_transport: Callable[[Handler], List[httpx.Request]]
+) -> None:
+    rest_client_module._MEMORY_STATE.clear()
+    observed: List[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed.append(request.url.params.get("since"))
+        return httpx.Response(200, json=[])
+
+    install_transport(handler)
+
+    stream = StreamConfig(
+        name="sample",
+        path="/records",
+        incremental=IncrementalConfig(
+            mode="updated_at",
+            cursor_param="since",
+            cursor_field="updated_at",
+        ),
+    )
+
+    client = RestClient(
+        base_url="https://example.com",
+        auth=AuthConfig(),
+        options={"incremental_start_value": "baseline"},
+    )
+
+    list(client.fetch_records(stream))
+
+    assert observed == ["baseline"]
+
+
+def test_incremental_memory_roundtrip(
+    install_transport: Callable[[Handler], List[httpx.Request]]
+) -> None:
+    rest_client_module._MEMORY_STATE.clear()
+
+    observed: List[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed.append(request.url.params.get("since"))
+        return httpx.Response(200, json=[{"id": 1, "updated_at": "2024-02-01T06:00:00Z"}])
+
+    install_transport(handler)
+
+    stream = StreamConfig(
+        name="sample",
+        path="/records",
+        incremental=IncrementalConfig(
+            mode="updated_at",
+            cursor_param="since",
+            cursor_field="updated_at",
+        ),
+    )
+
+    first_client = RestClient(
+        base_url="https://example.com",
+        auth=AuthConfig(),
+        options={"incremental_start_value": "baseline"},
+    )
+
+    list(first_client.fetch_records(stream))
+
+    second_client = RestClient(base_url="https://example.com", auth=AuthConfig())
+
+    list(second_client.fetch_records(stream))
+
+    assert observed == ["baseline", "2024-02-01T06:00:00Z"]
+
+
+def test_incremental_memory_can_be_disabled(
+    install_transport: Callable[[Handler], List[httpx.Request]]
+) -> None:
+    rest_client_module._MEMORY_STATE.clear()
+
+    observed: List[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed.append(request.url.params.get("since"))
+        return httpx.Response(200, json=[{"id": 1, "updated_at": "2024-02-01T06:00:00Z"}])
+
+    install_transport(handler)
+
+    stream = StreamConfig(
+        name="sample",
+        path="/records",
+        incremental=IncrementalConfig(
+            mode="updated_at",
+            cursor_param="since",
+            cursor_field="updated_at",
+        ),
+    )
+
+    first_client = RestClient(
+        base_url="https://example.com",
+        auth=AuthConfig(),
+        options={
+            "incremental_start_value": "baseline",
+            "incremental_memory_state": "false",
+        },
+    )
+
+    list(first_client.fetch_records(stream))
+
+    assert rest_client_module._MEMORY_STATE == {}
+
+    second_client = RestClient(base_url="https://example.com", auth=AuthConfig())
+
+    list(second_client.fetch_records(stream))
+
+    assert observed == ["baseline", None]
+
+
+def test_incremental_remote_state_path(
+    install_transport: Callable[[Handler], List[httpx.Request]]
+) -> None:
+    pytest.importorskip("fsspec")
+    import fsspec
+
+    rest_client_module._MEMORY_STATE.clear()
+
+    fs = fsspec.filesystem("memory")
+    if hasattr(fs, "store"):
+        fs.store.clear()
+
+    remote_path = "memory://polymo/state/cursor.json"
+
+    observed: List[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed.append(request.url.params.get("since"))
+        return httpx.Response(200, json=[{"id": 1, "updated_at": "2024-05-04T00:00:00Z"}])
+
+    install_transport(handler)
+
+    stream = StreamConfig(
+        name="sample",
+        path="/records",
+        incremental=IncrementalConfig(
+            mode="updated_at",
+            cursor_param="since",
+            cursor_field="updated_at",
+        ),
+    )
+
+    first_client = RestClient(
+        base_url="https://example.com",
+        auth=AuthConfig(),
+        options={
+            "incremental_state_path": remote_path,
+            "incremental_start_value": "baseline",
+        },
+    )
+
+    list(first_client.fetch_records(stream))
+
+    with fsspec.open(remote_path, "r") as handle:
+        payload = json.load(handle)
+
+    entry = payload["streams"]["sample@https://example.com"]
+    assert entry["cursor_value"] == "2024-05-04T00:00:00Z"
+
+    second_client = RestClient(
+        base_url="https://example.com",
+        auth=AuthConfig(),
+        options={"incremental_state_path": remote_path},
+    )
+
+    list(second_client.fetch_records(stream))
+
+    assert observed == ["baseline", "2024-05-04T00:00:00Z"]

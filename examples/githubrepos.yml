@@ -10,6 +10,7 @@ stream:
     type: none
   record_selector:
     field_path:
+      - '*'
       - owner
     record_filter: null
     cast_to_schema_types: false

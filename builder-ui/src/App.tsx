@@ -15,7 +15,7 @@ import {
 	configPayloadAtom,
 	formStateToYamlAtom,
 	bearerTokenAtom,
-	readerOptionsAtom,
+	runtimeOptionsAtom,
 } from "./atoms";
 import { configToFormState } from "./lib/transform";
 import { validateConfigRequest, sampleRequest } from "./lib/api";
@@ -43,7 +43,7 @@ const App: React.FC = () => {
 	const configPayload = useAtomValue(configPayloadAtom);
 	const formStateYaml = useAtomValue(formStateToYamlAtom);
 	const bearerToken = useAtomValue(bearerTokenAtom); // moved from inside handlePreview
-	const readerOptions = useAtomValue(readerOptionsAtom);
+	const runtimeOptions = useAtomValue(runtimeOptionsAtom);
 	const [yamlErrorLine, setYamlErrorLine] = React.useState<number | null>(null);
 	const [yamlErrorCol, setYamlErrorCol] = React.useState<number | null>(null);
 	const [yamlSnapshot, setYamlSnapshot] = React.useState<string | null>(null);
@@ -170,7 +170,7 @@ const App: React.FC = () => {
 				const payload = await validateConfigRequest({
 					...configPayload,
 					token: bearerToken,
-					options: readerOptions,
+					options: runtimeOptions,
 				});
 
 				if (applyResponse) {
@@ -186,7 +186,7 @@ const App: React.FC = () => {
 				setIsValidating(false);
 			}
 		},
-		[applyValidationPayload, configPayload, setIsValidating, setYamlText, bearerToken, readerOptions]
+		[applyValidationPayload, configPayload, setIsValidating, setYamlText, bearerToken, runtimeOptions]
 	);
 
 	const handleValidate = React.useCallback(async () => {
@@ -231,7 +231,7 @@ const App: React.FC = () => {
 					...configPayload,
 					token: bearerToken,
 					limit: nextLimit,
-					options: readerOptions,
+					options: runtimeOptions,
 				});
 			const records = Array.isArray(payload.records) ? payload.records : [];
 			const truncated = records.slice(0, MAX_SAMPLE_ROWS);
@@ -260,7 +260,7 @@ const App: React.FC = () => {
 			setSample((prev) => ({ ...prev, loading: false }));
 			setStatus({ tone: "error", message: formatError(error) });
 		}
-	}, [builderView, configPayload, runValidation, sample.limit, sample.stream, setSample, setStatus, streamOptions, bearerToken, readerOptions]);
+	}, [builderView, configPayload, runValidation, sample.limit, sample.stream, setSample, setStatus, streamOptions, bearerToken, runtimeOptions]);
 
 	const handleYamlChange = React.useCallback(
 		(value: string) => {
@@ -288,7 +288,7 @@ const App: React.FC = () => {
 					const payload = await validateConfigRequest({
 						config: yamlText,
 						token: bearerToken,
-						options: readerOptions,
+						options: runtimeOptions,
 					});
 						if (payload.valid && payload.config) {
 							const nextState = configToFormState(payload.config as any);
@@ -318,7 +318,7 @@ const App: React.FC = () => {
 				return;
 			}
 		},
-		[builderView, configFormState, formStateYaml, setBuilderView, setConfigFormState, setLastEdited, setStatus, yamlText, setYamlError, bearerToken, readerOptions]
+		[builderView, configFormState, formStateYaml, setBuilderView, setConfigFormState, setLastEdited, setStatus, yamlText, setYamlError, bearerToken, runtimeOptions]
 	);
 
 	const handleSampleViewChange = React.useCallback(

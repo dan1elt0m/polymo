@@ -99,3 +99,43 @@ export const formStateToYamlAtom = atom((get) => {
 
 export const bearerTokenAtom = atom<string>('');
 export const readerOptionsAtom = atom<Record<string, string>>({});
+
+const INCREMENTAL_OPTION_KEYS = new Set([
+  'incremental_state_path',
+  'incremental_start_value',
+  'incremental_state_key',
+  'incremental_memory_state',
+]);
+
+export const runtimeOptionsAtom = atom((get) => {
+  const formState = get(configFormStateAtom);
+  const manualOptions = { ...get(readerOptionsAtom) };
+
+  // Remove special keys managed by the incremental form fields
+  for (const key of INCREMENTAL_OPTION_KEYS) {
+    if (key in manualOptions) {
+      delete manualOptions[key];
+    }
+  }
+
+  const statePath = formState.incrementalStatePath.trim();
+  if (statePath) {
+    manualOptions['incremental_state_path'] = statePath;
+  }
+
+  const startValue = formState.incrementalStartValue.trim();
+  if (startValue) {
+    manualOptions['incremental_start_value'] = startValue;
+  }
+
+  const stateKey = formState.incrementalStateKey.trim();
+  if (stateKey) {
+    manualOptions['incremental_state_key'] = stateKey;
+  }
+
+  if (!formState.incrementalMemoryEnabled) {
+    manualOptions['incremental_memory_state'] = 'false';
+  }
+
+  return manualOptions;
+});

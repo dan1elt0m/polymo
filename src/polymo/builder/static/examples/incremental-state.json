@@ -1,0 +1,11 @@
+{
+  "streams": {
+    "issues@https://api.github.com": {
+      "cursor_param": "since",
+      "cursor_field": "updated_at",
+      "cursor_value": "2024-03-22T18:15:00Z",
+      "mode": "updated_at",
+      "updated_at": "2024-03-22T18:16:05Z"
+    }
+  }
+}

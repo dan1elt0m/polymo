@@ -41,7 +41,7 @@ If your data pipeline supplies values at runtime (like `owner: dan1elt0m`), add 
 
 ### 5. Pagination & incremental settings
 - Pagination is currently either **None** (single request) or **Link header** (follow `rel="next"` links). Choose the one that matches your API’s behaviour.
-- Incremental fields (`mode`, `cursor_param`, `cursor_field`) are there to document future plans. Fill them only if your team uses them.
+- Incremental fields (`mode`, `cursor_param`, `cursor_field`) power actual incremental syncs. The panel also includes runtime inputs for the state file/URL, initial cursor value, and state key override—no need to type the Spark options separately. When you run the connector through Spark with `.option("incremental_state_path", ...)`, Polymo feeds the stored cursor into the query and writes the latest value back after the run. Paths can point to local files or remote URLs like `s3://...` (install `fsspec` for non-local schemes). Skip the path and the driver keeps the cursor in memory until the session ends; add `.option("incremental_memory_state", "false")` if you prefer to start fresh every time. The Builder records the fields in YAML; you still decide where the state lives at runtime.
 
 ### 6. Record selector (for nested responses)
 Some APIs wrap data inside other objects. Use this panel to:

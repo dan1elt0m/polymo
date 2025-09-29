@@ -2,8 +2,8 @@ import React from "react";
 import * as Tabs from "@radix-ui/react-tabs";
 import type { ConfigFormState } from "../types";
 import { InfoTooltip } from "./InfoTooltip";
-import { useAtom, useSetAtom } from "jotai";
-import { bearerTokenAtom, readerOptionsAtom } from "../atoms";
+import { useAtom, useSetAtom, useAtomValue } from "jotai";
+import { bearerTokenAtom, readerOptionsAtom, runtimeOptionsAtom } from "../atoms";
 import { InputWithCursorPosition } from "./InputWithCursorPosition";
 
 // Add row components that defer key renames until blur to avoid remounting each keystroke
@@ -203,6 +203,13 @@ export const BuilderPanel: React.FC<BuilderPanelProps> = ({
 }) => {
 	const setBearerToken = useSetAtom(bearerTokenAtom);
 	const [readerOptions, setReaderOptions] = useAtom(readerOptionsAtom);
+	const runtimeOptions = useAtomValue(runtimeOptionsAtom);
+	const manualOptionCount = Object.keys(readerOptions).length;
+	const totalRuntimeOptions = Object.keys(runtimeOptions).length;
+	const incrementalOptionCount = Math.max(0, totalRuntimeOptions - manualOptionCount);
+	const runtimeOptionSummary = totalRuntimeOptions
+		? `${manualOptionCount} manual${incrementalOptionCount > 0 ? ` · ${incrementalOptionCount} incremental` : ''}`
+		: 'none';
 	// All panels collapsed initially
 	const [showAuth, setShowAuth] = React.useState(false);
 	const [showPagination, setShowPagination] = React.useState(false);
@@ -210,6 +217,34 @@ export const BuilderPanel: React.FC<BuilderPanelProps> = ({
 	const [showHeaders, setShowHeaders] = React.useState(false);
 	const [showRecordSelector, setShowRecordSelector] = React.useState(false);
 	const [showReaderOptions, setShowReaderOptions] = React.useState(false);
+	const [showIncremental, setShowIncremental] = React.useState(false);
+	const incrementalAutoOpenRef = React.useRef(false);
+
+	const incrementalSummary = React.useMemo(() => {
+		const parts: string[] = [];
+		if (state.incrementalMode.trim()) {
+			parts.push(state.incrementalMode.trim());
+		}
+		if (state.incrementalCursorParam.trim()) {
+			parts.push(`param ${state.incrementalCursorParam.trim()}`);
+		}
+		if (state.incrementalCursorField.trim()) {
+			parts.push(`field ${state.incrementalCursorField.trim()}`);
+		}
+		if (state.incrementalStatePath.trim()) {
+			parts.push('state path set');
+		}
+		if (state.incrementalStartValue.trim()) {
+			parts.push('start value');
+		}
+		if (state.incrementalStateKey.trim()) {
+			parts.push('state key');
+		}
+		if (!state.incrementalMemoryEnabled) {
+			parts.push('memory off');
+		}
+		return parts.length ? parts.join(' · ') : 'disabled';
+	}, [state.incrementalMode, state.incrementalCursorParam, state.incrementalCursorField, state.incrementalStatePath, state.incrementalStartValue, state.incrementalStateKey, state.incrementalMemoryEnabled]);
 
 	// Initialize headers if not present
 	React.useEffect(() => {
@@ -229,6 +264,63 @@ export const BuilderPanel: React.FC<BuilderPanelProps> = ({
 			setShowReaderOptions(true);
 		}
 	}, [readerOptions]);
+
+	React.useEffect(() => {
+		const hasIncrementalValues = Boolean(
+			state.incrementalMode.trim() ||
+			state.incrementalCursorParam.trim() ||
+			state.incrementalCursorField.trim() ||
+			state.incrementalStatePath.trim() ||
+			state.incrementalStartValue.trim() ||
+			state.incrementalStateKey.trim() ||
+			!state.incrementalMemoryEnabled,
+		);
+		if (hasIncrementalValues && !showIncremental && !incrementalAutoOpenRef.current) {
+			setShowIncremental(true);
+			incrementalAutoOpenRef.current = true;
+		}
+		if (!hasIncrementalValues) {
+			incrementalAutoOpenRef.current = false;
+		}
+	}, [showIncremental, state.incrementalMode, state.incrementalCursorParam, state.incrementalCursorField, state.incrementalStatePath, state.incrementalStartValue, state.incrementalStateKey, state.incrementalMemoryEnabled]);
+
+	React.useEffect(() => {
+		const specialKeys = [
+			'incremental_state_path',
+			'incremental_start_value',
+			'incremental_state_key',
+			'incremental_memory_state',
+		] as const;
+
+		let mutated = false;
+		const nextOptions = { ...readerOptions };
+		const patch: Partial<ConfigFormState> = {};
+
+		specialKeys.forEach((key) => {
+			if (nextOptions[key] !== undefined) {
+				const raw = nextOptions[key];
+				delete nextOptions[key];
+				mutated = true;
+				if (key === 'incremental_state_path') {
+					patch.incrementalStatePath = String(raw ?? '');
+				} else if (key === 'incremental_start_value') {
+					patch.incrementalStartValue = String(raw ?? '');
+				} else if (key === 'incremental_state_key') {
+					patch.incrementalStateKey = String(raw ?? '');
+				} else if (key === 'incremental_memory_state') {
+					const normalized = String(raw ?? '').trim().toLowerCase();
+					patch.incrementalMemoryEnabled = normalized !== 'false';
+				}
+			}
+		});
+
+		if (mutated) {
+			setReaderOptions(nextOptions);
+		}
+		if (Object.keys(patch).length > 0) {
+			onUpdateState(patch);
+		}
+	}, [readerOptions, onUpdateState, setReaderOptions]);
 
 	// Handle header add/remove/update
 	const onAddHeader = React.useCallback(() => {
@@ -590,6 +682,136 @@ export const BuilderPanel: React.FC<BuilderPanelProps> = ({
 									)}
 								</div>
 
+								{/* Incremental */}
+								<div className="space-y-3">
+									<button
+										type="button"
+										className="flex w-full items-center justify-between rounded-lg border border-border bg-background px-4 py-3 text-left text-sm font-medium text-slate-12 hover:border-blue-7 hover:bg-blue-3/20 dark:hover:bg-drac-selection/40 transition-colors duration-200"
+										onClick={() => setShowIncremental((v) => !v)}
+										aria-expanded={showIncremental}
+										aria-controls="incremental-section"
+									>
+										<span className="flex items-center gap-2">
+											Incremental sync
+											<span className="text-xs font-normal text-muted">({incrementalSummary})</span>
+										</span>
+										<span className={"transition-transform duration-200 " + (showIncremental ? 'rotate-90' : '')}>
+											<svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+												<path d="M7.25 3.75a.75.75 0 0 1 1.06 0l5 5a.75.75 0 0 1 0 1.06l-5 5a.75.75 0 1 1-1.06-1.06L11.69 10 7.25 5.56a.75.75 0 0 1 0-1.06Z" />
+											</svg>
+										</span>
+									</button>
+									{showIncremental && (
+										<div
+											id="incremental-section"
+											className="space-y-5 rounded-xl border border-border/60 dark:border-drac-border/60 bg-surface/70 dark:bg-[#1f232b]/80 backdrop-blur-sm p-5 shadow-inner transition ring-1 ring-border/40 dark:ring-drac-border/30 animate-in fade-in duration-200"
+										>
+											<div className="grid gap-4 md:grid-cols-3">
+												<label className="flex flex-col gap-2">
+													<div className="flex items-center gap-1">
+														<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Mode</span>
+														<InfoTooltip text="Short label for the incremental strategy (e.g. updated_at, created_at)." />
+													</div>
+													<input
+														type="text"
+														className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-3 py-2 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border focus-visible:ring-1 focus-visible:ring-blue-5"
+														placeholder="updated_at"
+														value={state.incrementalMode}
+														onChange={(e) => onUpdateState({ incrementalMode: e.target.value })}
+													/>
+												</label>
+												<label className="flex flex-col gap-2">
+													<div className="flex items-center gap-1">
+														<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Cursor parameter</span>
+														<InfoTooltip text="Query parameter added to each request (e.g. since, updated_after)." />
+													</div>
+													<input
+														type="text"
+														className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-3 py-2 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border focus-visible:ring-1 focus-visible:ring-blue-5"
+														placeholder="since"
+														value={state.incrementalCursorParam}
+														onChange={(e) => onUpdateState({ incrementalCursorParam: e.target.value })}
+													/>
+												</label>
+												<label className="flex flex-col gap-2">
+													<div className="flex items-center gap-1">
+														<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Cursor field</span>
+														<InfoTooltip text="Field in the response used to compute the next cursor (supports dotted paths)." />
+													</div>
+													<input
+														type="text"
+														className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-3 py-2 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border focus-visible:ring-1 focus-visible:ring-blue-5"
+														placeholder="updated_at"
+														value={state.incrementalCursorField}
+														onChange={(e) => onUpdateState({ incrementalCursorField: e.target.value })}
+													/>
+												</label>
+											</div>
+
+											<div className="space-y-4">
+												<p className="text-xs text-muted dark:text-drac-muted">
+													Runtime options are passed to <code>spark.read.option(...)</code> and are not stored in the YAML file.
+												</p>
+												<div className="grid gap-4 md:grid-cols-2">
+													<label className="flex flex-col gap-2">
+														<div className="flex items-center gap-1">
+															<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">State file or URL</span>
+															<InfoTooltip text="Location where Polymo stores the latest cursor. Supports local paths and fsspec URLs (s3://, gs://, etc.)." />
+														</div>
+														<input
+															type="text"
+															className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-3 py-2 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border focus-visible:ring-1 focus-visible:ring-blue-5"
+															placeholder="/tmp/polymo-state.json or s3://team/state.json"
+															value={state.incrementalStatePath}
+															onChange={(e) => onUpdateState({ incrementalStatePath: e.target.value })}
+														/>
+													</label>
+													<label className="flex flex-col gap-2">
+														<div className="flex items-center gap-1">
+															<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Initial cursor value</span>
+															<InfoTooltip text="Fallback value used when no state file is present." />
+														</div>
+														<input
+															type="text"
+															className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-3 py-2 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border focus-visible:ring-1 focus-visible:ring-blue-5"
+															placeholder="2024-01-01T00:00:00Z"
+															value={state.incrementalStartValue}
+															onChange={(e) => onUpdateState({ incrementalStartValue: e.target.value })}
+														/>
+													</label>
+												</div>
+												<div className="grid gap-4 md:grid-cols-2">
+													<label className="flex flex-col gap-2">
+														<div className="flex items-center gap-1">
+															<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">State key override</span>
+															<InfoTooltip text="Optional identifier when sharing a state file across multiple connectors." />
+														</div>
+														<input
+															type="text"
+															className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-3 py-2 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border focus-visible:ring-1 focus-visible:ring-blue-5"
+															placeholder="orders-prod"
+															value={state.incrementalStateKey}
+															onChange={(e) => onUpdateState({ incrementalStateKey: e.target.value })}
+														/>
+													</label>
+													<label className="flex items-start gap-3 rounded-xl border border-border/60 dark:border-drac-border bg-background/70 dark:bg-[#272d38] px-4 py-3 text-left">
+														<input
+															type="checkbox"
+															className="mt-1 h-4 w-4 rounded border border-border accent-blue-9"
+															checked={state.incrementalMemoryEnabled}
+															onChange={(e) => onUpdateState({ incrementalMemoryEnabled: e.target.checked })}
+														/>
+														<div className="space-y-1">
+															<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Keep cursor in memory when no file is set</span>
+															<p className="text-xs text-muted dark:text-drac-muted">Uncheck to force a fresh start unless a state path is provided.</p>
+														</div>
+													</label>
+												</div>
+											</div>
+										</div>
+									)}
+								</div>
+
 								{/* Record Selector */}
 								<div className="space-y-3">
 									<button
@@ -709,7 +931,7 @@ export const BuilderPanel: React.FC<BuilderPanelProps> = ({
 									>
 										<span className="flex items-center gap-2">
 											Spark Reader Options
-											<span className="text-xs font-normal text-muted">({Object.keys(readerOptions).length || 'none'})</span>
+											<span className="text-xs font-normal text-muted">({runtimeOptionSummary})</span>
 										</span>
 										<span className={"transition-transform duration-200 " + (showReaderOptions ? 'rotate-90' : '')}>
                                             <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
@@ -737,6 +959,11 @@ export const BuilderPanel: React.FC<BuilderPanelProps> = ({
 												</button>
 											</div>
 											<p className="text-xs text-muted dark:text-drac-muted">Provide values for Jinja references like <code>{"{{ options.api_key }}"}</code>. These keys are passed to <code>spark.read.option()</code> during preview.</p>
+											{incrementalOptionCount > 0 && (
+												<p className="text-xs text-muted dark:text-drac-muted">
+													Incremental settings configured above contribute {incrementalOptionCount} runtime option{incrementalOptionCount === 1 ? '' : 's'} automatically.
+												</p>
+											)}
 											{Object.entries(readerOptions).length > 0 ? (
 												<ul className="flex flex-col gap-2">
 													{Object.entries(readerOptions).map(([key, value]) => (

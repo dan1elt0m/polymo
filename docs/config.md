@@ -92,7 +92,34 @@ incremental:
   cursor_field: updated_at
 ```
 
-These fields are placeholders for teams planning incremental syncs. They do not change how data is fetched yet, but they travel with the config so everyone agrees on the rules.
+When `cursor_param` and `cursor_field` are populated Polymo performs an incremental sync:
+
+- On the first request Polymo seeds the query with the last cursor value it knows about. The value is read from a JSON state file that you point to with `.option("incremental_state_path", "./polymo-state.json")`.
+- The path may be local or remote (for example `s3://team-bucket/polymo/state.json`). Remote URLs require installing `fsspec`; if the library is missing Polymo raises a helpful error before making any HTTP calls.
+- If the state file does not exist yet, provide a fallback with `.option("incremental_start_value", "2024-01-01T00:00:00Z")`.
+- After every successful run the JSON file is updated with the newest cursor value observed in the stream. By default the entry key is `<stream name>@<base URL>`, but you can override it via `.option("incremental_state_key", "orders-prod")` when you want to share a state file between connectors.
+- The stored cursor is only used when the query parameter is not already supplied in the config (so custom templates or overrides still win).
+- If you skip `incremental_state_path`, Polymo keeps the last cursor in memory for as long as the Spark driver stays alive. This is handy for notebooks or iterative development. Disable that behaviour with `.option("incremental_memory_state", "false")` when you want each run to start fresh.
+
+The JSON file uses a straightforward structure:
+
+```json
+{
+  "streams": {
+    "issues@https://api.github.com": {
+      "cursor_param": "since",
+      "cursor_field": "updated_at",
+      "cursor_value": "2024-03-22T18:15:00Z",
+      "mode": "updated_at",
+      "updated_at": "2024-03-22T18:16:05Z"
+    }
+  }
+}
+```
+
+You can keep one state file per connector or share it—Polymo creates directories as needed and overwrites the entry atomically.
+
+The repository includes `examples/incremental-state.json` as a ready-to-copy template.
 
 ### Schema vs. infer_schema
 

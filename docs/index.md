@@ -37,11 +37,21 @@ df = (
     spark.read.format("polymo")
     .option("config_path", "./config.yml")  # YAML you saved from the Builder
     .option("token", "YOUR_TOKEN")  # Only if the API needs one
+    # Uncomment the next lines to enable incremental syncs
+    # .option("incremental_state_path", "s3://team-bucket/polymo/state.json")
+    # .option("incremental_start_value", "2024-01-01T00:00:00Z")
     .load()
 )
 
 df.show()
 ```
+
+### Incremental syncs in one minute
+- Add `cursor_param` and `cursor_field` under `incremental:` in your YAML to tell Polymo which API field to track.
+- Pass `.option("incremental_state_path", ...)` when reading with Spark. Local paths work out of the box; remote URLs (S3, GCS, Azure, etc.) require `pip install fsspec`.
+- On the first run, seed a starting value with `.option("incremental_start_value", "...")`. Future runs reuse the stored cursor automatically.
+- Override the stored entry name with `.option("incremental_state_key", "...")` if you share a state file across connectors.
+- Skip the state path to keep cursors only in memory during the Spark session, or disable that cache with `.option("incremental_memory_state", "false")` if you always want a cold start.
 
 ## What’s inside this project
 - `src/polymo/` keeps the logic that speaks to APIs and hands data to Spark.

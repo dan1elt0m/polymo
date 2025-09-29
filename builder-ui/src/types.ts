@@ -85,6 +85,10 @@ export interface ConfigFormState {
   incrementalMode: string;
   incrementalCursorParam: string;
   incrementalCursorField: string;
+  incrementalStatePath: string;
+  incrementalStartValue: string;
+  incrementalStateKey: string;
+  incrementalMemoryEnabled: boolean;
   inferSchema: boolean;
   schema: string;
   headers: Record<string, string>;

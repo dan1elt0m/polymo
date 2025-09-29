@@ -10,6 +10,7 @@ Polymo turns REST APIs into Spark DataFrames with a single declarative configura
 - Spark-native DataSource exposes `spark.read.format("polymo")`, so connectors slot into existing ETL jobs, notebooks, or scheduled (lakeflow) pipelines.
 - Fast sampling pipeline shows both DataFrame output and raw API pages, making it easy to debug response shapes and headers.
 - Jinja templating, environment variable lookups, and runtime Spark options let you parameterise connectors for different environments.
+- Incremental sync support seeds API cursors from JSON state files (local or remote via `fsspec`) and updates them automatically between runs.
 
 ## Install
 
@@ -18,6 +19,7 @@ Polymo turns REST APIs into Spark DataFrames with a single declarative configura
 pip install polymo
 # Adds Spark, FastAPI/uvicorn and frontend assets for the builder UI
 pip install "polymo[builder]"
+
 ```
 
 Polymo requires PySpark 4.x. The CLI enforces this requirement before launching the builder or smoke test helpers.
@@ -47,12 +49,17 @@ Polymo requires PySpark 4.x. The CLI enforces this requirement before launching 
    spark = SparkSession.builder.getOrCreate()
    spark.dataSource.register(ApiReader)
 
-   df = (
-       spark.read.format("polymo")
-       .option("config_path", "./config.yml")
-       .option("token", "<YOUR_BEARER_TOKEN>")
-       .load()
-   )
+df = (
+    spark.read.format("polymo")
+    .option("config_path", "./config.yml")
+    .option("token", "<YOUR_BEARER_TOKEN>")
+    # Optional incremental sync settings
+    # .option("incremental_state_path", "s3://team-bucket/polymo/state.json")
+    # .option("incremental_start_value", "2024-01-01T00:00:00Z")
+    # .option("incremental_state_key", "orders-prod")
+    # .option("incremental_memory_state", "false")
+    .load()
+)
 
    df.show()
    ```
