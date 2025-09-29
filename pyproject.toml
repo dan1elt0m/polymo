@@ -33,6 +33,15 @@ all = [
 dev = [
     "pytest>=8.4.2",
 ]
+docs = [
+    "mkdocs>=1.4.2",
+    "mkdocs-material>=9.1.4",
+    "mkdocs-gen-files>=0.4,<0.6",
+    "mkdocs-literate-nav>=0.6.0",
+    "mkdocstrings[python]>=0.20,<0.30",
+    "mkautodoc>=0.2.0",
+    "pymdown-extensions>=10.0.1",
+]
 
 [project.scripts]
 polymo = "polymo.cli:main"
