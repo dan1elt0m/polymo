@@ -76,12 +76,20 @@ headers:
 
 ```yaml
 pagination:
-  type: link_header
+  type: offset
+  page_size: 100
+  limit_param: limit
+  offset_param: offset
 ```
 
-Pick one of two behaviours:
+Pick one of the supported behaviours:
 - `none` – only one page is requested.
-- `link_header` – Polymo follows `Link: <...>; rel="next"` headers until there are no more pages.
+- `offset` – Polymo increments an offset query parameter (default `offset`) by the configured `page_size` (defaulting to the number of records returned) until an empty page is received. Override the parameter name or starting point with `offset_param` and `start_offset`.
+- `page` – Polymo increments a page counter (default `page`) on every request and enforces an optional `page_size` via `limit_param` (default `per_page`). Adjust the behaviour with `page_param` and `start_page`.
+- `cursor` – Polymo reads the next cursor value from the response payload or headers and sends it back via `cursor_param` (defaults to `cursor`). Combine with `cursor_path` (a list or dotted path such as `meta.next_cursor`) or `cursor_header` to tell Polymo where to find the cursor. Alternatively provide `next_url_path` when the API returns a fully qualified "next" link.
+- `link_header` – legacy support that follows `Link: <...>; rel="next"` headers until there are no more pages.
+
+Every pagination strategy stops when the API returns an empty list of records. Override that default by setting `stop_on_empty_response: false`.
 
 ### Incremental fields
 
@@ -177,7 +185,9 @@ stream:
   headers:
     Accept: application/vnd.github+json
   pagination:
-    type: link_header
+    type: page
+    page_size: 50
+    limit_param: per_page
   incremental:
     mode: updated_at
     cursor_param: since

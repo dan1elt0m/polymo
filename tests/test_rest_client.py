@@ -51,28 +51,107 @@ def _record(handler: Handler, request: httpx.Request, calls: List[httpx.Request]
     return handler(request)
 
 
-def test_fetch_records_paginated(install_transport: Callable[[Handler], List[httpx.Request]]) -> None:
+def test_fetch_records_offset_pagination(
+    install_transport: Callable[[Handler], List[httpx.Request]]
+) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/page1":
-            headers = {"Link": "</page2>; rel=\"next\""}
-            return httpx.Response(200, json=[{"id": 1}], headers=headers)
-        if request.url.path == "/page2":
+        offset = int(request.url.params.get("offset", "0"))
+        limit = request.url.params.get("limit")
+        assert limit == "1"
+
+        if offset == 0:
+            return httpx.Response(200, json=[{"id": 1}])
+        if offset == 1:
             return httpx.Response(200, json=[{"id": 2}])
-        pytest.fail(f"Unexpected URL: {request.url}")
+        if offset == 2:
+            return httpx.Response(200, json=[])
+        pytest.fail(f"Unexpected offset: {offset}")
 
     calls = install_transport(handler)
 
     stream = StreamConfig(
         name="sample",
-        path="/page1",
-        pagination=PaginationConfig(type="link_header"),
+        path="/items",
+        pagination=PaginationConfig(
+            type="offset",
+            page_size=1,
+            limit_param="limit",
+            offset_param="offset",
+        ),
+    )
+
+    client = RestClient(base_url="https://example.com", auth=AuthConfig())
+    pages = list(client.fetch_records(stream))
+
+    assert pages == [[{"id": 1}], [{"id": 2}], []]
+    assert [req.url.params.get("offset") for req in calls] == ["0", "1", "2"]
+
+
+def test_fetch_records_page_pagination(
+    install_transport: Callable[[Handler], List[httpx.Request]]
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        page = int(request.url.params.get("page", "0"))
+        assert request.url.params.get("per_page") == "2"
+
+        if page == 1:
+            return httpx.Response(200, json=[{"id": 10}, {"id": 11}])
+        if page == 2:
+            return httpx.Response(200, json=[{"id": 12}])
+        if page == 3:
+            return httpx.Response(200, json=[])
+        pytest.fail(f"Unexpected page: {page}")
+
+    calls = install_transport(handler)
+
+    stream = StreamConfig(
+        name="sample",
+        path="/paged",
+        pagination=PaginationConfig(
+            type="page",
+            page_size=2,
+            limit_param="per_page",
+            page_param="page",
+        ),
+    )
+
+    client = RestClient(base_url="https://example.com", auth=AuthConfig())
+    pages = list(client.fetch_records(stream))
+
+    assert pages == [[{"id": 10}, {"id": 11}], [{"id": 12}], []]
+    assert [req.url.params.get("page") for req in calls] == ["1", "2", "3"]
+
+
+def test_fetch_records_cursor_pagination(
+    install_transport: Callable[[Handler], List[httpx.Request]]
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        cursor = request.url.params.get("cursor")
+        if cursor is None:
+            payload = {"data": [{"id": 1}], "next_cursor": "token-1"}
+            return httpx.Response(200, json=payload)
+        if cursor == "token-1":
+            payload = {"data": [{"id": 2}], "next_cursor": None}
+            return httpx.Response(200, json=payload)
+        pytest.fail(f"Unexpected cursor: {cursor}")
+
+    calls = install_transport(handler)
+
+    stream = StreamConfig(
+        name="sample",
+        path="/cursor",
+        pagination=PaginationConfig(
+            type="cursor",
+            cursor_param="cursor",
+            cursor_path=("next_cursor",),
+        ),
     )
 
     client = RestClient(base_url="https://example.com", auth=AuthConfig())
     pages = list(client.fetch_records(stream))
 
     assert pages == [[{"id": 1}], [{"id": 2}]]
-    assert [req.url.path for req in calls] == ["/page1", "/page2"]
+    assert [req.url.params.get("cursor") for req in calls] == [None, "token-1"]
 
 
 def test_fetch_records_normalises_wrapped_payload(

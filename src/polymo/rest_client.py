@@ -195,15 +195,46 @@ class RestClient:
 
         tracker.apply_to_params(query_params)
 
-        next_url: Optional[str] = initial_path
         retry_policy = _RetryPolicy(stream.error_handler)
+
+        next_url: Optional[str] = initial_path
+        include_params = True
+
+        # Track pagination-specific state between requests.
+        offset_value = pagination.start_offset if pagination.type == "offset" else 0
+        page_number = pagination.start_page if pagination.type == "page" else 1
+        cursor_to_apply: Optional[str] = pagination.initial_cursor if pagination.type == "cursor" else None
+
+        if pagination.type == "offset" and pagination.limit_param and pagination.page_size is not None:
+            query_params.setdefault(pagination.limit_param, pagination.page_size)
+        if pagination.type == "page" and pagination.limit_param and pagination.page_size is not None:
+            query_params.setdefault(pagination.limit_param, pagination.page_size)
+        if pagination.type == "cursor" and pagination.cursor_param and cursor_to_apply is not None:
+            query_params[pagination.cursor_param] = cursor_to_apply
+            cursor_to_apply = None
 
         try:
             while next_url:
+                if pagination.type == "offset":
+                    offset_param = pagination.offset_param or "offset"
+                    query_params[offset_param] = offset_value
+                    include_params = True
+                elif pagination.type == "page":
+                    page_param = pagination.page_param or "page"
+                    query_params[page_param] = page_number
+                    include_params = True
+                    if pagination.limit_param and pagination.page_size is not None:
+                        query_params[pagination.limit_param] = pagination.page_size
+                elif pagination.type == "cursor":
+                    if cursor_to_apply is not None and pagination.cursor_param:
+                        query_params[pagination.cursor_param] = cursor_to_apply
+                        cursor_to_apply = None
+                    include_params = True
+
                 response = self._request_with_retries(
                     url=next_url,
                     query_params=query_params,
-                    include_params=next_url == initial_path,
+                    include_params=include_params,
                     request_headers=request_headers,
                     policy=retry_policy,
                 )
@@ -227,7 +258,59 @@ class RestClient:
                     headers=dict(response.headers),
                 )
 
-                next_url = _next_page(response, pagination)
+                # Advance pagination state based on configured strategy.
+                if pagination.type == "none":
+                    next_url = None
+                elif pagination.type == "link_header":
+                    next_url = _next_page(response, pagination)
+                    include_params = next_url == initial_path if next_url else True
+                elif pagination.type == "offset":
+                    if pagination.stop_on_empty_response and not records:
+                        next_url = None
+                    else:
+                        step = pagination.page_size or len(records)
+                        if step <= 0:
+                            next_url = None
+                        else:
+                            offset_value += step
+                            next_url = initial_path
+                            include_params = True
+                elif pagination.type == "page":
+                    if pagination.stop_on_empty_response and not records:
+                        next_url = None
+                    else:
+                        page_number += 1
+                        next_url = initial_path
+                        include_params = True
+                elif pagination.type == "cursor":
+                    next_link = None
+                    if pagination.next_url_path:
+                        next_link = _first_value_from_path(payload, pagination.next_url_path)
+                    if isinstance(next_link, str) and next_link:
+                        if pagination.stop_on_empty_response and not records:
+                            next_url = None
+                            cursor_to_apply = None
+                            include_params = False
+                        else:
+                            parsed = urlparse(next_link)
+                            # Include query params only when following a path without its own query.
+                            include_params = not (parsed.scheme or parsed.netloc or parsed.query)
+                            next_url = next_link
+                            cursor_to_apply = None
+                    else:
+                        next_cursor = _resolve_cursor_value_from_response(
+                            response, payload, pagination
+                        )
+                        if next_cursor in (None, ""):
+                            next_url = None
+                        else:
+                            cursor_to_apply = str(next_cursor)
+                            next_url = initial_path
+                            include_params = True
+                            if pagination.stop_on_empty_response and not records:
+                                next_url = None
+                else:
+                    next_url = None
         finally:
             tracker.persist()
 
@@ -507,6 +590,56 @@ def _next_page(response: httpx.Response, pagination: PaginationConfig) -> Option
         rel_part = ",".join(parts[1:]).strip()
         if 'rel="next"' in rel_part:
             return url_part.strip("<>")
+    return None
+
+
+def _first_value_from_path(payload: Any, path: Iterable[str]) -> Any:
+    if not path:
+        return None
+    try:
+        values = _select_field_path(payload, path)
+    except Exception:
+        return None
+    for value in values:
+        if value in (None, ""):
+            continue
+        if isinstance(value, list):
+            for item in value:
+                if item not in (None, ""):
+                    return item
+        else:
+            return value
+    return None
+
+
+def _resolve_cursor_value_from_response(
+    response: httpx.Response,
+    payload: Any,
+    pagination: PaginationConfig,
+) -> Any:
+    candidates: List[Any] = []
+
+    if pagination.cursor_path:
+        try:
+            candidates.extend(_select_field_path(payload, pagination.cursor_path))
+        except Exception:
+            pass
+
+    if pagination.cursor_header:
+        header_value = response.headers.get(pagination.cursor_header)
+        if header_value:
+            candidates.append(header_value)
+
+    for candidate in candidates:
+        if candidate in (None, ""):
+            continue
+        if isinstance(candidate, list):
+            for item in candidate:
+                if item not in (None, ""):
+                    return item
+        else:
+            return candidate
+
     return None
 
 

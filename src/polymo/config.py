@@ -41,7 +41,19 @@ class AuthConfig:
 class PaginationConfig:
     """Pagination strategy definition."""
 
-    type: Literal["none", "link_header"] = "none"
+    type: Literal["none", "link_header", "offset", "cursor", "page"] = "none"
+    page_size: Optional[int] = None
+    limit_param: Optional[str] = None
+    offset_param: Optional[str] = None
+    start_offset: int = 0
+    page_param: Optional[str] = None
+    start_page: int = 1
+    cursor_param: Optional[str] = None
+    cursor_path: Tuple[str, ...] = field(default_factory=tuple)
+    next_url_path: Tuple[str, ...] = field(default_factory=tuple)
+    cursor_header: Optional[str] = None
+    initial_cursor: Optional[str] = None
+    stop_on_empty_response: bool = True
 
 
 @dataclass(frozen=True)
@@ -211,7 +223,7 @@ def config_to_dict(config: RestSourceConfig) -> Dict[str, Any]:
         "path": stream.path,
         "infer_schema": stream.infer_schema,
         "schema": stream.schema,
-        "pagination": {"type": stream.pagination.type},
+        "pagination": _pagination_to_dict(stream.pagination),
     }
 
     if stream.params:
@@ -347,10 +359,150 @@ def _parse_pagination(raw: Any) -> PaginationConfig:
         raise ConfigError("'pagination' must be a mapping when provided")
 
     pag_type = raw.get("type", "none")
-    if pag_type not in {"none", "link_header"}:
+    allowed_types = {"none", "link_header", "offset", "cursor", "page"}
+    if pag_type not in allowed_types:
         raise ConfigError(f"Unsupported pagination type: {pag_type}")
 
-    return PaginationConfig(type=pag_type)
+    page_size = _maybe_int(raw.get("page_size"), "pagination.page_size", minimum=1)
+    limit_param = _maybe_str(raw.get("limit_param"), "pagination.limit_param")
+    offset_param = _maybe_str(raw.get("offset_param"), "pagination.offset_param")
+    start_offset = _maybe_int(
+        raw.get("start_offset"), "pagination.start_offset", minimum=0, default=0
+    )
+    page_param = _maybe_str(raw.get("page_param"), "pagination.page_param")
+    start_page = _maybe_int(raw.get("start_page"), "pagination.start_page", minimum=1, default=1)
+    cursor_param = _maybe_str(raw.get("cursor_param"), "pagination.cursor_param")
+    cursor_path = _maybe_path(raw.get("cursor_path"), "pagination.cursor_path")
+    next_url_path = _maybe_path(raw.get("next_url_path"), "pagination.next_url_path")
+    cursor_header = _maybe_str(raw.get("cursor_header"), "pagination.cursor_header")
+    initial_cursor = _maybe_str(raw.get("initial_cursor"), "pagination.initial_cursor")
+    stop_on_empty = _maybe_bool(
+        raw.get("stop_on_empty_response"), "pagination.stop_on_empty_response", default=True
+    )
+
+    if pag_type == "offset":
+        if offset_param is None:
+            offset_param = "offset"
+        if limit_param is None and page_size is not None:
+            limit_param = "limit"
+    if pag_type == "page":
+        if page_param is None:
+            page_param = "page"
+        if limit_param is None and page_size is not None:
+            limit_param = "per_page"
+    if pag_type == "cursor":
+        if not cursor_param and not next_url_path:
+            raise ConfigError(
+                "Cursor pagination requires either 'cursor_param' or 'next_url_path' to be set"
+            )
+        if cursor_param and not (cursor_path or cursor_header or initial_cursor):
+            raise ConfigError(
+                "When 'cursor_param' is provided you must supply one of 'cursor_path',"
+                " 'cursor_header', or 'initial_cursor'"
+            )
+
+    return PaginationConfig(
+        type=pag_type,
+        page_size=page_size,
+        limit_param=limit_param,
+        offset_param=offset_param,
+        start_offset=start_offset,
+        page_param=page_param,
+        start_page=start_page,
+        cursor_param=cursor_param,
+        cursor_path=cursor_path,
+        next_url_path=next_url_path,
+        cursor_header=cursor_header,
+        initial_cursor=initial_cursor,
+        stop_on_empty_response=stop_on_empty,
+    )
+
+
+def _pagination_to_dict(config: PaginationConfig) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {"type": config.type}
+
+    if config.page_size is not None:
+        payload["page_size"] = config.page_size
+    if config.limit_param:
+        payload["limit_param"] = config.limit_param
+    if config.offset_param and config.type == "offset":
+        payload["offset_param"] = config.offset_param
+    if config.start_offset and config.type == "offset":
+        payload["start_offset"] = config.start_offset
+    if config.page_param and config.type == "page":
+        payload["page_param"] = config.page_param
+    if config.start_page != 1 and config.type == "page":
+        payload["start_page"] = config.start_page
+    if config.cursor_param and config.type == "cursor":
+        payload["cursor_param"] = config.cursor_param
+    if config.cursor_path:
+        payload["cursor_path"] = list(config.cursor_path)
+    if config.next_url_path:
+        payload["next_url_path"] = list(config.next_url_path)
+    if config.cursor_header:
+        payload["cursor_header"] = config.cursor_header
+    if config.initial_cursor:
+        payload["initial_cursor"] = config.initial_cursor
+    if not config.stop_on_empty_response:
+        payload["stop_on_empty_response"] = False
+
+    return payload
+
+
+def _maybe_int(
+    value: Any, field: str, *, minimum: Optional[int] = None, default: Optional[int] = None
+) -> Optional[int]:
+    if value is None:
+        return default
+    try:
+        result = int(value)
+    except (TypeError, ValueError):
+        raise ConfigError(f"{field} must be an integer") from None
+    if minimum is not None and result < minimum:
+        raise ConfigError(f"{field} must be >= {minimum}")
+    return result
+
+
+def _maybe_str(value: Any, field: str) -> Optional[str]:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise ConfigError(f"{field} must be a non-empty string when provided")
+    return value
+
+
+def _maybe_path(value: Any, field: str) -> Tuple[str, ...]:
+    if value in (None, [], ()):  # treat empty as no path
+        return tuple()
+    if isinstance(value, str):
+        parts = [segment.strip() for segment in value.split(".") if segment.strip()]
+        if not parts:
+            raise ConfigError(f"{field} must not be empty")
+        return tuple(parts)
+    if isinstance(value, (list, tuple)):
+        parts: List[str] = []
+        for segment in value:
+            if not isinstance(segment, str) or not segment:
+                raise ConfigError(f"{field} entries must be non-empty strings")
+            parts.append(segment)
+        return tuple(parts)
+    raise ConfigError(f"{field} must be a list of strings or dotted path")
+
+
+def _maybe_bool(value: Any, field: str, *, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes", "y", "on"}:
+            return True
+        if lowered in {"false", "0", "no", "n", "off"}:
+            return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    raise ConfigError(f"{field} must be a boolean value")
 
 
 def _parse_incremental(raw: Any) -> IncrementalConfig:

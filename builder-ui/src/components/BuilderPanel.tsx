@@ -245,7 +245,7 @@ export const BuilderPanel: React.FC<BuilderPanelProps> = ({
 		if (!state.incrementalMemoryEnabled) {
 			parts.push('memory off');
 		}
-		return parts.length ? parts.join(' · ') : 'disabled';
+		return parts.length ? parts.join(' · ') : 'optional';
 	}, [state.incrementalMode, state.incrementalCursorParam, state.incrementalCursorField, state.incrementalStatePath, state.incrementalStartValue, state.incrementalStateKey, state.incrementalMemoryEnabled]);
 
 	const errorHandlerSummary = React.useMemo(() => {
@@ -440,7 +440,7 @@ export const BuilderPanel: React.FC<BuilderPanelProps> = ({
 		});
 	}, [setReaderOptions]);
 
-	React.useEffect(() => { if (state.authType === 'bearer') setShowAuth(true); }, [state.authType]);
+	React.useEffect(() => { if (state.authType === 'bearer' || state.authType === 'api_key') setShowAuth(true); }, [state.authType]);
 
 	const handleAddFieldPathSegment = React.useCallback(() => {
 		const next = [...(state.recordFieldPath || []), ""];
@@ -552,14 +552,17 @@ export const BuilderPanel: React.FC<BuilderPanelProps> = ({
 															className="w-full rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm appearance-none pr-9 transition-all focus:border-blue-7 dark:focus:border-drac-accent focus:outline-none"
 															value={state.authType}
 															onChange={(e) => {
-																const authType = e.target.value as 'none' | 'bearer';
+																const authType = e.target.value as 'none' | 'bearer' | 'api_key';
 																const patch: Partial<ConfigFormState> = { authType };
-																if (authType === 'none') { patch.authToken = ''; setBearerToken(''); }
+																if (authType === 'none') { patch.authToken = ''; patch.authApiKeyParamName = state.authApiKeyParamName; setBearerToken(''); }
+																if (authType === 'bearer') { patch.authApiKeyParamName = state.authApiKeyParamName; }
+																if (authType === 'api_key') { patch.authToken = ''; if (!state.authApiKeyParamName) patch.authApiKeyParamName = 'api_key'; setBearerToken(''); }
 																onUpdateState(patch);
 															}}
 														>
 															<option value="none">None</option>
 															<option value="bearer">Bearer Token</option>
+															<option value="api_key">API Key</option>
 														</select>
 														<span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-10 dark:text-drac-muted">
 															<svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
@@ -586,6 +589,36 @@ export const BuilderPanel: React.FC<BuilderPanelProps> = ({
 															}}
 														/>
 													</label>
+												)}
+												{state.authType === 'api_key' && (
+													<div className="grid gap-5 md:grid-cols-2">
+														<label className="flex flex-col gap-2">
+															<div className="flex items-center gap-1">
+																<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">API Key Param</span>
+																<InfoTooltip text="Query parameter name that will hold the API key at runtime." />
+															</div>
+															<input
+																type="text"
+																className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
+																placeholder="api_key"
+																value={state.authApiKeyParamName || ''}
+																onChange={(e) => onUpdateState({ authApiKeyParamName: e.target.value.trim() })}
+															/>
+														</label>
+														<label className="flex flex-col gap-2">
+															<div className="flex items-center gap-1">
+																<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">API Key (secret)</span>
+																<InfoTooltip text="Secret API key stored only in the browser session and supplied at runtime via Spark options." />
+															</div>
+															<input
+																type="password"
+																className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
+																placeholder="your-api-key"
+																value={state.authToken}
+																onChange={(e) => { const value = e.target.value; onUpdateState({ authToken: value }); setBearerToken(value); }}
+															/>
+														</label>
+													</div>
 												)}
 											</div>
 										</div>
@@ -787,7 +820,6 @@ export const BuilderPanel: React.FC<BuilderPanelProps> = ({
 													<input
 														type="number"
 														min={0}
-														step="0.1"
 														className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
 														value={state.errorHandlerInitialDelaySeconds}
 														onChange={(e) => onUpdateState({ errorHandlerInitialDelaySeconds: e.target.value })}
@@ -810,11 +842,11 @@ export const BuilderPanel: React.FC<BuilderPanelProps> = ({
 												<label className="flex flex-col gap-2">
 													<div className="flex items-center gap-1">
 														<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Backoff multiplier</span>
-														<InfoTooltip text="Each retry delay is multiplied by this factor (exponential backoff)." />
+														<InfoTooltip text="Factor by which delay increases between retries." />
 													</div>
 													<input
 														type="number"
-														min={0}
+														min={1}
 														step="0.1"
 														className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
 														value={state.errorHandlerBackoffMultiplier}
@@ -823,24 +855,26 @@ export const BuilderPanel: React.FC<BuilderPanelProps> = ({
 												</label>
 											</div>
 
-											<div className="flex flex-col gap-3 md:flex-row md:items-center md:gap-6">
-												<label className="flex items-center gap-3 rounded-lg border border-border/60 dark:border-drac-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground">
+											<div className="grid gap-5 md:grid-cols-2">
+												<label className="flex items-center gap-2">
 													<input
 														type="checkbox"
-														className="h-4 w-4 rounded border border-border accent-blue-9"
+														className="h-4 w-4 rounded border-border text-blue-9 focus:ring-blue-5 dark:border-drac-border dark:text-drac-accent dark:focus:ring-drac-accent/40"
 														checked={state.errorHandlerRetryOnTimeout}
 														onChange={(e) => onUpdateState({ errorHandlerRetryOnTimeout: e.target.checked })}
 													/>
-													<span>Retry on timeouts</span>
+													<span className="text-sm text-slate-11 dark:text-drac-foreground/90">Retry on timeout</span>
+													<InfoTooltip text="Whether to retry requests that time out." />
 												</label>
-												<label className="flex items-center gap-3 rounded-lg border border-border/60 dark:border-drac-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground">
+												<label className="flex items-center gap-2">
 													<input
 														type="checkbox"
-														className="h-4 w-4 rounded border border-border accent-blue-9"
+														className="h-4 w-4 rounded border-border text-blue-9 focus:ring-blue-5 dark:border-drac-border dark:text-drac-accent dark:focus:ring-drac-accent/40"
 														checked={state.errorHandlerRetryOnConnectionErrors}
 														onChange={(e) => onUpdateState({ errorHandlerRetryOnConnectionErrors: e.target.checked })}
 													/>
-													<span>Retry on network failures</span>
+													<span className="text-sm text-slate-11 dark:text-drac-foreground/90">Retry on connection errors</span>
+													<InfoTooltip text="Whether to retry requests that fail due to connection issues." />
 												</label>
 											</div>
 										</div>
@@ -858,55 +892,240 @@ export const BuilderPanel: React.FC<BuilderPanelProps> = ({
 									>
 										<span className="flex items-center gap-2">
 											Pagination
-											<span className="text-xs font-normal text-muted">({state.paginationType === 'none' ? 'disabled' : state.paginationType})</span>
+											<span className="text-xs font-normal text-muted">(optional)</span>
 										</span>
 										<span className={"transition-transform duration-200 " + (showPagination ? 'rotate-90' : '')}>
-                                            <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-                                                <path d="M7.25 3.75a.75.75 0 0 1 1.06 0l5 5a.75.75 0 0 1 0 1.06l-5 5a.75.75 0 1 1-1.06-1.06L11.69 10 7.25 5.56a.75.75 0 0 1 0-1.06Z" />
-                                            </svg>
-                                        </span>
+											<svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+												<path d="M7.25 3.75a.75.75 0 0 1 1.06 0l5 5a.75.75 0 0 1 0 1.06l-5 5a.75.75 0 1 1-1.06-1.06L11.69 10 7.25 5.56a.75.75 0 0 1 0-1.06Z" />
+											</svg>
+										</span>
 									</button>
 									{showPagination && (
 										<div
 											id="pagination-section"
-											className="rounded-xl border border-border/60 dark:border-drac-border/60 bg-surface/70 dark:bg-[#1f232b]/80 backdrop-blur-sm p-5 shadow-inner transition ring-1 ring-border/40 dark:ring-drac-border/30 animate-in fade-in duration-200"
+											className="space-y-4 rounded-xl border border-border/60 dark:border-drac-border/60 bg-surface/70 dark:bg-[#1f232b]/80 backdrop-blur-sm p-5 shadow-inner transition ring-1 ring-border/40 dark:ring-drac-border/30 animate-in fade-in duration-200"
 										>
-											<label className="flex flex-col gap-2 max-w-xs">
-												<div className="flex items-center gap-1">
-													<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Pagination Type</span>
-													<InfoTooltip text="Strategy for requesting additional pages." />
-												</div>
-												<div className="relative">
-													<select
-														className="w-full rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm appearance-none pr-9 transition-all focus:border-blue-7 dark:focus:border-drac-accent focus:outline-none"
-														value={state.paginationType}
-														onChange={(e) => onUpdateState({ paginationType: e.target.value as 'none' | 'link_header' })}
-													>
-														<option value="none">None</option>
-														<option value="link_header">Link Header</option>
-													</select>
-													<span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-10 dark:text-drac-muted">
-														<svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-															<path d="M5.8 7.5a.75.75 0 0 1 1.05-.2L10 9.2l3.15-1.9a.75.75 0 0 1 .75 1.3l-3.5 2.11a.75.75 0 0 1-.76 0L5.99 8.6a.75.75 0 0 1-.2-1.1Z" />
-														</svg>
-													</span>
-												</div>
-											</label>
+											<div className="space-y-4">
+												<label className="flex flex-col gap-2">
+													<div className="flex items-center gap-1">
+														<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Pagination Type</span>
+														<InfoTooltip text="Method used to paginate through multiple pages of results" />
+													</div>
+													<div className="relative">
+														<select
+															className="w-full rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm appearance-none pr-9 transition-all focus:border-blue-7 dark:focus:border-drac-accent focus:outline-none"
+															value={state.paginationType || 'none'}
+															onChange={(e) => onUpdateState({ paginationType: e.target.value as any })}
+														>
+															<option value="none">None</option>
+															<option value="offset">Offset-based</option>
+															<option value="cursor">Cursor-based</option>
+															<option value="page">Page-based</option>
+														</select>
+														<span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-10 dark:text-drac-muted">
+															<svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+																<path d="M5.8 7.5a.75.75 0 0 1 1.05-.2L10 9.2l3.15-1.9a.75.75 0 0 1 .75 1.3l-3.5 2.11a.75.75 0 0 1-.76 0L5.99 8.6a.75.75 0 0 1-.2-1.1Z" />
+															</svg>
+														</span>
+													</div>
+												</label>
+
+												{state.paginationType && state.paginationType !== 'none' && (
+													<div className="space-y-4">
+														{['offset', 'page', 'cursor'].includes(state.paginationType) && (
+															<div className="grid gap-4 md:grid-cols-2">
+															<label className="flex flex-col gap-2">
+																<div className="flex items-center gap-1">
+																	<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Page Size</span>
+																	<InfoTooltip text="Number of records requested per page." />
+																</div>
+																<input
+																	type="number"
+																	min={1}
+																	className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
+																	placeholder="100"
+																	value={state.paginationPageSize || ''}
+																	onChange={(e) => onUpdateState({ paginationPageSize: e.target.value })}
+																/>
+															</label>
+
+															{['offset', 'page', 'cursor'].includes(state.paginationType) && (
+																<label className="flex flex-col gap-2">
+																	<div className="flex items-center gap-1">
+																		<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Limit Parameter</span>
+																		<InfoTooltip text="Query parameter name used for page size (leave empty to keep existing params)." />
+																	</div>
+																	<input
+																		type="text"
+																		className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
+																		placeholder={state.paginationType === 'page' ? 'per_page' : 'limit'}
+																		value={state.paginationLimitParam || ''}
+																		onChange={(e) => onUpdateState({ paginationLimitParam: e.target.value })}
+																	/>
+																</label>
+															)}
+														</div>)})
+
+														{state.paginationType === 'offset' && (
+															<div className="grid gap-4 md:grid-cols-2">
+																<label className="flex flex-col gap-2">
+																	<div className="flex items-center gap-1">
+																		<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Offset Parameter</span>
+																		<InfoTooltip text="Query parameter that carries the current offset value." />
+																	</div>
+																	<input
+																		type="text"
+																		className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
+																		placeholder="offset"
+																		value={state.paginationOffsetParam || ''}
+																		onChange={(e) => onUpdateState({ paginationOffsetParam: e.target.value })}
+																	/>
+																</label>
+																<label className="flex flex-col gap-2">
+																	<div className="flex items-center gap-1">
+																		<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Start Offset</span>
+																		<InfoTooltip text="First offset value to request (defaults to 0)." />
+																	</div>
+																	<input
+																		type="number"
+																		min={0}
+																		className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
+																		placeholder="0"
+																		value={state.paginationStartOffset || ''}
+																		onChange={(e) => onUpdateState({ paginationStartOffset: e.target.value })}
+																	/>
+																</label>
+															</div>)})
+															</div>
+														)}
+
+														{state.paginationType === 'page' && (
+															<div className="grid gap-4 md:grid-cols-2">
+																<label className="flex flex-col gap-2">
+																	<div className="flex items-center gap-1">
+																		<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Page Parameter</span>
+																		<InfoTooltip text="Query parameter that carries the current page number." />
+																	</div>
+																	<input
+																		type="text"
+																		className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
+																		placeholder="page"
+																		value={state.paginationPageParam || ''}
+																		onChange={(e) => onUpdateState({ paginationPageParam: e.target.value })}
+																	/>
+																</label>
+																<label className="flex flex-col gap-2">
+																	<div className="flex items-center gap-1">
+																		<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Start Page</span>
+																		<InfoTooltip text="First page number to request (defaults to 1)." />
+																	</div>
+																	<input
+																		type="number"
+																		min={1}
+																		className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
+																		placeholder="1"
+																		value={state.paginationStartPage || ''}
+																		onChange={(e) => onUpdateState({ paginationStartPage: e.target.value })}
+																	/>
+																</label>
+															</div>
+														)}
+
+														{state.paginationType === 'cursor' && (
+															<div className="grid gap-4 md:grid-cols-2">
+																<label className="flex flex-col gap-2">
+																	<div className="flex items-center gap-1">
+																		<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Cursor Parameter</span>
+																		<InfoTooltip text="Query parameter that receives the next cursor value." />
+																	</div>
+																	<input
+																		type="text"
+																		className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
+																		placeholder="cursor"
+																		value={state.paginationCursorParam || ''}
+																		onChange={(e) => onUpdateState({ paginationCursorParam: e.target.value })}
+																	/>
+																</label>
+																<label className="flex flex-col gap-2">
+																	<div className="flex items-center gap-1">
+																		<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Cursor Path</span>
+																		<InfoTooltip text="Dotted path to the cursor value in the response payload (e.g. meta.next_cursor)." />
+																	</div>
+																	<InputWithCursorPosition
+																		className="rounded-lg border border-border dark:border-drac-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:focus-visible:border-drac-accent focus-visible:ring-1 focus-visible:ring-blue-5"
+																		placeholder="meta.next_cursor"
+																		value={state.paginationCursorPath || ''}
+																		onValueChange={(value) => onUpdateState({ paginationCursorPath: value })}
+																	/>
+																</label>
+																<label className="flex flex-col gap-2">
+																	<div className="flex items-center gap-1">
+																		<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Next URL Path</span>
+																		<InfoTooltip text="Dotted path to a fully qualified 'next' link in the payload (optional)." />
+																	</div>
+																	<InputWithCursorPosition
+																		className="rounded-lg border border-border dark:border-drac-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:focus-visible:border-drac-accent focus-visible:ring-1 focus-visible:ring-blue-5"
+																		placeholder="links.next"
+																		value={state.paginationNextUrlPath || ''}
+																		onValueChange={(value) => onUpdateState({ paginationNextUrlPath: value })}
+																	/>
+																</label>
+																<label className="flex flex-col gap-2">
+																	<div className="flex items-center gap-1">
+																		<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Cursor Header</span>
+																		<InfoTooltip text="Response header that carries the next cursor (optional)." />
+																	</div>
+																	<input
+																		type="text"
+																		className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
+																		placeholder="X-Next-Cursor"
+																		value={state.paginationCursorHeader || ''}
+																		onChange={(e) => onUpdateState({ paginationCursorHeader: e.target.value })}
+																	/>
+																</label>
+																<label className="flex flex-col gap-2">
+																	<div className="flex items-center gap-1">
+																		<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Initial Cursor</span>
+																		<InfoTooltip text="Fallback cursor value sent on the first request." />
+																	</div>
+																	<input
+																		type="text"
+																		className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
+																		placeholder="Provided by API"
+																		value={state.paginationInitialCursor || ''}
+																		onChange={(e) => onUpdateState({ paginationInitialCursor: e.target.value })}
+																	/>
+																</label>
+															</div>
+														)}
+
+														<div className="flex items-center gap-2">
+															<input
+																type="checkbox"
+																className="h-4 w-4 rounded border-border text-blue-7 focus:ring-blue-5"
+																checked={state.paginationStopOnEmptyResponse}
+																onChange={(e) => onUpdateState({ paginationStopOnEmptyResponse: e.target.checked })}
+															/>
+															<span className="text-sm text-slate-11 dark:text-drac-foreground/90">Stop when the API returns no records</span>
+														</div>
+													</div>
+												)
+											</div>)}
 										</div>
-									)}
+									)
 								</div>
 
-								{/* Incremental */}
+								{/* Incremental Sync */}
 								<div className="space-y-3">
 									<button
 										type="button"
 										className="flex w-full items-center justify-between rounded-lg border border-border bg-background px-4 py-3 text-left text-sm font-medium text-slate-12 hover:border-blue-7 hover:bg-blue-3/20 dark:hover:bg-drac-selection/40 transition-colors duration-200"
-										onClick={() => setShowIncremental((v) => !v)}
+										onClick={() => setShowIncremental(v => !v)}
 										aria-expanded={showIncremental}
 										aria-controls="incremental-section"
 									>
 										<span className="flex items-center gap-2">
-											Incremental sync
+											Incremental Sync
 											<span className="text-xs font-normal text-muted">({incrementalSummary})</span>
 										</span>
 										<span className={"transition-transform duration-200 " + (showIncremental ? 'rotate-90' : '')}>
@@ -918,7 +1137,7 @@ export const BuilderPanel: React.FC<BuilderPanelProps> = ({
 									{showIncremental && (
 										<div
 											id="incremental-section"
-											className="space-y-5 rounded-xl border border-border/60 dark:border-drac-border/60 bg-surface/70 dark:bg-[#1f232b]/80 backdrop-blur-sm p-5 shadow-inner transition ring-1 ring-border/40 dark:ring-drac-border/30 animate-in fade-in duration-200"
+											className="space-y-4 rounded-xl border border-border/60 dark:border-drac-border/60 bg-surface/70 dark:bg-[#1f232b]/80 backdrop-blur-sm p-5 shadow-inner transition ring-1 ring-border/40 dark:ring-drac-border/30 animate-in fade-in duration-200"
 										>
 											<div className="grid gap-4 md:grid-cols-3">
 												<label className="flex flex-col gap-2">
@@ -1029,7 +1248,7 @@ export const BuilderPanel: React.FC<BuilderPanelProps> = ({
 								{/* Record Selector */}
 								<div className="space-y-3">
 									<button
-										type="button"
+									 type="button"
 										className="flex w-full items-center justify-between rounded-lg border border-border bg-background px-4 py-3 text-left text-sm font-medium text-slate-12 hover:border-blue-7 hover:bg-blue-3/20 dark:hover:bg-drac-selection/40 transition-colors duration-200"
 										onClick={() => setShowRecordSelector(v => !v)}
 										aria-expanded={showRecordSelector}
@@ -1044,15 +1263,15 @@ export const BuilderPanel: React.FC<BuilderPanelProps> = ({
 											</span>
 										</span>
 										<span className={"transition-transform duration-200 " + (showRecordSelector ? 'rotate-90' : '')}>
-                                            <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-                                                <path d="M7.25 3.75a.75.75 0 0 1 1.06 0l5 5a.75.75 0 0 1 0 1.06l-5 5a.75.75 0 1 1-1.06-1.06L11.69 10 7.25 5.56a.75.75 0 0 1 0-1.06Z" />
-                                            </svg>
-                                        </span>
+											<svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+												<path d="M7.25 3.75a.75.75 0 0 1 1.06 0l5 5a.75.75 0 0 1 0 1.06l-5 5a.75.75 0 1 1-1.06-1.06L11.69 10 7.25 5.56a.75.75 0 0 1 0-1.06Z" />
+											</svg>
+										</span>
 									</button>
 									{showRecordSelector && (
 										<div
 											id="record-selector-section"
-											className="space-y-5 rounded-xl border border-border/60 dark:border-drac-border/60 bg-surface/70 dark:bg-[#1f232b]/80 backdrop-blur-sm p-5 shadow-inner transition ring-1 ring-border/40 dark:ring-drac-border/30 animate-in fade-in duration-200"
+											className="space-y-4 rounded-xl border border-border/60 dark:border-drac-border/60 bg-surface/70 dark:bg-[#1f232b]/80 backdrop-blur-sm p-5 shadow-inner transition ring-1 ring-border/40 dark:ring-drac-border/30 animate-in fade-in duration-200"
 										>
 											<div className="space-y-3">
 												<div className="flex items-center gap-1">
@@ -1139,7 +1358,7 @@ export const BuilderPanel: React.FC<BuilderPanelProps> = ({
 									<button
 										type="button"
 										className="flex w-full items-center justify-between rounded-lg border border-border bg-background px-4 py-3 text-left text-sm font-medium text-slate-12 hover:border-blue-7 hover:bg-blue-3/20 dark:hover:bg-drac-selection/40 transition-colors duration-200"
-										onClick={() => setShowReaderOptions((v) => !v)}
+										onClick={() => setShowReaderOptions(v => !v)}
 										aria-expanded={showReaderOptions}
 										aria-controls="reader-options-section"
 									>
@@ -1148,10 +1367,10 @@ export const BuilderPanel: React.FC<BuilderPanelProps> = ({
 											<span className="text-xs font-normal text-muted">({runtimeOptionSummary})</span>
 										</span>
 										<span className={"transition-transform duration-200 " + (showReaderOptions ? 'rotate-90' : '')}>
-                                            <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-                                                <path d="M7.25 3.75a.75.75 0 0 1 1.06 0l5 5a.75.75 0 0 1 0 1.06l-5 5a.75.75 0 1 1-1.06-1.06L11.69 10 7.25 5.56a.75.75 0 0 1 0-1.06Z" />
-                                            </svg>
-                                        </span>
+											<svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+												<path d="M7.25 3.75a.75.75 0 0 1 1.06 0l5 5a.75.75 0 0 1 0 1.06l-5 5a.75.75 0 1 1-1.06-1.06L11.69 10 7.25 5.56a.75.75 0 0 1 0-1.06Z" />
+											</svg>
+										</span>
 									</button>
 									{showReaderOptions && (
 										<div
@@ -1159,11 +1378,10 @@ export const BuilderPanel: React.FC<BuilderPanelProps> = ({
 											className="space-y-4 rounded-xl border border-border/60 dark:border-drac-border/60 bg-surface/70 dark:bg-[#1f232b]/80 backdrop-blur-sm p-5 shadow-inner transition ring-1 ring-border/40 dark:ring-drac-border/30 animate-in fade-in duration-200"
 										>
 											<div className="flex items-center justify-between">
-												<h4 className="text-sm font-semibold text-slate-12 dark:text-drac-foreground">Runtime Options</h4>
+												<h4 className="text-sm font-semibold text-slate-12 dark:text-drac-foreground">Reader Options</h4>
 												<button
 													type="button"
-													className="inline-flex items-center gap-1.5 rounded-full border border-border/60 dark:border-drac-border bg-background/70 dark:bg-[#242a33] px-4 py-1.5 text-xs font-medium text-slate-11 dark:text-drac-foreground shadow-sm transition-all duration-200 hover:border-blue-7 hover:text-blue-11 dark:hover:border-drac-accent dark:hover:text-drac-accent hover:scale-105 hover:shadow-md dark:hover:shadow-[0_0_8px_rgba(80,250,123,0.15)] hover:bg-blue-3/50 dark:hover:bg-[#273242]
-													focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-7 dark:focus-visible:ring-drac-accent"
+													className="inline-flex items-center gap-1.5 rounded-full border border-border/60 dark:border-drac-border bg-background/70 dark:bg-[#242a33] px-4 py-1.5 text-xs font-medium text-slate-11 dark:text-drac-foreground shadow-sm transition-all duration-200 hover:border-blue-7 hover:text-blue-11 dark:hover:border-drac-accent dark:hover:text-drac-accent hover:scale-105 hover:shadow-md dark:hover:shadow-[0_0_8px_rgba(80,250,123,0.15)] hover:bg-blue-3/50 dark:hover:bg-[#273242] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-7 dark:focus-visible:ring-drac-accent"
 													onClick={handleAddReaderOption}
 												>
 													<svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
@@ -1172,26 +1390,20 @@ export const BuilderPanel: React.FC<BuilderPanelProps> = ({
 													<span>Add Option</span>
 												</button>
 											</div>
-											<p className="text-xs text-muted dark:text-drac-muted">Provide values for Jinja references like <code>{"{{ options.api_key }}"}</code>. These keys are passed to <code>spark.read.option()</code> during preview.</p>
-											{incrementalOptionCount > 0 && (
-												<p className="text-xs text-muted dark:text-drac-muted">
-													Incremental settings configured above contribute {incrementalOptionCount} runtime option{incrementalOptionCount === 1 ? '' : 's'} automatically.
-												</p>
-											)}
 											{Object.entries(readerOptions).length > 0 ? (
 												<ul className="flex flex-col gap-2">
 													{Object.entries(readerOptions).map(([key, value]) => (
-														<ReaderOptionRow key={key} originalKey={key} value={value} onUpdateKey={handleUpdateReaderOption} onUpdateValue={handleUpdateReaderOption} onRemove={handleRemoveReaderOption} />
+														<ReaderOptionRow key={key} originalKey={key} value={String(value)} onUpdateKey={handleUpdateReaderOption} onUpdateValue={handleUpdateReaderOption} onRemove={handleRemoveReaderOption} />
 													))}
 												</ul>
 											) : (
-												<p className="text-sm text-muted dark:text-drac-muted">No runtime options defined.</p>
+												<p className="text-sm text-muted dark:text-drac-muted">No reader options configured.</p>
 											)}
 										</div>
 									)}
-								</div>
+								</div> </Tabs.Content>
+					</Tabs.Root></section>
 							</div>
-						</Tabs.Content>
 
 						<Tabs.Content value="schema" className="p-8 outline-none">
 							<div className="space-y-8">
@@ -1229,10 +1441,6 @@ export const BuilderPanel: React.FC<BuilderPanelProps> = ({
 									)}
 								</div>
 							</div>
-						</Tabs.Content>
-					</Tabs.Root>
-				</section>
-			</div>
-		</div>
+						</Tabs.Content> </div>
 	);
 };

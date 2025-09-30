@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+t import { test, expect } from '@playwright/test';
 
 // E2E preview test with network interception (does not rely on MSW)
 // Verifies: validate call, sample call, table render, JSON view.

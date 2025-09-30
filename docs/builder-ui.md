@@ -18,7 +18,7 @@ When the page loads you will see three large tiles:
 - **Upload YAML** – pick an existing config file to continue working on it.
 - **Load an example** – try one of the sample connectors bundled with Polymo (GitHub, JSON Placeholder, etc.).
 
-Every option resets old tokens, previews, and temporary values so you never accidentally reuse secrets.
+Every option resets old tokens, previews, and temporary values so you never accidentally reuse secrets. Under the tiles you will also see a **Saved connectors** library. The Builder automatically stores every change in your browser, so closing the tab or hopping back to the landing screen never loses your progress. Open an entry to keep editing, rename it to stay organised, export the YAML, or delete configs you no longer need.
 
 ## A guided form for your API
 The left-hand panel has two tabs: **UI Builder** and **YAML Editor**. Stay on the UI Builder tab if you prefer plain-language fields. Each section can collapse to keep things tidy.
@@ -73,14 +73,14 @@ The right-hand panel is where you test your work.
 If something goes wrong—wrong URL, missing token, network issue—the error appears in the status pill and the Raw API view so you can fix it quickly.
 
 ## Saving your work
-- Press **Save** (or hit <kbd>Ctrl/Cmd</kbd> + <kbd>S</kbd>).
-- Name your file in the modal.
-- If your browser supports folder access, you can choose a target directory once; otherwise the file downloads like any other.
-- Polymo always re-validates before saving to make sure you are storing a working configuration. Tokens are stripped automatically.
+- The Builder continuously caches your progress locally, so you can step away or experiment without fear—just reopen the connector from the library when you return.
+- Use the connector picker in the header to jump between saved configs instantly; the **Manage connectors…** option opens the full library where you can rename, export, or remove drafts.
+- When you are ready to download the file, press **Save** (or <kbd>Ctrl/Cmd</kbd> + <kbd>S</kbd>). Name the file in the modal; browsers that support folder access let you pick a target directory once, otherwise the file downloads like any other.
+- Polymo always re-validates before saving to make sure you store a working configuration, and tokens are stripped automatically.
 
 ## Helpful touches
 - The theme switcher toggles between light, dark, or “follow my computer” modes.
-- The **New Connector** button reopens the landing screen without refreshing the page.
+- The **Connectors** button in the header opens the saved connectors library—autosave means you never lose work when switching between configurations.
 - The status pill keeps the latest validation, preview, or save result visible so you know what just happened.
 
 That’s it—you now have a friendly workspace for building reusable API connectors without touching a single line of code.

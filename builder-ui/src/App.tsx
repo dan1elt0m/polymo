@@ -16,17 +16,37 @@ import {
 	formStateToYamlAtom,
 	bearerTokenAtom,
 	runtimeOptionsAtom,
+	readerOptionsAtom,
+	savedConnectorsAtom,
+	activeConnectorIdAtom,
+	DEFAULT_SAMPLE_STATE,
 } from "./atoms";
-import { configToFormState } from "./lib/transform";
+import { configToFormState, formStateToConfig } from "./lib/transform";
 import { validateConfigRequest, sampleRequest } from "./lib/api";
 import { BuilderPanel } from "./components/BuilderPanel";
 import { YamlEditor } from "./components/YamlEditor";
 import { SamplePreview } from "./components/SamplePreview";
 import { ThemeMenu } from "./components/ThemeMenu";
 import { LandingScreen } from "./components/LandingScreen";
-import type { ConfigFormState, ValidationResponse, RestSourceConfig } from "./types";
+import type { ConfigFormState, ValidationResponse, RestSourceConfig, SavedConnector } from "./types";
 import { MAX_SAMPLE_ROWS, SAMPLE_VIEWS } from "./lib/constants";
 import yaml from 'js-yaml';
+import { INITIAL_FORM_STATE } from "./lib/initial-data";
+import { createId } from "./lib/id";
+
+const cloneFormState = (state: ConfigFormState): ConfigFormState => JSON.parse(JSON.stringify(state));
+
+const createSampleState = () => JSON.parse(JSON.stringify(DEFAULT_SAMPLE_STATE));
+
+const slugify = (value: string): string => {
+	return value
+		.toLowerCase()
+		.trim()
+		.replace(/[^a-z0-9]+/g, '-')
+		.replace(/^-+|-+$/g, '') || 'connector';
+};
+
+const stripExtension = (name: string): string => name.replace(/\.[^.]+$/, '').trim();
 
 const App: React.FC = () => {
 	const [showLandingScreen, setShowLandingScreen] = React.useState(true);
@@ -39,11 +59,14 @@ const App: React.FC = () => {
 	const [isValidating, setIsValidating] = useAtom(isValidatingAtom);
 	const [isSaving, setIsSaving] = useAtom(isSavingAtom);
 	const [sample, setSample] = useAtom(sampleAtom);
+	const [readerOptions, setReaderOptions] = useAtom(readerOptionsAtom);
 	const streamOptions = useAtomValue(streamOptionsAtom);
 	const configPayload = useAtomValue(configPayloadAtom);
 	const formStateYaml = useAtomValue(formStateToYamlAtom);
 	const bearerToken = useAtomValue(bearerTokenAtom); // moved from inside handlePreview
 	const runtimeOptions = useAtomValue(runtimeOptionsAtom);
+	const [savedConnectors, setSavedConnectors] = useAtom(savedConnectorsAtom);
+	const [activeConnectorId, setActiveConnectorId] = useAtom(activeConnectorIdAtom);
 	const [yamlErrorLine, setYamlErrorLine] = React.useState<number | null>(null);
 	const [yamlErrorCol, setYamlErrorCol] = React.useState<number | null>(null);
 	const [yamlSnapshot, setYamlSnapshot] = React.useState<string | null>(null);
@@ -53,9 +76,276 @@ const App: React.FC = () => {
 	const [saveFileName, setSaveFileName] = React.useState('config.yml');
 	const [saveDirHandle, setSaveDirHandle] = React.useState<any | null>(null); // directory handle
 	const [saveDirName, setSaveDirName] = React.useState<string | null>(null);
+	const [isRenamingConnector, setIsRenamingConnector] = React.useState(false);
+	const [connectorNameDraft, setConnectorNameDraft] = React.useState('');
+
+	// Removed autoCreatedRef and auto-create behavior so refresh returns to landing screen
+	// const autoCreatedRef = React.useRef(false);
 
 	// feature detection for directory picker
 	const dirPickerSupported = typeof window !== 'undefined' && 'showDirectoryPicker' in window;
+	const initialLoadRef = React.useRef(true);
+
+	const currentConnector = React.useMemo(() => (
+		savedConnectors.find((entry) => entry.id === activeConnectorId) ?? null
+	), [savedConnectors, activeConnectorId]);
+
+	const updateSaveFileName = React.useCallback((name: string) => {
+		setSaveFileName(`${slugify(name)}.yml`);
+	}, [setSaveFileName]);
+
+	const resetWorkingState = React.useCallback(() => {
+		setSample(createSampleState());
+		setYamlError(null);
+		setYamlErrorLine(null);
+		setYamlErrorCol(null);
+		setYamlSnapshot(null);
+		setFormSnapshot(null);
+		setIsValidating(false);
+		setIsSaving(false);
+	}, [setFormSnapshot, setIsSaving, setIsValidating, setSample, setYamlError, setYamlErrorCol, setYamlErrorLine, setYamlSnapshot]);
+
+	const generateConnectorName = React.useCallback((baseName?: string, existing: SavedConnector[] = savedConnectors) => {
+		const trimmed = baseName && baseName.trim() ? baseName.trim() : 'Untitled connector';
+		if (!existing.some((entry) => entry.name === trimmed)) {
+			return trimmed;
+		}
+		let counter = 2;
+		while (existing.some((entry) => entry.name === `${trimmed} (${counter})`)) {
+			counter += 1;
+		}
+		return `${trimmed} (${counter})`;
+	}, [savedConnectors]);
+
+	const loadConnector = React.useCallback(
+		(connector: SavedConnector, options?: { message?: string }) => {
+			resetWorkingState();
+			let effectiveFormState = cloneFormState(connector.formState);
+			// Fallback: if the stored formState looks empty but we have YAML, attempt to rebuild from YAML
+			const looksEmpty = !effectiveFormState.baseUrl && !effectiveFormState.streamPath && Object.keys(effectiveFormState.params || {}).length === 0;
+			if (looksEmpty && connector.yaml && connector.yaml.trim().length) {
+				try {
+					const loaded: any = yaml.load(connector.yaml) || {};
+					if (loaded && typeof loaded === 'object') {
+						const parsed = configToFormState(loaded as RestSourceConfig);
+						// Preserve auth fields from existing state if any
+						parsed.authType = effectiveFormState.authType || parsed.authType;
+						parsed.authToken = effectiveFormState.authToken || parsed.authToken;
+						effectiveFormState = cloneFormState(parsed);
+					}
+				} catch {/* ignore parse errors; keep existing */}
+			}
+			setActiveConnectorId(connector.id);
+			setConfigFormState(effectiveFormState);
+			setYamlText(connector.yaml);
+			setLastEdited(connector.lastEdited);
+			setBuilderView(connector.builderView ?? 'ui');
+			setReaderOptions({ ...connector.readerOptions });
+			setStatus({ tone: 'info', message: options?.message ?? `Loaded ${connector.name}` });
+			updateSaveFileName(connector.name);
+			setShowLandingScreen(false);
+			setIsRenamingConnector(false);
+			setConnectorNameDraft('');
+		},
+		[
+			resetWorkingState,
+			setActiveConnectorId,
+			setBuilderView,
+			setConfigFormState,
+			setLastEdited,
+			setReaderOptions,
+			setShowLandingScreen,
+			setStatus,
+			setYamlText,
+			updateSaveFileName,
+		],
+	);
+
+	const createConnector = React.useCallback(
+		(options?: {
+			name?: string;
+			formState?: ConfigFormState;
+			yamlText?: string;
+			lastEdited?: 'ui' | 'yaml';
+			builderView?: 'ui' | 'yaml';
+			readerOptions?: Record<string, string>;
+			statusMessage?: string;
+		}) => {
+			const now = new Date().toISOString();
+			const uniqueName = generateConnectorName(options?.name);
+			const connector: SavedConnector = {
+				id: createId('connector'),
+				name: uniqueName,
+				createdAt: now,
+				updatedAt: now,
+				formState: cloneFormState(options?.formState ?? INITIAL_FORM_STATE),
+				yaml: options?.yamlText ?? '',
+				lastEdited: options?.lastEdited ?? 'ui',
+				builderView: options?.builderView ?? 'ui',
+				readerOptions: { ...(options?.readerOptions ?? {}) },
+			};
+			setSavedConnectors((prev) => [...prev, connector]);
+			loadConnector(connector, { message: options?.statusMessage ?? `Created ${uniqueName}` });
+		},
+		[generateConnectorName, loadConnector, setSavedConnectors],
+	);
+
+	// Removed effect that auto-created a connector when none existed
+	/* React.useEffect(() => {
+		if (!autoCreatedRef.current && savedConnectors.length === 0) {
+			autoCreatedRef.current = true;
+			createConnector({ statusMessage: 'Started new connector' });
+		}
+	}, [savedConnectors, createConnector]); */
+
+	const handleStartNewConnector = React.useCallback(() => {
+		createConnector({ statusMessage: 'Ready to configure a new connector' });
+	}, [createConnector]);
+
+	const handleImportConnector = React.useCallback(
+		(config: RestSourceConfig, yamlContent: string, meta?: { suggestedName?: string }) => {
+			const formState = configToFormState(config);
+			const derivedFromPath = (config.stream?.path || '').split('/').filter(Boolean).pop() || 'imported';
+			const baseName = meta?.suggestedName ? stripExtension(meta.suggestedName) : derivedFromPath || 'Imported connector';
+			createConnector({
+				name: baseName,
+				formState,
+				yamlText: yamlContent.trimEnd(),
+				lastEdited: 'yaml',
+				statusMessage: `Loaded ${baseName}`,
+			});
+		},
+		[createConnector],
+	);
+
+	const handleSelectSavedConnector = React.useCallback(
+		(id: string) => {
+			const connector = savedConnectors.find((entry) => entry.id === id);
+			if (connector) {
+				loadConnector(connector, { message: `Loaded ${connector.name}` });
+			}
+		},
+		[savedConnectors, loadConnector],
+	);
+
+	const handleDeleteSavedConnector = React.useCallback(
+		(id: string) => {
+			const removed = savedConnectors.find((entry) => entry.id === id);
+			const next = savedConnectors.filter((entry) => entry.id !== id);
+			setSavedConnectors(next);
+			if (removed) {
+				setStatus({ tone: 'info', message: `Deleted ${removed.name}` });
+			}
+			if (id === activeConnectorId) {
+				// If we're currently on the landing screen, don't auto-load another connector.
+				if (showLandingScreen) {
+					setActiveConnectorId(null);
+					return;
+				}
+				if (next.length) {
+					loadConnector(next[0], { message: `Loaded ${next[0].name}` });
+				} else {
+					setActiveConnectorId(null);
+					setShowLandingScreen(true);
+				}
+			}
+		},
+		[activeConnectorId, loadConnector, savedConnectors, setActiveConnectorId, setSavedConnectors, setShowLandingScreen, setStatus, showLandingScreen],
+	);
+
+	const handleExportSavedConnector = React.useCallback(
+		(id: string) => {
+			const connector = savedConnectors.find((entry) => entry.id === id);
+			if (!connector) return;
+			const yamlTextToSave = connector.yaml && connector.yaml.trim().length
+				? connector.yaml
+				: yaml.dump(formStateToConfig(connector.formState), { noRefs: true, lineWidth: 120, sortKeys: false, quotingType: "'" }).trimEnd();
+			const blob = new Blob([yamlTextToSave], { type: 'text/yaml' });
+			const link = document.createElement('a');
+			link.href = URL.createObjectURL(blob);
+			link.download = `${slugify(connector.name)}.yml`;
+			document.body.appendChild(link);
+			link.click();
+			document.body.removeChild(link);
+			URL.revokeObjectURL(link.href);
+		},
+		[savedConnectors],
+	);
+
+	const handleRenameSavedConnector = React.useCallback(
+		(id: string, name: string) => {
+			const trimmed = name.trim() || 'Untitled connector';
+			const nextName = generateConnectorName(trimmed, savedConnectors.filter((entry) => entry.id !== id));
+			const updatedAt = new Date().toISOString();
+			setSavedConnectors((prev) => prev.map((entry) => (entry.id === id ? { ...entry, name: nextName, updatedAt } : entry)));
+			if (id === activeConnectorId) {
+				setStatus({ tone: 'info', message: `Renamed connector to ${nextName}` });
+				updateSaveFileName(nextName);
+			}
+		},
+		[activeConnectorId, generateConnectorName, savedConnectors, setSavedConnectors, setStatus, updateSaveFileName],
+	);
+
+	const beginHeaderRename = React.useCallback(() => {
+		if (!currentConnector) return;
+		setIsRenamingConnector(true);
+		setConnectorNameDraft(currentConnector.name);
+	}, [currentConnector]);
+
+	const commitHeaderRename = React.useCallback(() => {
+		if (!currentConnector) return;
+		handleRenameSavedConnector(currentConnector.id, connectorNameDraft);
+		setIsRenamingConnector(false);
+		setConnectorNameDraft('');
+	}, [connectorNameDraft, currentConnector, handleRenameSavedConnector]);
+
+	const cancelHeaderRename = React.useCallback(() => {
+		setIsRenamingConnector(false);
+		setConnectorNameDraft('');
+	}, []);
+
+	const openConnectorLibrary = React.useCallback(() => {
+		setShowLandingScreen(true);
+		setIsRenamingConnector(false);
+		setConnectorNameDraft('');
+	}, [setShowLandingScreen]);
+
+	const savedConnectorSummaries = React.useMemo(
+		() =>
+			[...savedConnectors]
+				.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+				.map(({ id, name, createdAt, updatedAt }) => ({ id, name, createdAt, updatedAt })),
+		[savedConnectors],
+	);
+
+	React.useEffect(() => {
+		setIsRenamingConnector(false);
+		setConnectorNameDraft('');
+	}, [currentConnector?.id]);
+
+	React.useEffect(() => {
+		if (!activeConnectorId) return;
+		// Do not sync while on landing screen (avoids wiping saved connector with empty draft after refresh)
+		if (showLandingScreen) return;
+		const handle = window.setTimeout(() => {
+			setSavedConnectors((prev) => prev.map((entry) => {
+				if (entry.id !== activeConnectorId) return entry;
+				return {
+					...entry,
+					formState: cloneFormState(configFormState),
+					yaml: yamlText,
+					lastEdited,
+					builderView,
+					readerOptions: { ...readerOptions },
+					updatedAt: new Date().toISOString(),
+				};
+			}));
+		}, 400);
+		return () => window.clearTimeout(handle);
+	}, [activeConnectorId, builderView, configFormState, lastEdited, readerOptions, setSavedConnectors, yamlText, showLandingScreen]);
+
+	// Instead, just mark initialLoadRef consumed once after first render
+	React.useEffect(() => { if (initialLoadRef.current) initialLoadRef.current = false; }, []);
 
 	// sync form state -> yaml when UI edits
 	React.useEffect(() => {
@@ -397,11 +687,6 @@ const App: React.FC = () => {
 		return () => window.removeEventListener("keydown", handler);
 	}, []);
 
-	// Handle the completion of the landing screen
-	const handleLandingComplete = React.useCallback(() => {
-		setShowLandingScreen(false);
-	}, []);
-
 	// Theme management (light/dark/system)
 	const getSystemDark = () => (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches);
 	const [themeMode, setThemeMode] = React.useState<'light' | 'dark' | 'system'>(() => {
@@ -476,23 +761,90 @@ const App: React.FC = () => {
 							<h1 className="text-base font-semibold text-slate-12 dark:text-drac-foreground">Connector Builder</h1>
 						</div>
 					</div>
-					<div className="flex items-center gap-3">
-						<ThemeMenu mode={themeMode} effective={effectiveTheme} onChange={setThemeMode} />
-						{!showLandingScreen && (
-							<button
-								type="button"
-								className="rounded-full px-3 py-1.5 text-xs font-medium border border-border text-slate-12 hover:bg-blue-3/40 dark:border-drac-border/50 dark:text-drac-foreground dark:hover:bg-blue-9/20 transition"
-								onClick={() => setShowLandingScreen(true)}
-							>
-								New Connector
-							</button>
-						)}
-					</div>
+				<div className="flex items-center gap-3">
+					{currentConnector && (
+						<div className="flex items-center gap-2 rounded-full border border-border/70 bg-background/80 px-3 py-1.5 text-sm text-slate-12 dark:border-drac-border/60 dark:bg-[#1f232b] dark:text-drac-foreground">
+							{isRenamingConnector ? (
+								<div className="flex items-center gap-2">
+									<input
+										autoFocus
+										className="w-48 rounded-md border border-border bg-surface/70 px-3 py-1 text-sm text-slate-12 dark:border-drac-border/70 dark:bg-[#202530] dark:text-drac-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-7"
+										value={connectorNameDraft}
+										onChange={(e) => setConnectorNameDraft(e.target.value)}
+										onKeyDown={(e) => {
+											if (e.key === 'Enter') {
+												e.preventDefault();
+												commitHeaderRename();
+											} else if (e.key === 'Escape') {
+												cancelHeaderRename();
+											}
+										}}
+										onBlur={commitHeaderRename}
+									/>
+									<button
+										type="button"
+										className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-border bg-blue-9 text-white hover:bg-blue-10"
+										onClick={commitHeaderRename}
+										aria-label="Save name"
+									>
+										<svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+											<path fillRule="evenodd" d="M16.704 5.29a1 1 0 010 1.42l-7.5 7.5a1 1 0 01-1.42 0l-3.5-3.5a1 1 0 111.42-1.42L8.5 11.58l6.79-6.79a1 1 0 011.414 0z" clipRule="evenodd" />
+										</svg>
+									</button>
+									<button
+										type="button"
+										className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-border bg-background text-slate-11 hover:text-red-9 hover:border-red-7 dark:border-drac-border/60 dark:bg-[#1f232b] dark:text-drac-muted"
+										onClick={cancelHeaderRename}
+										aria-label="Cancel rename"
+									>
+										<svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+											<path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+										</svg>
+									</button>
+								</div>
+							) : (
+								<button
+									type="button"
+									className="inline-flex items-center gap-2 rounded-full bg-transparent text-sm font-medium text-slate-12 dark:text-drac-foreground"
+									onClick={beginHeaderRename}
+								>
+									<svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 text-blue-9" viewBox="0 0 20 20" fill="currentColor">
+										<path fillRule="evenodd" d="M5 10a5 5 0 015-5h1a5 5 0 015 5v4a1 1 0 01-1 1H6a1 1 0 01-1-1v-4zm5-3.5A3.5 3.5 0 006.5 10V13h7V10A3.5 3.5 0 0011 6.5h-1z" clipRule="evenodd" />
+									</svg>
+										{currentConnector.name}
+								</button>
+							)}
+						</div>
+					)}
+					<button
+						type="button"
+						className="rounded-full px-3 py-1.5 text-xs font-medium border border-border bg-background text-slate-12 hover:bg-blue-3/40 dark:border-drac-border/50 dark:bg-[#1f232b] dark:text-drac-foreground dark:hover:bg-blue-9/20 transition"
+						onClick={openConnectorLibrary}
+					>
+						Connectors
+					</button>
+					<button
+						type="button"
+						className="rounded-full px-3 py-1.5 text-xs font-medium border border-border bg-background text-slate-12 hover:bg-blue-3/40 dark:border-drac-border/50 dark:bg-[#1f232b] dark:text-drac-foreground dark:hover:bg-blue-9/20 transition disabled:opacity-50 disabled:cursor-not-allowed"
+						onClick={() => currentConnector && handleExportSavedConnector(currentConnector.id)}
+						disabled={!currentConnector}
+					>
+						Export
+					</button>
+					<ThemeMenu mode={themeMode} effective={effectiveTheme} onChange={setThemeMode} />
+				</div>
 				</div>
 			</header>
 			<main className="flex-1 flex w-full gap-6 px-4 py-8 lg:px-6 items-stretch">
 				{showLandingScreen ? (
-					<LandingScreen onComplete={handleLandingComplete} />
+					<LandingScreen
+						onStartNew={handleStartNewConnector}
+						onImportConfig={handleImportConnector}
+						savedConnectors={savedConnectorSummaries}
+						onSelectSaved={handleSelectSavedConnector}
+						onDeleteSaved={handleDeleteSavedConnector}
+						onExportSaved={handleExportSavedConnector}
+					/>
 				) : (
 					<>
 						<section className="w-full max-w-2xl flex flex-col gap-4 rounded-2xl border border-border bg-surface p-6 shadow-soft h-full">
@@ -527,7 +879,7 @@ const App: React.FC = () => {
 											onClick={() => setShowSaveModal(true)}
 											disabled={busy}
 										>
-											Save
+											Export
 										</button>
 									</div>
 								</div>

@@ -1,0 +1,32 @@
+version: 0.1
+source:
+  type: rest
+  base_url: https://api.openweathermap.org/data/2.5
+stream:
+  path: /weather
+  infer_schema: true
+  schema: null
+  pagination:
+    type: none
+  record_selector:
+    field_path: []
+    record_filter: null
+    cast_to_schema_types: false
+  params:
+    appid: "{{ options.api_key }}"
+    lat: "{{ options.latitude | default('40.7128') }}"
+    lon: "{{ options.longitude | default('-74.0060') }}"
+    units: "metric"
+    exclude: "minutely"
+  headers:
+    User-Agent: "Polymo Weather Connector/1.0"
+    Accept: "application/json"
+  error_handler:
+    max_retries: 3
+    retry_statuses: ["5XX", "429", "503"]
+    backoff:
+      initial_delay_seconds: 1.0
+      max_delay_seconds: 30.0
+      multiplier: 2.0
+    retry_on_timeout: true
+    retry_on_connection_errors: true

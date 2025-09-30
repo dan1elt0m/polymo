@@ -1,0 +1,28 @@
+version: 0.1
+source:
+  type: rest
+  base_url: https://restcountries.com/v3.1
+stream:
+  path: /all
+  infer_schema: true
+  schema: null
+  pagination:
+    type: none
+  record_selector:
+    field_path: []
+    record_filter: null
+    cast_to_schema_types: false
+  params:
+    fields: "name,flags"
+  headers:
+    Accept: "application/json"
+  error_handler:
+    max_retries: 2
+    retry_statuses: ["5XX", "429", "503"]
+    backoff:
+      initial_delay_seconds: 1.0
+      max_delay_seconds: 10.0
+      multiplier: 2.0
+    retry_on_timeout: true
+    retry_on_connection_errors: true
+

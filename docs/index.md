@@ -1,6 +1,6 @@
 # Welcome to Polymo
 
-Polymo is a helper that turns everyday web APIs into tables you can analyse. Point it at an API, tell it what you want to grab, and Polymo does the heavy lifting of fetching the data and lining it up neatly.
+Polymo is a helper for pyspark that turns everyday web APIs into tables you can analyse. Point it at an API, tell it what you want to grab, and Polymo does the heavy lifting of fetching the data and lining it up neatly.
 
 ## Why people use Polymo
 - **No custom code required.** Describe your API once in a short, friendly YAML file or through the point-and-click Builder.
@@ -25,6 +25,8 @@ Polymo is a helper that turns everyday web APIs into tables you can analyse. Poi
 3. **Preview the data.** Press the Preview button to see a table of records, the raw API replies, and any error messages.
 4. **Save the connector.** Download the YAML config or write it directly to your project folder. Tokens stay out of the file and are passed in later.
 5. **Use it in Spark.** Load the file with the short code snippet below or copy/paste from the Builder’s tips panel.
+
+The Builder keeps a local library of every connector you work on. Use the header’s connector picker to hop between drafts, open the library to rename or export them, and never worry about losing your place.
 
 ```python
 from pyspark.sql import SparkSession

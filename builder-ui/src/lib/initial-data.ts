@@ -50,10 +50,23 @@ export const INITIAL_FORM_STATE: ConfigFormState = {
   baseUrl: '',
   authType: 'none',
   authToken: '',
+  authApiKeyParamName: 'api_key',
   streamPath: '',
   params: {},
   headers: {},
   paginationType: 'none',
+  paginationPageSize: '',
+  paginationLimitParam: '',
+  paginationOffsetParam: '',
+  paginationStartOffset: '',
+  paginationPageParam: '',
+  paginationStartPage: '',
+  paginationCursorParam: '',
+  paginationCursorPath: '',
+  paginationNextUrlPath: '',
+  paginationCursorHeader: '',
+  paginationInitialCursor: '',
+  paginationStopOnEmptyResponse: true,
   incrementalMode: '',
   incrementalCursorParam: '',
   incrementalCursorField: '',
@@ -77,10 +90,14 @@ export const INITIAL_FORM_STATE: ConfigFormState = {
 
 export const PAGINATION_TYPES = [
   { value: 'none', label: 'None' },
-  { value: 'link_header', label: 'Link Header' },
+  { value: 'offset', label: 'Offset-based' },
+  { value: 'cursor', label: 'Cursor-based' },
+  { value: 'page', label: 'Page-based' },
+  { value: 'link_header', label: 'Link Header (legacy)' },
 ] as const;
 
 export const AUTH_TYPES = [
   { value: 'none', label: 'None' },
   { value: 'bearer', label: 'Bearer Token' },
+  { value: 'api_key', label: 'API Key' },
 ] as const;

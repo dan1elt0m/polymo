@@ -9,11 +9,18 @@ export function formStateToConfig(formState: ConfigFormState): RestSourceConfig 
   const cleanParams: Record<string, any> = {};
   Object.entries(formState.params).forEach(([key, value]) => {
     if (key.trim() && value.trim()) {
-      // Try to parse as number if it looks like one
       const numValue = Number(value);
       cleanParams[key] = !isNaN(numValue) && isFinite(numValue) ? numValue : value;
     }
   });
+
+  // Inject api_key param placeholder if using api_key auth and user hasn't defined it
+  if (formState.authType === 'api_key') {
+    const paramName = (formState.authApiKeyParamName || 'api_key').trim();
+    if (paramName && !(paramName in cleanParams)) {
+      cleanParams[paramName] = `{{ options.${paramName} }}`;
+    }
+  }
 
   // Clean up headers - remove empty values
   const cleanHeaders: Record<string, any> = {};
@@ -35,6 +42,40 @@ export function formStateToConfig(formState: ConfigFormState): RestSourceConfig 
   const parseFloatOrDefault = (value: string, fallback: number): number => {
     const parsed = Number.parseFloat(value);
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+  };
+  const parseOptionalInteger = (
+    value?: string | null,
+    minimum: number | undefined = undefined,
+  ): number | undefined => {
+    if (value === undefined || value === null) {
+      return undefined;
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+    const parsed = Number.parseInt(trimmed, 10);
+    if (!Number.isFinite(parsed)) {
+      return undefined;
+    }
+    if (minimum !== undefined && parsed < minimum) {
+      return undefined;
+    }
+    return parsed;
+  };
+  const parseOptionalPositiveInt = (value?: string | null): number | undefined =>
+    parseOptionalInteger(value, 1);
+  const parseOptionalNonNegativeInt = (value?: string | null): number | undefined =>
+    parseOptionalInteger(value, 0);
+  const parsePathInput = (value?: string | null): string[] | undefined => {
+    if (!value) {
+      return undefined;
+    }
+    const segments = value
+      .split('.')
+      .map((segment) => segment.trim())
+      .filter((segment) => segment.length > 0);
+    return segments.length > 0 ? segments : undefined;
   };
 
   const sanitizedRetryStatuses = (formState.errorHandlerRetryStatuses || [])
@@ -74,9 +115,69 @@ export function formStateToConfig(formState: ConfigFormState): RestSourceConfig 
       path: formState.streamPath,
       params: cleanParams,
       headers: cleanHeaders,
-      pagination: {
-        type: formState.paginationType,
-      },
+      pagination: (() => {
+        const pagination: Record<string, any> = { type: formState.paginationType };
+        if (formState.paginationType !== 'none') {
+          const parsedSize = parseOptionalPositiveInt(formState.paginationPageSize);
+          if (parsedSize !== undefined) {
+            pagination.page_size = parsedSize;
+          }
+          const limitParam = formState.paginationLimitParam?.trim();
+          if (limitParam) {
+            pagination.limit_param = limitParam;
+          }
+          if (formState.paginationStopOnEmptyResponse === false) {
+            pagination.stop_on_empty_response = false;
+          }
+        }
+
+        if (formState.paginationType === 'offset') {
+          const offsetParam = formState.paginationOffsetParam?.trim();
+          if (offsetParam) {
+            pagination.offset_param = offsetParam;
+          }
+          const startOffset = parseOptionalNonNegativeInt(formState.paginationStartOffset);
+          if (startOffset !== undefined) {
+            pagination.start_offset = startOffset;
+          }
+        }
+
+        if (formState.paginationType === 'page') {
+          const pageParam = formState.paginationPageParam?.trim();
+          if (pageParam) {
+            pagination.page_param = pageParam;
+          }
+          const startPage = parseOptionalPositiveInt(formState.paginationStartPage);
+          if (startPage !== undefined) {
+            pagination.start_page = startPage;
+          }
+        }
+
+        if (formState.paginationType === 'cursor') {
+          const cursorParam = formState.paginationCursorParam?.trim();
+          if (cursorParam) {
+            pagination.cursor_param = cursorParam;
+          }
+          const cursorPath = parsePathInput(formState.paginationCursorPath);
+          if (cursorPath) {
+            pagination.cursor_path = cursorPath;
+          }
+          const nextUrlPath = parsePathInput(formState.paginationNextUrlPath);
+          if (nextUrlPath) {
+            pagination.next_url_path = nextUrlPath;
+          }
+          const cursorHeader = formState.paginationCursorHeader?.trim();
+          if (cursorHeader) {
+            pagination.cursor_header = cursorHeader;
+          }
+          const initialCursor = formState.paginationInitialCursor?.trim();
+          if (initialCursor) {
+            pagination.initial_cursor = initialCursor;
+          }
+        }
+
+        return pagination;
+      })(),
       incremental: {
         mode: formState.incrementalMode || null,
         cursor_param: formState.incrementalCursorParam || null,
@@ -141,6 +242,37 @@ export function configToFormState(config: RestSourceConfig): ConfigFormState {
     params: stringParams,
     headers: stringHeaders,
     paginationType: config.stream.pagination?.type || 'none',
+    paginationPageSize: config.stream.pagination?.page_size
+      ? String(config.stream.pagination.page_size)
+      : '',
+    paginationLimitParam: config.stream.pagination?.limit_param || '',
+    paginationOffsetParam: config.stream.pagination?.offset_param || '',
+    paginationStartOffset:
+      config.stream.pagination?.start_offset !== undefined &&
+      config.stream.pagination?.start_offset !== null &&
+      config.stream.pagination?.start_offset !== 0
+        ? String(config.stream.pagination.start_offset)
+        : '',
+    paginationPageParam: config.stream.pagination?.page_param || '',
+    paginationStartPage:
+      config.stream.pagination?.start_page !== undefined &&
+      config.stream.pagination?.start_page !== null &&
+      config.stream.pagination?.start_page !== 1
+        ? String(config.stream.pagination.start_page)
+        : '',
+    paginationCursorParam: config.stream.pagination?.cursor_param || '',
+    paginationCursorPath:
+      config.stream.pagination?.cursor_path && config.stream.pagination.cursor_path.length > 0
+        ? config.stream.pagination.cursor_path.join('.')
+        : '',
+    paginationNextUrlPath:
+      config.stream.pagination?.next_url_path && config.stream.pagination.next_url_path.length > 0
+        ? config.stream.pagination.next_url_path.join('.')
+        : '',
+    paginationCursorHeader: config.stream.pagination?.cursor_header || '',
+    paginationInitialCursor: config.stream.pagination?.initial_cursor || '',
+    paginationStopOnEmptyResponse:
+      config.stream.pagination?.stop_on_empty_response === false ? false : true,
     incrementalMode: config.stream.incremental?.mode || '',
     incrementalCursorParam: config.stream.incremental?.cursor_param || '',
     incrementalCursorField: config.stream.incremental?.cursor_field || '',

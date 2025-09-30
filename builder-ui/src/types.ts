@@ -1,12 +1,24 @@
 // Configuration types matching the Python backend schema
 
 export interface AuthConfig {
-  type: 'none' | 'bearer';
+  type: 'none' | 'bearer' | 'api_key';
   token?: string | null;
 }
 
 export interface PaginationConfig {
-  type: 'none' | 'link_header';
+  type: 'none' | 'link_header' | 'offset' | 'cursor' | 'page';
+  page_size?: number | null;
+  limit_param?: string | null;
+  offset_param?: string | null;
+  start_offset?: number | null;
+  page_param?: string | null;
+  start_page?: number | null;
+  cursor_param?: string | null;
+  cursor_path?: string[] | null;
+  next_url_path?: string[] | null;
+  cursor_header?: string | null;
+  initial_cursor?: string | null;
+  stop_on_empty_response?: boolean | null;
 }
 
 export interface IncrementalConfig {
@@ -92,11 +104,25 @@ export interface RawPagePayload {
 export interface ConfigFormState {
   version: string;
   baseUrl: string;
-  authType: 'none' | 'bearer';
+  authType: 'none' | 'bearer' | 'api_key';
   authToken: string;
+  authApiKeyParamName?: string; // name of the query parameter for api_key auth
   streamPath: string;
   params: Record<string, string>;
-  paginationType: 'none' | 'link_header';
+  paginationType: 'none' | 'link_header' | 'offset' | 'cursor' | 'page';
+  // Added pagination input fields used by the Builder UI (not yet serialized to backend config)
+  paginationPageSize?: string; // number as string for input control
+  paginationLimitParam?: string; // e.g. "limit"
+  paginationOffsetParam?: string;
+  paginationStartOffset?: string;
+  paginationPageParam?: string;
+  paginationStartPage?: string;
+  paginationCursorParam?: string;
+  paginationCursorPath?: string;
+  paginationNextUrlPath?: string;
+  paginationCursorHeader?: string;
+  paginationInitialCursor?: string;
+  paginationStopOnEmptyResponse: boolean;
   incrementalMode: string;
   incrementalCursorParam: string;
   incrementalCursorField: string;
@@ -117,6 +143,18 @@ export interface ConfigFormState {
   errorHandlerBackoffMultiplier: string;
   errorHandlerRetryOnTimeout: boolean;
   errorHandlerRetryOnConnectionErrors: boolean;
+}
+
+export interface SavedConnector {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  formState: ConfigFormState;
+  yaml: string;
+  lastEdited: 'ui' | 'yaml';
+  builderView: 'ui' | 'yaml';
+  readerOptions: Record<string, string>;
 }
 
 // Added interfaces used by atoms and components

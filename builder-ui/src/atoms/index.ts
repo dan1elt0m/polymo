@@ -1,5 +1,6 @@
 import { atom } from "jotai";
-import type { ConfigFormState, SampleState, StatusState } from "../types";
+import { atomWithStorage, createJSONStorage } from "jotai/utils";
+import type { ConfigFormState, SampleState, StatusState, SavedConnector } from "../types";
 import { DEFAULT_ERROR_HANDLER, INITIAL_FORM_STATE } from "../lib/initial-data";
 import { formStateToConfig } from "../lib/transform";
 import {
@@ -18,7 +19,7 @@ export const statusAtom = atom<StatusState>({ tone: "info", message: "Ready to c
 export const isValidatingAtom = atom(false);
 export const isSavingAtom = atom(false);
 
-const defaultSampleState: SampleState = {
+export const DEFAULT_SAMPLE_STATE: SampleState = {
 	data: [],
 	dtypes: [],
 	stream: "",
@@ -31,7 +32,7 @@ const defaultSampleState: SampleState = {
 	rawPages: [],
 	restError: null,
 };
-export const sampleAtom = atom<SampleState>(defaultSampleState);
+export const sampleAtom = atom<SampleState>(DEFAULT_SAMPLE_STATE);
 
 export const streamOptionsAtom = atom((get) => {
 	const state = get(configFormStateAtom);
@@ -154,5 +155,34 @@ export const runtimeOptionsAtom = atom((get) => {
     manualOptions['incremental_memory_state'] = 'false';
   }
 
+  // Add API key option directly so users don't have to manually add it as a Spark reader option.
+  if (formState.authType === 'api_key') {
+    const paramName = (formState.authApiKeyParamName || 'api_key').trim();
+    const token = formState.authToken.trim();
+    if (paramName && token) {
+      manualOptions[paramName] = token;
+    }
+  }
+
   return manualOptions;
 });
+
+const savedConnectorsStorage = typeof window !== 'undefined'
+	? createJSONStorage<SavedConnector[]>(() => localStorage)
+	: undefined;
+
+export const savedConnectorsAtom = atomWithStorage<SavedConnector[]>(
+	'polymo.saved_connectors.v1',
+	[],
+	savedConnectorsStorage,
+);
+
+const activeConnectorStorage = typeof window !== 'undefined'
+	? createJSONStorage<string | null>(() => localStorage)
+	: undefined;
+
+export const activeConnectorIdAtom = atomWithStorage<string | null>(
+	'polymo.active_connector_id.v1',
+	null,
+	activeConnectorStorage,
+);
