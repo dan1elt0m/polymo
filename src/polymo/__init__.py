@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from pyspark.sql import SparkSession
 
-from .config import RestSourceConfig, config_to_dict, dump_config, load_config, parse_config
+from .config import (
+    RestSourceConfig,
+    config_to_dict,
+    dump_config,
+    load_config,
+    parse_config,
+)
 from .datasource import ApiReader
 
 __all__ = [

@@ -7,21 +7,29 @@ from typing import Sequence
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="polymo", description="Utilities for the polymo toolkit")
+    parser = argparse.ArgumentParser(
+        prog="polymo", description="Utilities for the polymo toolkit"
+    )
     subparsers = parser.add_subparsers(dest="command")
     bld_parser = subparsers.add_parser("builder", help="Launch the local builder UI")
-    bld_parser.add_argument("--host", default="127.0.0.1", help="Host to bind (default: %(default)s)")
-    bld_parser.add_argument("--port", type=int, default=8000, help="Port to bind (default: %(default)s)")
+    bld_parser.add_argument(
+        "--host", default="127.0.0.1", help="Host to bind (default: %(default)s)"
+    )
+    bld_parser.add_argument(
+        "--port", type=int, default=8000, help="Port to bind (default: %(default)s)"
+    )
     bld_parser.add_argument(
         "--reload",
         action="store_true",
         help="Enable auto-reload (useful during development)",
     )
 
+    from polymo.scripts.smoke import _default_config_path  # avoid circular imports
+
     smoke_parser = subparsers.add_parser("smoke", help="Launch the smoke test")
     smoke_parser.add_argument(
         "--config",
-        default="examples/jsonplaceholder.yml",
+        default=str(_default_config_path()),
         help="Path to the YAML config file (default: %(default)s)",
     )
     smoke_parser.add_argument(
@@ -40,16 +48,31 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=5,
         help="Number of rows to show from the resulting DataFrame",
     )
+    smoke_parser.add_argument(
+        "--streaming",
+        action="store_true",
+        help="Run the smoke test using spark.readStream",
+    )
+    smoke_parser.add_argument(
+        "--stream-batch-size",
+        type=int,
+        default=100,
+        help="Rows per micro-batch when --streaming is enabled (default: %(default)s)",
+    )
 
     args = parser.parse_args(argv)
 
     # Check Spark Version
     import pyspark
-    if not pyspark.__version__.startswith('4.'):
-        raise ImportError("pyspark>=4.0.0 is required: run pip install 'polymo[builder]'")
+
+    if not pyspark.__version__.startswith("4."):
+        raise ImportError(
+            "pyspark>=4.0.0 is required: run pip install 'polymo[builder]'"
+        )
 
     if args.command == "builder":
         import uvicorn
+
         uvicorn.run(
             "polymo.builder.app:create_app",
             host=args.host,
@@ -60,6 +83,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     elif args.command == "smoke":
         from polymo.scripts.smoke import main as smoke_main
+
         smoke_main(args)
         return 0
 

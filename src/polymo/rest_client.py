@@ -116,11 +116,12 @@ class _RetryPolicy:
     def next_delay(self, retries_attempted: int) -> float:
         base = self._config.backoff.initial_delay_seconds
         multiplier = self._config.backoff.multiplier
-        delay = base * (multiplier ** retries_attempted)
+        delay = base * (multiplier**retries_attempted)
         max_delay = self._config.backoff.max_delay_seconds
         if max_delay > 0:
             delay = min(delay, max_delay)
         return max(delay, 0.0)
+
 
 @dataclass
 class RestClient:
@@ -140,7 +141,9 @@ class RestClient:
             headers["Authorization"] = f"Bearer {access_token}"
             self._oauth2_token = access_token
 
-        self._client = httpx.Client(base_url=self.base_url, headers=headers, timeout=self.timeout)
+        self._client = httpx.Client(
+            base_url=self.base_url, headers=headers, timeout=self.timeout
+        )
 
     def close(self) -> None:
         self._client.close()
@@ -173,10 +176,14 @@ class RestClient:
             "raw_params": dict(stream.params or {}),
         }
 
-        rendered_params = {
-            key: _render_template(value, template_context)
-            for key, value in stream.params.items()
-        } if stream.params else {}
+        rendered_params = (
+            {
+                key: _render_template(value, template_context)
+                for key, value in stream.params.items()
+            }
+            if stream.params
+            else {}
+        )
 
         template_context["params"] = rendered_params
 
@@ -299,15 +306,25 @@ class RestClient:
 
         retry_policy = _RetryPolicy(stream.error_handler)
 
-        window_page = getattr(pagination_window, "page", None) if pagination_window else None
-        window_offset = getattr(pagination_window, "offset", None) if pagination_window else None
-        max_pages = getattr(pagination_window, "max_pages", None) if pagination_window else None
+        window_page = (
+            getattr(pagination_window, "page", None) if pagination_window else None
+        )
+        window_offset = (
+            getattr(pagination_window, "offset", None) if pagination_window else None
+        )
+        max_pages = (
+            getattr(pagination_window, "max_pages", None) if pagination_window else None
+        )
         extra_params = (
             dict(pagination_window.extra_params)
             if pagination_window and pagination_window.extra_params
             else {}
         )
-        path_override = getattr(pagination_window, "path_override", None) if pagination_window else None
+        path_override = (
+            getattr(pagination_window, "path_override", None)
+            if pagination_window
+            else None
+        )
 
         base_path = path_override or initial_path
 
@@ -326,13 +343,27 @@ class RestClient:
         page_number = pagination.start_page if pagination.type == "page" else 1
         if window_page is not None and pagination.type == "page":
             page_number = window_page
-        cursor_to_apply: Optional[str] = pagination.initial_cursor if pagination.type == "cursor" else None
+        cursor_to_apply: Optional[str] = (
+            pagination.initial_cursor if pagination.type == "cursor" else None
+        )
 
-        if pagination.type == "offset" and pagination.limit_param and pagination.page_size is not None:
+        if (
+            pagination.type == "offset"
+            and pagination.limit_param
+            and pagination.page_size is not None
+        ):
             query_params.setdefault(pagination.limit_param, pagination.page_size)
-        if pagination.type == "page" and pagination.limit_param and pagination.page_size is not None:
+        if (
+            pagination.type == "page"
+            and pagination.limit_param
+            and pagination.page_size is not None
+        ):
             query_params.setdefault(pagination.limit_param, pagination.page_size)
-        if pagination.type == "cursor" and pagination.cursor_param and cursor_to_apply is not None:
+        if (
+            pagination.type == "cursor"
+            and pagination.cursor_param
+            and cursor_to_apply is not None
+        ):
             query_params[pagination.cursor_param] = cursor_to_apply
             cursor_to_apply = None
 
@@ -369,7 +400,9 @@ class RestClient:
                 except json.JSONDecodeError as exc:
                     raise ValueError("Expected API response to be valid JSON") from exc
 
-                records = _extract_records(payload, stream.record_selector, declared_schema)
+                records = _extract_records(
+                    payload, stream.record_selector, declared_schema
+                )
                 if not isinstance(records, list):
                     raise ValueError("Expected API response to be a list of records")
 
@@ -415,7 +448,9 @@ class RestClient:
                 elif pagination.type == "cursor":
                     next_link = None
                     if pagination.next_url_path:
-                        next_link = _first_value_from_path(payload, pagination.next_url_path)
+                        next_link = _first_value_from_path(
+                            payload, pagination.next_url_path
+                        )
                     if isinstance(next_link, str) and next_link:
                         if pagination.stop_on_empty_response and not records:
                             next_url = None
@@ -424,7 +459,9 @@ class RestClient:
                         else:
                             parsed = urlparse(next_link)
                             # Include query params only when following a path without its own query.
-                            include_params = not (parsed.scheme or parsed.netloc or parsed.query)
+                            include_params = not (
+                                parsed.scheme or parsed.netloc or parsed.query
+                            )
                             next_url = next_link
                             cursor_to_apply = None
                     else:
@@ -469,7 +506,9 @@ class RestClient:
                     headers=request_headers,
                 )
             except (httpx.TimeoutException, httpx.RequestError) as exc:
-                if policy.should_retry_exception(exc) and policy.can_retry(retries_attempted):
+                if policy.should_retry_exception(exc) and policy.can_retry(
+                    retries_attempted
+                ):
                     delay = policy.next_delay(retries_attempted)
                     retries_attempted += 1
                     if delay > 0:
@@ -479,7 +518,9 @@ class RestClient:
 
             status_code = response.status_code
             if status_code >= 400:
-                if policy.should_retry_status(status_code) and policy.can_retry(retries_attempted):
+                if policy.should_retry_status(status_code) and policy.can_retry(
+                    retries_attempted
+                ):
                     delay = policy.next_delay(retries_attempted)
                     retries_attempted += 1
                     response.close()
@@ -586,7 +627,7 @@ def _filter_records(records: List[Any], expression: str) -> List[Any]:
         return records
     if expr not in _FILTER_CACHE:
         stripped = expr
-        if expr.startswith("{{") and expr.endswith("}}"): 
+        if expr.startswith("{{") and expr.endswith("}}"):
             stripped = expr[2:-2].strip()
         try:
             _FILTER_CACHE[expr] = _FILTER_ENV.compile_expression(stripped)
@@ -692,7 +733,9 @@ def _cast_value(value: Any, datatype: Any) -> Any:
         return value
     if isinstance(datatype, MapType):
         if isinstance(value, Mapping):
-            return {key: _cast_value(val, datatype.valueType) for key, val in value.items()}
+            return {
+                key: _cast_value(val, datatype.valueType) for key, val in value.items()
+            }
         return value
     if isinstance(datatype, StructType):
         if isinstance(value, Mapping):
@@ -850,7 +893,11 @@ class _IncrementalTracker:
                     self._initial_value = str(fallback)
 
     def apply_to_params(self, params: Dict[str, Any]) -> None:
-        if not self._enabled or self._initial_value is None or self._cursor_param is None:
+        if (
+            not self._enabled
+            or self._initial_value is None
+            or self._cursor_param is None
+        ):
             return
         params.setdefault(self._cursor_param, self._initial_value)
 
@@ -985,7 +1032,9 @@ def _read_remote_json(path: str) -> Dict[str, Any]:
     except FileNotFoundError:
         return {}
     except Exception as exc:  # pragma: no cover - depends on backend
-        raise RuntimeError(f"Failed to read incremental state from {path}: {exc}") from exc
+        raise RuntimeError(
+            f"Failed to read incremental state from {path}: {exc}"
+        ) from exc
 
     try:
         payload = json.loads(raw)
@@ -1013,13 +1062,17 @@ def _write_remote_text(path: str, data: str) -> None:
                 except FileExistsError:
                     pass
     except Exception as exc:  # pragma: no cover - depends on backend
-        raise RuntimeError(f"Failed to prepare incremental state directory for {path}: {exc}") from exc
+        raise RuntimeError(
+            f"Failed to prepare incremental state directory for {path}: {exc}"
+        ) from exc
 
     try:
         with fs.open(remote_path, mode="w") as handle:
             handle.write(data)
     except Exception as exc:  # pragma: no cover - depends on backend
-        raise RuntimeError(f"Failed to write incremental state to {path}: {exc}") from exc
+        raise RuntimeError(
+            f"Failed to write incremental state to {path}: {exc}"
+        ) from exc
 
 
 def _get_remote_filesystem(path: str):

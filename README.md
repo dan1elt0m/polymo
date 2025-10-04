@@ -49,6 +49,27 @@ df = (
 df.show()
 ```
 
+### Streaming too
+
+Structured Streaming works out of the box:
+
+```python
+stream_df = (
+    spark.readStream.format("polymo")
+    .option("config_path", "./config.yml")
+    .option("stream_batch_size", 100)
+    .option("stream_progress_path", "/tmp/polymo-progress.json")
+    .load()
+)
+
+query = stream_df.writeStream.format("memory").outputMode("append").queryName("polymo")
+query.start()
+```
+
+Use the same runtime options as `read` (tokens, OAuth2 client secrets, incremental state paths, etc.). `stream_batch_size` caps the number of rows per micro-batch and `stream_progress_path` stores a tiny JSON file so restarts resume from the same offset.
+
+Want a quick check without writing code? Run `polymo smoke --streaming` and the CLI will execute a one-off micro-batch using the bundled JSONPlaceholder example (or a YAML you pass in).
+
 ### Incremental syncs in one minute
 - Add `cursor_param` and `cursor_field` under `incremental:` in your YAML to tell Polymo which API field to track.
 - Pass `.option("incremental_state_path", ...)` when reading with Spark. Local paths and remote URLs (S3, GCS, Azure, etc.) work out of the box.
@@ -83,6 +104,7 @@ stream:
 - `src/polymo/` keeps the logic that speaks to APIs and hands data to Spark.
 - `polymo builder` is a small web app (FastAPI + React) that guides you through every step. No need to run npm, the app is bundled with pip and ready to go.
 - `examples/` contains ready-made configs you can copy, tweak, and use for smoke tests.
+- `tests/test_datasource.py::test_stream_reader_batches` exercises the streaming reader end to end; run it with `pytest -k stream_reader_batches` for a quick smoke test.
 
 ## Run the Builder in Docker
 - Build the dev-friendly image and launch the Builder with hot reload:

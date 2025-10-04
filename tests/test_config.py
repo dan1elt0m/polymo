@@ -43,7 +43,6 @@ stream:
     assert config.stream.error_handler.retry_statuses == ("5XX", "429")
 
 
-
 def test_load_config_missing_file(tmp_path: Path) -> None:
     config_path = tmp_path / "missing.yml"
 

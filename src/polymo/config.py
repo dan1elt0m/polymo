@@ -21,7 +21,8 @@ from pyspark.sql.types import (
     StringType,
     StructField,
     StructType,
-    TimestampType, VariantType,
+    TimestampType,
+    VariantType,
 )
 
 
@@ -333,7 +334,11 @@ def _parse_auth_config(
     runtime_token: Optional[str],
     runtime_options: Dict[str, Any],
 ) -> AuthConfig:
-    token_value = runtime_token.strip() if isinstance(runtime_token, str) and runtime_token.strip() else None
+    token_value = (
+        runtime_token.strip()
+        if isinstance(runtime_token, str) and runtime_token.strip()
+        else None
+    )
 
     if raw_auth is None:
         if token_value:
@@ -355,7 +360,9 @@ def _parse_auth_config(
         raw_token = raw_token.strip() if isinstance(raw_token, str) else None
         token = token_value or raw_token
         if not token:
-            raise ConfigError("Bearer auth requires a token supplied via config or runtime options")
+            raise ConfigError(
+                "Bearer auth requires a token supplied via config or runtime options"
+            )
         return AuthConfig(type="bearer", token=token)
 
     # OAuth2 client credentials
@@ -370,7 +377,11 @@ def _parse_auth_config(
     client_secret = raw_auth.get("client_secret")
     if isinstance(client_secret, str):
         client_secret = client_secret.strip() or None
-        if client_secret and client_secret.startswith("{{") and client_secret.endswith("}}"):
+        if (
+            client_secret
+            and client_secret.startswith("{{")
+            and client_secret.endswith("}}")
+        ):
             client_secret = None
     elif client_secret is not None:
         client_secret = str(client_secret)
@@ -404,13 +415,19 @@ def _parse_auth_config(
         raise ConfigError("'source.auth.scope' must be a string or list of strings")
 
     audience_raw = raw_auth.get("audience")
-    audience = audience_raw.strip() if isinstance(audience_raw, str) and audience_raw.strip() else None
+    audience = (
+        audience_raw.strip()
+        if isinstance(audience_raw, str) and audience_raw.strip()
+        else None
+    )
 
     extra_params_raw = raw_auth.get("extra_params")
     extra_params: Dict[str, Any] = {}
     if extra_params_raw is not None:
         if not isinstance(extra_params_raw, Mapping):
-            raise ConfigError("'source.auth.extra_params' must be a mapping when provided")
+            raise ConfigError(
+                "'source.auth.extra_params' must be a mapping when provided"
+            )
         for key, value in extra_params_raw.items():
             extra_params[str(key)] = value
 
@@ -434,15 +451,17 @@ def _parse_stream(raw: Any) -> StreamConfig:
     # Check if we're using endpoint partitioning
     partition_data = raw.get("partition", {})
     using_endpoint_partitioning = (
-        isinstance(partition_data, dict) and
-        partition_data.get("strategy") == "endpoints" and
-        partition_data.get("endpoints")
+        isinstance(partition_data, dict)
+        and partition_data.get("strategy") == "endpoints"
+        and partition_data.get("endpoints")
     )
 
     # Only validate path if not using endpoint partitioning or if path is provided
     if path is None:
         if not using_endpoint_partitioning:
-            raise ConfigError("Stream 'path' is required unless using endpoint partitioning")
+            raise ConfigError(
+                "Stream 'path' is required unless using endpoint partitioning"
+            )
         # Use a placeholder path that will be overridden by endpoint partitioning
         path = "/"
     elif not isinstance(path, str) or not path.startswith("/"):
@@ -524,19 +543,31 @@ def _parse_pagination(raw: Any) -> PaginationConfig:
         raw.get("start_offset"), "pagination.start_offset", minimum=0, default=0
     )
     page_param = _maybe_str(raw.get("page_param"), "pagination.page_param")
-    start_page = _maybe_int(raw.get("start_page"), "pagination.start_page", minimum=1, default=1)
+    start_page = _maybe_int(
+        raw.get("start_page"), "pagination.start_page", minimum=1, default=1
+    )
     cursor_param = _maybe_str(raw.get("cursor_param"), "pagination.cursor_param")
     cursor_path = _maybe_path(raw.get("cursor_path"), "pagination.cursor_path")
     next_url_path = _maybe_path(raw.get("next_url_path"), "pagination.next_url_path")
     cursor_header = _maybe_str(raw.get("cursor_header"), "pagination.cursor_header")
     initial_cursor = _maybe_str(raw.get("initial_cursor"), "pagination.initial_cursor")
     stop_on_empty = _maybe_bool(
-        raw.get("stop_on_empty_response"), "pagination.stop_on_empty_response", default=True
+        raw.get("stop_on_empty_response"),
+        "pagination.stop_on_empty_response",
+        default=True,
     )
-    total_pages_path = _maybe_path(raw.get("total_pages_path"), "pagination.total_pages_path")
-    total_pages_header = _maybe_str(raw.get("total_pages_header"), "pagination.total_pages_header")
-    total_records_path = _maybe_path(raw.get("total_records_path"), "pagination.total_records_path")
-    total_records_header = _maybe_str(raw.get("total_records_header"), "pagination.total_records_header")
+    total_pages_path = _maybe_path(
+        raw.get("total_pages_path"), "pagination.total_pages_path"
+    )
+    total_pages_header = _maybe_str(
+        raw.get("total_pages_header"), "pagination.total_pages_header"
+    )
+    total_records_path = _maybe_path(
+        raw.get("total_records_path"), "pagination.total_records_path"
+    )
+    total_records_header = _maybe_str(
+        raw.get("total_records_header"), "pagination.total_records_header"
+    )
 
     if pag_type == "offset":
         if offset_param is None:
@@ -620,7 +651,11 @@ def _pagination_to_dict(config: PaginationConfig) -> Dict[str, Any]:
 
 
 def _maybe_int(
-    value: Any, field: str, *, minimum: Optional[int] = None, default: Optional[int] = None
+    value: Any,
+    field: str,
+    *,
+    minimum: Optional[int] = None,
+    default: Optional[int] = None,
 ) -> Optional[int]:
     if value is None:
         return default
@@ -705,15 +740,21 @@ def _parse_record_selector(raw: Any) -> RecordSelectorConfig:
         field_path = []
         for entry in field_path_raw:
             if not isinstance(entry, str) or not entry.strip():
-                raise ConfigError("Each entry in 'record_selector.field_path' must be a non-empty string")
+                raise ConfigError(
+                    "Each entry in 'record_selector.field_path' must be a non-empty string"
+                )
             field_path.append(entry.strip())
     else:
-        raise ConfigError("'record_selector.field_path' must be a list of strings or a string")
+        raise ConfigError(
+            "'record_selector.field_path' must be a list of strings or a string"
+        )
 
     record_filter = raw.get("record_filter")
     if record_filter is not None:
         if not isinstance(record_filter, str) or not record_filter.strip():
-            raise ConfigError("'record_selector.record_filter' must be a non-empty string when provided")
+            raise ConfigError(
+                "'record_selector.record_filter' must be a non-empty string when provided"
+            )
         record_filter = record_filter.strip()
 
     cast_to_schema_types = bool(raw.get("cast_to_schema_types", False))
@@ -740,16 +781,24 @@ def _parse_error_handler(raw: Any) -> ErrorHandlerConfig:
         retry_statuses = _default_retry_statuses()
     else:
         if not isinstance(retry_statuses_raw, list):
-            raise ConfigError("'error_handler.retry_statuses' must be a list when provided")
-        retry_statuses = tuple(_normalize_status_spec(value) for value in retry_statuses_raw)
+            raise ConfigError(
+                "'error_handler.retry_statuses' must be a list when provided"
+            )
+        retry_statuses = tuple(
+            _normalize_status_spec(value) for value in retry_statuses_raw
+        )
 
     retry_on_timeout = raw.get("retry_on_timeout", True)
     if not isinstance(retry_on_timeout, bool):
-        raise ConfigError("'error_handler.retry_on_timeout' must be a boolean when provided")
+        raise ConfigError(
+            "'error_handler.retry_on_timeout' must be a boolean when provided"
+        )
 
     retry_on_connection_errors = raw.get("retry_on_connection_errors", True)
     if not isinstance(retry_on_connection_errors, bool):
-        raise ConfigError("'error_handler.retry_on_connection_errors' must be a boolean when provided")
+        raise ConfigError(
+            "'error_handler.retry_on_connection_errors' must be a boolean when provided"
+        )
 
     backoff_raw = raw.get("backoff")
     if backoff_raw is None:
@@ -820,19 +869,27 @@ def _parse_partition(raw: Any) -> PartitionConfig:
     if strategy == "param_range":
         param = _maybe_str(raw.get("param"), "partition.param")
         if not param:
-            raise ConfigError("'partition.param' must be provided for param_range strategy")
+            raise ConfigError(
+                "'partition.param' must be provided for param_range strategy"
+            )
 
         range_start = raw.get("range_start")
         range_end = raw.get("range_end")
 
         if range_start is None:
-            raise ConfigError("'partition.range_start' must be provided for param_range strategy")
+            raise ConfigError(
+                "'partition.range_start' must be provided for param_range strategy"
+            )
         if range_end is None:
-            raise ConfigError("'partition.range_end' must be provided for param_range strategy")
+            raise ConfigError(
+                "'partition.range_end' must be provided for param_range strategy"
+            )
 
         range_kind = raw.get("range_kind", "numeric")
         if range_kind not in {"numeric", "date"}:
-            raise ConfigError("'partition.range_kind' must be either 'numeric' or 'date'")
+            raise ConfigError(
+                "'partition.range_kind' must be either 'numeric' or 'date'"
+            )
 
         # Parse step if provided
         if "range_step" in raw:
@@ -842,13 +899,19 @@ def _parse_partition(raw: Any) -> PartitionConfig:
             range_step = step_value
 
         # Optional templates
-        value_template = _maybe_str(raw.get("value_template"), "partition.value_template")
-        extra_template = _maybe_str(raw.get("extra_template"), "partition.extra_template")
+        value_template = _maybe_str(
+            raw.get("value_template"), "partition.value_template"
+        )
+        extra_template = _maybe_str(
+            raw.get("extra_template"), "partition.extra_template"
+        )
 
     elif strategy == "endpoints":
         raw_endpoints = raw.get("endpoints")
         if not raw_endpoints:
-            raise ConfigError("'partition.endpoints' must be provided for endpoints strategy")
+            raise ConfigError(
+                "'partition.endpoints' must be provided for endpoints strategy"
+            )
 
         if isinstance(raw_endpoints, str):
             # Handle comma-separated string format
@@ -861,11 +924,15 @@ def _parse_partition(raw: Any) -> PartitionConfig:
             endpoint_list = []
             for endpoint in raw_endpoints:
                 if not isinstance(endpoint, str) or not endpoint.strip():
-                    raise ConfigError("Each endpoint in 'partition.endpoints' must be a non-empty string")
+                    raise ConfigError(
+                        "Each endpoint in 'partition.endpoints' must be a non-empty string"
+                    )
                 endpoint_list.append(endpoint.strip())
             endpoints = tuple(endpoint_list)
         else:
-            raise ConfigError("'partition.endpoints' must be a list of strings or a comma-separated string")
+            raise ConfigError(
+                "'partition.endpoints' must be a list of strings or a comma-separated string"
+            )
 
     return PartitionConfig(
         strategy=strategy,
@@ -879,7 +946,6 @@ def _parse_partition(raw: Any) -> PartitionConfig:
         extra_template=extra_template,
         endpoints=endpoints,
     )
-
 
 
 def _normalize_status_spec(value: Any) -> str:
@@ -898,7 +964,9 @@ def _normalize_status_spec(value: Any) -> str:
                 raise ConfigError("Pattern status codes must look like '5XX'")
             bucket = int(text[0])
             if bucket < 1 or bucket > 5:
-                raise ConfigError("Pattern status codes must be between '1XX' and '5XX'")
+                raise ConfigError(
+                    "Pattern status codes must be between '1XX' and '5XX'"
+                )
             return f"{bucket}XX"
         if text.isdigit():
             code = int(text)
@@ -946,7 +1014,10 @@ def parse_schema_struct(schema_text: str) -> StructType:
         try:
             return _parse_ddl_without_spark(schema_text)
         except Exception as fallback_exc:
-            raise ValueError(f"Unable to parse schema: {fallback_exc}") from original_exc
+            raise ValueError(
+                f"Unable to parse schema: {fallback_exc}"
+            ) from original_exc
+
 
 def _coerce_env(value: Any) -> Any:
     if isinstance(value, str) and value.startswith("${env:") and value.endswith("}"):
@@ -957,6 +1028,7 @@ def _coerce_env(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _coerce_env(item) for key, item in value.items()}
     return value
+
 
 def _resolve_env(name: str) -> str:
     from os import getenv

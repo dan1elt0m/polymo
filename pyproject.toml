@@ -48,6 +48,7 @@ smoke = [
 [dependency-groups]
 dev = [
     "pytest>=8.4.2",
+    "ruff>=0.13.3",
 ]
 docs = [
     "mkdocs>=1.4.2",
@@ -71,3 +72,8 @@ Homepage = "https://github.com/dan1elt0m/polymo"
 Repository = "https://github.com/dan1elt0m/polymo.git"
 Documentation = "https://dan1elt0m.github.io/polymo/"
 Issues = "https://github.com/dan1elt0m/polymo/issues"
+
+[tool.pytest.ini_options]
+markers = [
+    "smoke: quick streaming smoke test",
+]

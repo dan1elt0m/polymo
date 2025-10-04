@@ -247,6 +247,25 @@ For OAuth2, supply the client secret the same way: `.option("oauth_client_secret
 
 ## Putting it all together
 
+### Structured Streaming
+
+Polymo can also act as a streaming source. Point `spark.readStream` at the same YAML file and supply any runtime options you would normally pass to `read`:
+
+```python
+spark.readStream.format("polymo") \
+  .option("config_path", "./jsonplaceholder_endpoints.yml") \
+  .option("oauth_client_secret", os.environ["CLIENT_SECRET"]) \
+  .option("stream_batch_size", 100) \
+  .option("stream_progress_path", "/tmp/polymo-progress.json") \
+  .load()
+```
+
+- `stream_batch_size` controls how many records are fetched per micro-batch (defaults to 100).
+- `stream_progress_path` stores a tiny JSON file with the last processed offset so the next query run resumes where it left off.
+- Incremental options such as `incremental_state_path` still apply and are the recommended way to avoid re-processing old records.
+
+All of the authentication rules above still apply—use `.option("token", ...)` for bearer tokens and `.option("oauth_client_secret", ...)` for OAuth2.
+
 Here is a fuller example, annotated with comments:
 
 ```yaml

@@ -6,11 +6,17 @@ import json
 import math
 from dataclasses import replace
 from datetime import datetime, timedelta
-from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence
+from pathlib import Path
+from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple
 
 import pyarrow as pa
 from pyspark.sql import SparkSession
-from pyspark.sql.datasource import DataSource, DataSourceReader, InputPartition
+from pyspark.sql.datasource import (
+    DataSource,
+    DataSourceReader,
+    DataSourceStreamReader,
+    InputPartition,
+)
 from pyspark.sql.types import (
     BooleanType,
     DoubleType,
@@ -21,7 +27,13 @@ from pyspark.sql.types import (
     _parse_datatype_string,
 )
 
-from .config import ConfigError, PaginationConfig, PartitionConfig, RestSourceConfig, load_config
+from .config import (
+    ConfigError,
+    PaginationConfig,
+    PartitionConfig,
+    RestSourceConfig,
+    load_config,
+)
 from .rest_client import PaginationWindow, RestClient, RestPage
 
 
@@ -51,12 +63,24 @@ class ApiReader(DataSource):
     def reader(self, schema: StructType) -> DataSourceReader:
         return RestDataSourceReader(self._config, self.schema())
 
+    def streamReader(self, schema: StructType) -> DataSourceStreamReader:
+        return RestDataSourceStreamReader(self._config, self.schema())
+
 
 class RestInputPartition(InputPartition):
-    def __init__(self, config: RestSourceConfig, window: Optional[PaginationWindow] = None) -> None:
+    def __init__(
+        self, config: RestSourceConfig, window: Optional[PaginationWindow] = None
+    ) -> None:
         super().__init__(value=None)
         self.config = config
         self.window = window
+
+
+class RestStreamInputPartition(InputPartition):
+    def __init__(self, start: int, end: int) -> None:
+        super().__init__(value=None)
+        self.start = start
+        self.end = end
 
 
 class RestDataSourceReader(DataSourceReader):
@@ -75,6 +99,112 @@ class RestDataSourceReader(DataSourceReader):
     def read(self, partition: InputPartition) -> Iterator[pa.RecordBatch]:
         assert isinstance(partition, RestInputPartition)
         yield from _read_partition(partition.config, self._schema, partition.window)
+
+
+class RestDataSourceStreamReader(DataSourceStreamReader):
+    """Structured Streaming reader for REST-backed datasets."""
+
+    def __init__(self, config: RestSourceConfig, schema: StructType) -> None:
+        self._config = config
+        self._schema = schema
+
+        options = dict(config.options or {})
+        raw_batch_size = options.get("stream_batch_size", 100)
+        try:
+            self._batch_size = int(raw_batch_size)
+        except (TypeError, ValueError):
+            self._batch_size = 100
+        if self._batch_size <= 0:
+            self._batch_size = 100
+
+        progress_path = options.get("stream_progress_path")
+        if isinstance(progress_path, str) and progress_path.strip():
+            self._progress_path = Path(progress_path).expanduser()
+        else:
+            self._progress_path = None
+
+        self._current_offset = self._load_progress()
+
+    def initialOffset(self) -> Dict[str, int]:
+        return {"offset": self._current_offset}
+
+    def latestOffset(self) -> Dict[str, int]:
+        self._current_offset += 1
+        return {"offset": self._current_offset}
+
+    def partitions(
+        self, start: Dict[str, int], end: Dict[str, int]
+    ) -> Sequence[InputPartition]:
+        start_offset = int(start.get("offset", 0))
+        end_offset = int(end.get("offset", 0))
+        return [RestStreamInputPartition(start_offset, end_offset)]
+
+    def commit(self, end: Dict[str, int]) -> None:
+        offset = int(end.get("offset", self._current_offset))
+        self._current_offset = offset
+        self._save_progress(offset)
+
+    def read(self, partition: RestStreamInputPartition) -> Iterator[Tuple[Any, ...]]:
+        records = self._fetch_batch()
+        rows: List[Tuple[Any, ...]] = []
+        for record in records:
+            if not isinstance(record, Mapping):
+                continue
+            row = tuple(
+                _coerce_value(record.get(field.name), field.dataType)
+                for field in self._schema
+            )
+            rows.append(row)
+        return iter(rows)
+
+    def _fetch_batch(self) -> List[Mapping[str, Any]]:
+        results: List[Mapping[str, Any]] = []
+        if self._batch_size <= 0:
+            return results
+
+        with RestClient(
+            base_url=self._config.base_url,
+            auth=self._config.auth,
+            options=self._config.options,
+        ) as client:
+            iterator = client.fetch_records(self._config.stream)
+            for page in iterator:
+                if not isinstance(page, list):
+                    continue
+                for record in page:
+                    if not isinstance(record, Mapping):
+                        continue
+                    results.append(record)
+                    if len(results) >= self._batch_size:
+                        break
+                if len(results) >= self._batch_size:
+                    break
+        return results
+
+    def _load_progress(self) -> int:
+        if self._progress_path is None:
+            return 0
+        try:
+            if not self._progress_path.exists():
+                return 0
+            payload = json.loads(self._progress_path.read_text())
+            value = payload.get("offset")
+            if isinstance(value, int):
+                return value
+            if isinstance(value, str) and value.isdigit():
+                return int(value)
+        except Exception:
+            return 0
+        return 0
+
+    def _save_progress(self, offset: int) -> None:
+        if self._progress_path is None:
+            return
+        try:
+            self._progress_path.parent.mkdir(parents=True, exist_ok=True)
+            self._progress_path.write_text(json.dumps({"offset": offset}))
+        except Exception:
+            pass
 
 
 def _load_source_config(options: Mapping[str, str]) -> RestSourceConfig:
@@ -115,14 +245,18 @@ def _infer_schema(config: RestSourceConfig) -> StructType:
 
     fields = []
     for key in ordered_keys:
-        sample_value = next((row.get(key) for row in sample_records if row.get(key) is not None), None)
+        sample_value = next(
+            (row.get(key) for row in sample_records if row.get(key) is not None), None
+        )
         dtype = _infer_type(sample_value)
         fields.append(StructField(key, dtype, nullable=True))
     return StructType(fields)
 
 
 def _sample_stream(config: RestSourceConfig) -> List[Mapping[str, Any]]:
-    with RestClient(base_url=config.base_url, auth=config.auth, options=config.options) as client:
+    with RestClient(
+        base_url=config.base_url, auth=config.auth, options=config.options
+    ) as client:
         iterator = client.fetch_records(config.stream)
         first_page = next(iterator, [])
         if isinstance(first_page, list):
@@ -213,7 +347,9 @@ def _partition_from_options(
             name = str(entry.get("name") or "").strip()
             path = str(entry.get("path") or "").strip()
             if not path:
-                raise ConfigError("Each endpoint must include a path when using endpoints strategy")
+                raise ConfigError(
+                    "Each endpoint must include a path when using endpoints strategy"
+                )
             endpoints.append(f"{name}:{path}" if name else path)
 
         return PartitionConfig(strategy="endpoints", endpoints=tuple(endpoints))
@@ -241,7 +377,9 @@ def _plan_pagination_partitions(config: RestSourceConfig) -> List[PaginationWind
     if not has_total_hint:
         return []
 
-    with RestClient(base_url=config.base_url, auth=config.auth, options=config.options) as client:
+    with RestClient(
+        base_url=config.base_url, auth=config.auth, options=config.options
+    ) as client:
         first_page = client.peek_page(config.stream)
 
     if first_page is None:
@@ -301,7 +439,9 @@ def _plan_endpoint_partitions(config: RestSourceConfig) -> List[PaginationWindow
     partition = config.stream.partition
 
     if not partition.endpoints:
-        raise ConfigError("partition_strategy='endpoints' requires 'endpoints' to be defined")
+        raise ConfigError(
+            "partition_strategy='endpoints' requires 'endpoints' to be defined"
+        )
 
     windows: List[PaginationWindow] = []
 
@@ -345,7 +485,9 @@ def _resolve_total_pages(
         else None
     )
     if total_pages_candidate is None and pagination.total_pages_header:
-        total_pages_candidate = _coerce_positive_int(headers.get(pagination.total_pages_header))
+        total_pages_candidate = _coerce_positive_int(
+            headers.get(pagination.total_pages_header)
+        )
 
     if total_pages_candidate is not None and total_pages_candidate > 0:
         return total_pages_candidate
@@ -356,7 +498,9 @@ def _resolve_total_pages(
         else None
     )
     if total_records_candidate is None and pagination.total_records_header:
-        total_records_candidate = _coerce_positive_int(headers.get(pagination.total_records_header))
+        total_records_candidate = _coerce_positive_int(
+            headers.get(pagination.total_records_header)
+        )
 
     if total_records_candidate is None or total_records_candidate <= 0:
         return None
@@ -421,7 +565,9 @@ def _generate_range_values(options: Mapping[str, Any]) -> List[str]:
         end = int(str(end_raw))
         step = int(str(step_raw)) if step_raw is not None else 1
         if step <= 0:
-            raise ConfigError("partition_range_step must be greater than 0 for numeric ranges")
+            raise ConfigError(
+                "partition_range_step must be greater than 0 for numeric ranges"
+            )
 
         values: List[str] = []
         if start <= end:
@@ -441,7 +587,9 @@ def _generate_range_values(options: Mapping[str, Any]) -> List[str]:
         end_date = datetime.fromisoformat(str(end_raw)).date()
         step_days = int(str(step_raw)) if step_raw is not None else 1
         if step_days <= 0:
-            raise ConfigError("partition_range_step must be greater than 0 for date ranges")
+            raise ConfigError(
+                "partition_range_step must be greater than 0 for date ranges"
+            )
 
         delta = timedelta(days=step_days)
         values = []
@@ -573,7 +721,9 @@ def _parse_endpoint_entries(raw: Any) -> List[Dict[str, Any]]:
         results: List[Dict[str, Any]] = []
         for item in parsed:
             if not isinstance(item, Mapping):
-                raise ConfigError("partition_endpoints entries must be objects with name/path")
+                raise ConfigError(
+                    "partition_endpoints entries must be objects with name/path"
+                )
             entry = dict(item)
             params = entry.get("params")
             if isinstance(params, str):
@@ -582,7 +732,9 @@ def _parse_endpoint_entries(raw: Any) -> List[Dict[str, Any]]:
             results.append(entry)
         return results
 
-    raise ConfigError("partition_endpoints must be a JSON array or comma-separated name:path list")
+    raise ConfigError(
+        "partition_endpoints must be a JSON array or comma-separated name:path list"
+    )
 
 
 def _read_partition(
@@ -591,7 +743,9 @@ def _read_partition(
     window: Optional[PaginationWindow] = None,
 ) -> Iterator[pa.RecordBatch]:
     """Read data from the stream."""
-    with RestClient(base_url=config.base_url, auth=config.auth, options=config.options) as client:
+    with RestClient(
+        base_url=config.base_url, auth=config.auth, options=config.options
+    ) as client:
         endpoint_name = window.endpoint_name if window else None
 
         for page in client.fetch_records(config.stream, window=window):
@@ -600,8 +754,7 @@ def _read_partition(
 
             if endpoint_name is not None:
                 records: List[Mapping[str, Any]] = [
-                    {"endpoint_name": endpoint_name, "data": record}
-                    for record in page
+                    {"endpoint_name": endpoint_name, "data": record} for record in page
                 ]
             else:
                 records = page
@@ -612,12 +765,16 @@ def _read_partition(
                 yield batch
 
 
-def _records_to_batch(records: List[Mapping[str, Any]], schema: StructType) -> pa.RecordBatch:
+def _records_to_batch(
+    records: List[Mapping[str, Any]], schema: StructType
+) -> pa.RecordBatch:
     arrays = []
     field_names = []
 
     for field in schema:
-        column = [_coerce_value(record.get(field.name), field.dataType) for record in records]
+        column = [
+            _coerce_value(record.get(field.name), field.dataType) for record in records
+        ]
         arrays.append(_to_arrow_array(column, field.dataType))
         field_names.append(field.name)
 
@@ -660,4 +817,6 @@ def _to_arrow_array(values: List[Any], data_type: Any) -> pa.Array:
         return pa.array(values, type=pa.float64())
     if isinstance(data_type, BooleanType):
         return pa.array(values, type=pa.bool_())
-    return pa.array([str(v) if v is not None else None for v in values], type=pa.string())
+    return pa.array(
+        [str(v) if v is not None else None for v in values], type=pa.string()
+    )

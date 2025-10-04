@@ -58,7 +58,9 @@ class ValidationRequest(BaseModel):
     config_dict: Optional[Dict[str, Any]] = Field(
         None, description="Configuration provided as a dictionary"
     )
-    token: Optional[str] = Field(None, description="Bearer token supplied separately (not stored)")
+    token: Optional[str] = Field(
+        None, description="Bearer token supplied separately (not stored)"
+    )
     options: Optional[Dict[str, Any]] = Field(
         default=None, description="Spark reader options provided alongside the config"
     )
@@ -101,7 +103,9 @@ class SampleRequest(BaseModel):
 class SampleResponse(BaseModel):
     stream: str
     records: List[Dict[str, Any]]
-    dtypes: List[Dict[str, str]] = Field(default_factory=list, description="Spark column data types")
+    dtypes: List[Dict[str, str]] = Field(
+        default_factory=list, description="Spark column data types"
+    )
     raw_pages: List[Dict[str, Any]] = Field(
         default_factory=list, description="Raw REST API responses captured per page"
     )
@@ -122,12 +126,16 @@ def create_app() -> FastAPI:
     app.mount("/static", StaticFiles(directory=str(STATIC_PATH)), name="static")
 
     @app.get("/favicon.ico", include_in_schema=False)
-    async def favicon() -> FileResponse:  # pragma: no cover - static convenience endpoint
+    async def favicon() -> (
+        FileResponse
+    ):  # pragma: no cover - static convenience endpoint
         return FileResponse(STATIC_PATH / "favicon.ico")
 
     @app.get("/apple-touch-icon.png", include_in_schema=False)
     @app.get("/apple-touch-icon-precomposed.png", include_in_schema=False)
-    async def apple_touch_icon() -> FileResponse:  # pragma: no cover - static convenience endpoint
+    async def apple_touch_icon() -> (
+        FileResponse
+    ):  # pragma: no cover - static convenience endpoint
         # Re-use existing high-res logo as apple touch icon
         return FileResponse(STATIC_PATH / "logo192.png")
 
@@ -239,7 +247,9 @@ def _parse_yaml(
     return parse_config(parsed, token=token, options=options)
 
 
-def _collect_rest_preview(config: RestSourceConfig, limit: int) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+def _collect_rest_preview(
+    config: RestSourceConfig, limit: int
+) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     pages: List[Dict[str, Any]] = []
     total_records = 0
 
@@ -247,7 +257,9 @@ def _collect_rest_preview(config: RestSourceConfig, limit: int) -> Tuple[List[Di
     window_sequence: List[Optional[PaginationWindow]] = windows if windows else [None]
 
     try:
-        with RestClient(base_url=config.base_url, auth=config.auth, options=config.options) as client:
+        with RestClient(
+            base_url=config.base_url, auth=config.auth, options=config.options
+        ) as client:
             page_counter = 0
             for window in window_sequence:
                 for page in client.fetch_pages(config.stream, window=window):
@@ -284,14 +296,16 @@ def _collect_rest_preview(config: RestSourceConfig, limit: int) -> Tuple[List[Di
         return pages, str(exc)
 
 
-def _collect_records(config: RestSourceConfig, token: str | None, limit: int) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
+def _collect_records(
+    config: RestSourceConfig, token: str | None, limit: int
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
     """Collect processed records and dtypes using PySpark DataSource."""
     import tempfile
     import os
     from ..config import dump_config
 
     # Create a temporary config file for Spark to use
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yml', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
         config_yaml = dump_config(config)
         f.write(config_yaml)
         config_path = f.name
@@ -311,6 +325,7 @@ def _collect_records(config: RestSourceConfig, token: str | None, limit: int) ->
     finally:
         spark.stop()
         os.unlink(config_path)
+
 
 def _get_preview_df(
     config_path: str,
@@ -338,13 +353,15 @@ def _get_preview_df(
         options[key] = value
     return spark.read.format("polymo").options(**options).load()
 
+
 def _get_or_create_spark() -> Any:
     """Get or create a Spark session."""
     from pyspark.sql import SparkSession
 
-    spark = SparkSession.builder \
-        .appName("polymo-builder") \
-        .config("spark.sql.adaptive.enabled", "false") \
-        .config("spark.sql.adaptive.coalescePartitions.enabled", "false") \
+    spark = (
+        SparkSession.builder.appName("polymo-builder")
+        .config("spark.sql.adaptive.enabled", "false")
+        .config("spark.sql.adaptive.coalescePartitions.enabled", "false")
         .getOrCreate()
+    )
     return spark

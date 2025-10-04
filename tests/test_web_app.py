@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import pytest
+
+fastapi = pytest.importorskip("fastapi", reason="FastAPI is required for builder tests")
 from fastapi.testclient import TestClient
 
 from polymo.builder import create_app
@@ -25,7 +27,6 @@ def test_validate_endpoint_success() -> None:
 
     assert response.status_code == 200
     assert payload["stream"] == "posts"
-
 
 
 def test_validate_with_config_dict() -> None:

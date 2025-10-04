@@ -32,16 +32,18 @@ Key switches:
 
 | Flag | Default | What it does |
 |------|---------|--------------|
-| `--config` | `examples/jsonplaceholder.yml` | Path to your YAML file. |
+| `--config` | bundled JSONPlaceholder example | Path to your YAML file. Defaults to the example shipped with Polymo. |
 | `--stream` | first stream in the file | For future use. Leave blank unless you add more streams later. |
 | `--format` | `polymo` | Name of the Spark reader. Change it only if you registered a custom alias. |
 | `--limit` | `5` | How many rows to print with `show()`. |
+| `--streaming` | off | Run the smoke test with `spark.readStream` instead of `spark.read`. |
+| `--stream-batch-size` | `100` | Rows fetched per micro-batch when `--streaming` is used. |
 
 Behind the scenes the command:
-1. Checks the file exists.
+1. Checks the file exists (or uses the bundled example).
 2. Creates a Spark session called `polymo-smoke`.
 3. Registers the Polymo reader.
-4. Loads the data and prints the schema + a few rows.
+4. Loads the data (batch or streaming with `trigger(once=True)`), prints the schema, and shows a handful of rows.
 
 If something fails (missing token, wrong URL, etc.), the error bubbles up right away so you can fix it before deploying.
 

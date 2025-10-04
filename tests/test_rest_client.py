@@ -28,13 +28,17 @@ def disable_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def install_transport(monkeypatch: pytest.MonkeyPatch) -> Callable[[Handler], List[httpx.Request]]:
+def install_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Callable[[Handler], List[httpx.Request]]:
     calls: List[httpx.Request] = []
 
     original_client = httpx.Client
 
     def factory(handler: Handler) -> List[httpx.Request]:
-        transport = httpx.MockTransport(lambda request: _record(handler, request, calls))
+        transport = httpx.MockTransport(
+            lambda request: _record(handler, request, calls)
+        )
 
         def client_factory(*args: Any, **kwargs: Any) -> httpx.Client:
             kwargs.setdefault("transport", transport)
@@ -46,13 +50,15 @@ def install_transport(monkeypatch: pytest.MonkeyPatch) -> Callable[[Handler], Li
     return factory
 
 
-def _record(handler: Handler, request: httpx.Request, calls: List[httpx.Request]) -> httpx.Response:
+def _record(
+    handler: Handler, request: httpx.Request, calls: List[httpx.Request]
+) -> httpx.Response:
     calls.append(request)
     return handler(request)
 
 
 def test_fetch_records_offset_pagination(
-    install_transport: Callable[[Handler], List[httpx.Request]]
+    install_transport: Callable[[Handler], List[httpx.Request]],
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         offset = int(request.url.params.get("offset", "0"))
@@ -88,7 +94,7 @@ def test_fetch_records_offset_pagination(
 
 
 def test_fetch_records_page_pagination(
-    install_transport: Callable[[Handler], List[httpx.Request]]
+    install_transport: Callable[[Handler], List[httpx.Request]],
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         page = int(request.url.params.get("page", "0"))
@@ -123,7 +129,7 @@ def test_fetch_records_page_pagination(
 
 
 def test_fetch_records_cursor_pagination(
-    install_transport: Callable[[Handler], List[httpx.Request]]
+    install_transport: Callable[[Handler], List[httpx.Request]],
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         cursor = request.url.params.get("cursor")
@@ -155,7 +161,7 @@ def test_fetch_records_cursor_pagination(
 
 
 def test_fetch_records_normalises_wrapped_payload(
-    install_transport: Callable[[Handler], List[httpx.Request]]
+    install_transport: Callable[[Handler], List[httpx.Request]],
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"data": [{"id": 5}]})
@@ -171,7 +177,7 @@ def test_fetch_records_normalises_wrapped_payload(
 
 
 def test_record_selector_field_path(
-    install_transport: Callable[[Handler], List[httpx.Request]]
+    install_transport: Callable[[Handler], List[httpx.Request]],
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         payload = {"response": {"docs": [{"id": 10}, {"id": 11}]}}
@@ -189,7 +195,7 @@ def test_record_selector_field_path(
 
 
 def test_record_selector_wildcard_path(
-    install_transport: Callable[[Handler], List[httpx.Request]]
+    install_transport: Callable[[Handler], List[httpx.Request]],
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         payload = {"data": [{"record": {"id": 1}}, {"record": {"id": 2}}]}
@@ -207,7 +213,7 @@ def test_record_selector_wildcard_path(
 
 
 def test_record_selector_filter(
-    install_transport: Callable[[Handler], List[httpx.Request]]
+    install_transport: Callable[[Handler], List[httpx.Request]],
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         payload = [
@@ -229,7 +235,7 @@ def test_record_selector_filter(
 
 
 def test_record_selector_casts_to_schema(
-    install_transport: Callable[[Handler], List[httpx.Request]]
+    install_transport: Callable[[Handler], List[httpx.Request]],
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         payload = [{"id": "123", "amount": "4.50"}]
@@ -252,7 +258,7 @@ def test_record_selector_casts_to_schema(
 
 
 def test_record_selector_invalid_filter_raises(
-    install_transport: Callable[[Handler], List[httpx.Request]]
+    install_transport: Callable[[Handler], List[httpx.Request]],
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         payload = [{"id": 1}]
@@ -269,7 +275,7 @@ def test_record_selector_invalid_filter_raises(
 
 
 def test_fetch_records_renders_option_templates(
-    install_transport: Callable[[Handler], List[httpx.Request]]
+    install_transport: Callable[[Handler], List[httpx.Request]],
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.params.get("api_key") == "secret123"
@@ -297,7 +303,7 @@ def test_fetch_records_renders_option_templates(
 
 
 def test_fetch_records_missing_option_raises(
-    install_transport: Callable[[Handler], List[httpx.Request]]
+    install_transport: Callable[[Handler], List[httpx.Request]],
 ) -> None:
     install_transport(lambda request: httpx.Response(200, json=[]))
 
@@ -334,7 +340,9 @@ def test_incremental_uses_state_value_for_query(
 
     def handler(request: httpx.Request) -> httpx.Response:
         observed_params.append(request.url.params.get("since"))
-        return httpx.Response(200, json=[{"id": 1, "updated_at": "2024-01-02T00:00:00Z"}])
+        return httpx.Response(
+            200, json=[{"id": 1, "updated_at": "2024-01-02T00:00:00Z"}]
+        )
 
     install_transport(handler)
 
@@ -403,7 +411,7 @@ def test_incremental_persists_latest_value(
 
 
 def test_incremental_start_value_option(
-    install_transport: Callable[[Handler], List[httpx.Request]]
+    install_transport: Callable[[Handler], List[httpx.Request]],
 ) -> None:
     rest_client_module._MEMORY_STATE.clear()
     observed: List[str | None] = []
@@ -436,7 +444,7 @@ def test_incremental_start_value_option(
 
 
 def test_incremental_memory_roundtrip(
-    install_transport: Callable[[Handler], List[httpx.Request]]
+    install_transport: Callable[[Handler], List[httpx.Request]],
 ) -> None:
     rest_client_module._MEMORY_STATE.clear()
 
@@ -444,7 +452,9 @@ def test_incremental_memory_roundtrip(
 
     def handler(request: httpx.Request) -> httpx.Response:
         observed.append(request.url.params.get("since"))
-        return httpx.Response(200, json=[{"id": 1, "updated_at": "2024-02-01T06:00:00Z"}])
+        return httpx.Response(
+            200, json=[{"id": 1, "updated_at": "2024-02-01T06:00:00Z"}]
+        )
 
     install_transport(handler)
 
@@ -474,7 +484,7 @@ def test_incremental_memory_roundtrip(
 
 
 def test_incremental_memory_can_be_disabled(
-    install_transport: Callable[[Handler], List[httpx.Request]]
+    install_transport: Callable[[Handler], List[httpx.Request]],
 ) -> None:
     rest_client_module._MEMORY_STATE.clear()
 
@@ -482,7 +492,9 @@ def test_incremental_memory_can_be_disabled(
 
     def handler(request: httpx.Request) -> httpx.Response:
         observed.append(request.url.params.get("since"))
-        return httpx.Response(200, json=[{"id": 1, "updated_at": "2024-02-01T06:00:00Z"}])
+        return httpx.Response(
+            200, json=[{"id": 1, "updated_at": "2024-02-01T06:00:00Z"}]
+        )
 
     install_transport(handler)
 
@@ -517,7 +529,7 @@ def test_incremental_memory_can_be_disabled(
 
 
 def test_error_handler_retries_server_error(
-    install_transport: Callable[[Handler], List[httpx.Request]]
+    install_transport: Callable[[Handler], List[httpx.Request]],
 ) -> None:
     attempts = 0
 
@@ -540,7 +552,7 @@ def test_error_handler_retries_server_error(
 
 
 def test_error_handler_can_retry_custom_status(
-    install_transport: Callable[[Handler], List[httpx.Request]]
+    install_transport: Callable[[Handler], List[httpx.Request]],
 ) -> None:
     attempts = 0
 
@@ -559,7 +571,9 @@ def test_error_handler_can_retry_custom_status(
         error_handler=ErrorHandlerConfig(
             retry_statuses=("404",),
             max_retries=3,
-            backoff=BackoffConfig(initial_delay_seconds=0.0, max_delay_seconds=0.0, multiplier=1.0),
+            backoff=BackoffConfig(
+                initial_delay_seconds=0.0, max_delay_seconds=0.0, multiplier=1.0
+            ),
         ),
     )
 
@@ -572,7 +586,7 @@ def test_error_handler_can_retry_custom_status(
 
 
 def test_error_handler_exhausts_retries(
-    install_transport: Callable[[Handler], List[httpx.Request]]
+    install_transport: Callable[[Handler], List[httpx.Request]],
 ) -> None:
     attempts = 0
 
@@ -598,7 +612,7 @@ def test_error_handler_exhausts_retries(
 
 
 def test_incremental_remote_state_path(
-    install_transport: Callable[[Handler], List[httpx.Request]]
+    install_transport: Callable[[Handler], List[httpx.Request]],
 ) -> None:
     pytest.importorskip("fsspec")
     import fsspec
@@ -615,7 +629,9 @@ def test_incremental_remote_state_path(
 
     def handler(request: httpx.Request) -> httpx.Response:
         observed.append(request.url.params.get("since"))
-        return httpx.Response(200, json=[{"id": 1, "updated_at": "2024-05-04T00:00:00Z"}])
+        return httpx.Response(
+            200, json=[{"id": 1, "updated_at": "2024-05-04T00:00:00Z"}]
+        )
 
     install_transport(handler)
 

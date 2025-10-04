@@ -6,6 +6,8 @@ from typing import Dict, Iterable, List, Mapping, Optional
 import pyarrow as pa
 from pyspark.sql.types import LongType, StringType, StructField, StructType
 
+import pytest
+
 from polymo.config import (
     AuthConfig,
     ErrorHandlerConfig,
@@ -15,7 +17,7 @@ from polymo.config import (
     RestSourceConfig,
     StreamConfig,
 )
-from polymo.datasource import RestDataSourceReader
+from polymo.datasource import RestDataSourceReader, RestDataSourceStreamReader
 from polymo.rest_client import PaginationWindow, RestPage
 
 
@@ -87,7 +89,11 @@ class _FakeRestClient:
                 yield self._pages_by_page.get(int(window.page), [])
                 return
 
-            if window is not None and window.offset is not None and self._pages_by_offset:
+            if (
+                window is not None
+                and window.offset is not None
+                and self._pages_by_offset
+            ):
                 yield self._pages_by_offset.get(int(window.offset), [])
                 return
 
@@ -302,3 +308,45 @@ def test_partitions_endpoint_strategy(monkeypatch) -> None:
         ("repos", json.dumps({"id": 2}, separators=(",", ":"), sort_keys=True)),
     }
     assert set(rows) == expected
+
+
+@pytest.mark.smoke
+def test_stream_reader_batches(monkeypatch, tmp_path) -> None:
+    pagination = PaginationConfig(type="none")
+    progress_path = tmp_path / "stream-progress.json"
+    config = _build_config(
+        pagination,
+        options={
+            "stream_batch_size": "2",
+            "stream_progress_path": str(progress_path),
+        },
+    )
+
+    batches = [[{"id": 1}, {"id": 2}], [{"id": 3}]]
+
+    def fake_fetch(self: RestDataSourceStreamReader) -> List[Mapping[str, int]]:
+        if batches:
+            return batches.pop(0)
+        return []
+
+    monkeypatch.setattr(
+        "polymo.datasource.RestDataSourceStreamReader._fetch_batch", fake_fetch
+    )
+
+    reader = RestDataSourceStreamReader(config, _build_id_schema())
+
+    start_offset = reader.initialOffset()
+    end_offset = reader.latestOffset()
+    partitions = reader.partitions(start_offset, end_offset)
+    rows = list(reader.read(partitions[0]))
+    assert rows == [(1,), (2,)]
+    reader.commit(end_offset)
+
+    if progress_path.exists():
+        payload = json.loads(progress_path.read_text())
+        assert payload["offset"] == end_offset["offset"]
+
+    next_end = reader.latestOffset()
+    next_rows = list(reader.read(reader.partitions(end_offset, next_end)[0]))
+    assert next_rows == [(3,)]
+    reader.commit(next_end)
