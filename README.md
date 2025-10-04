@@ -11,6 +11,7 @@ Polymo is a helper for pyspark that turns everyday web APIs into tables you can 
 - **See results before you commit.** Preview the real responses, record-by-record, so you can fix issues early.
 - **Works with Spark-based tools.** When you are ready, Polymo serves the data to your analytics stack using the same interface Spark already understands.
 - **Designed for teams.** Save reusable connectors, share them across projects, and keep secrets (like tokens) out of files.
+- **Speedy and efficient.** Polymo handles batch requests and pagination automatically, so you get your data faster than with per-row UDFs.
 
 ## Pick your path
 - **Mostly clicking?** Open the [Builder UI](builder-ui.md) and follow the guided screens. It is the easiest way to create a connector from scratch.
@@ -105,6 +106,7 @@ stream:
 - `polymo builder` is a small web app (FastAPI + React) that guides you through every step. No need to run npm, the app is bundled with pip and ready to go.
 - `examples/` contains ready-made configs you can copy, tweak, and use for smoke tests.
 - `tests/test_datasource.py::test_stream_reader_batches` exercises the streaming reader end to end; run it with `pytest -k stream_reader_batches` for a quick smoke test.
+- `notebooks/polymo_vs_udf_benchmark.ipynb` compares two approaches: Polymo’s DataSource batch endpoint vs a per-row Spark UDF. With the default 50ms simulated latency Polymo finishes ~10× faster than the per-row UDF. Tweak `PAGE_DELAY`, `page_size`, or the dataset size to mirror your own API.
 
 ## Run the Builder in Docker
 - Build the dev-friendly image and launch the Builder with hot reload:

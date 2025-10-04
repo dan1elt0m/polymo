@@ -13,6 +13,7 @@ from polymo.config import (
     ErrorHandlerConfig,
     IncrementalConfig,
     PaginationConfig,
+    PartitionConfig,
     RecordSelectorConfig,
     RestSourceConfig,
     StreamConfig,
@@ -126,6 +127,7 @@ def _build_config(
     pagination: PaginationConfig,
     *,
     options: Optional[Dict[str, str]] = None,
+    partition: Optional[PartitionConfig] = None,
 ) -> RestSourceConfig:
     stream = StreamConfig(
         name="sample",
@@ -138,6 +140,7 @@ def _build_config(
         schema=None,
         record_selector=RecordSelectorConfig(),
         error_handler=ErrorHandlerConfig(),
+        partition=partition or PartitionConfig(),
     )
 
     return RestSourceConfig(
@@ -247,6 +250,41 @@ def test_partitions_param_range(monkeypatch) -> None:
             "partition_values": "1,2,3",
         },
     )
+
+    records = {
+        "1": [{"id": 10}],
+        "2": [{"id": 20}],
+        "3": [{"id": 30}],
+    }
+
+    def factory(*args: object, **kwargs: object) -> _FakeRestClient:
+        return _FakeRestClient(*args, param_records=records, **kwargs)
+
+    monkeypatch.setattr("polymo.datasource.RestClient", factory)
+
+    reader = RestDataSourceReader(config, _build_id_schema())
+    partitions = reader.partitions()
+
+    assert len(partitions) == 3
+
+    observed = []
+    for partition in partitions:
+        observed.extend(_extract_ids(reader.read(partition)))
+
+    assert observed == [10, 20, 30]
+
+
+def test_partitions_param_range_from_yaml(monkeypatch) -> None:
+    pagination = PaginationConfig(type="none")
+    partition = PartitionConfig(
+        strategy="param_range",
+        param="page",
+        range_start=1,
+        range_end=3,
+        range_step=1,
+        range_kind="numeric",
+    )
+    config = _build_config(pagination, partition=partition)
 
     records = {
         "1": [{"id": 10}],

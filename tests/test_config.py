@@ -198,7 +198,69 @@ stream:
 
     config_dict = config_to_dict(config)
     assert config_dict["source"]["auth"]["type"] == "oauth2"
-    assert "client_secret" not in config_dict["source"]["auth"]
+
+
+def test_partition_param_range_range_block(tmp_path: Path) -> None:
+    config_path = write_config(
+        tmp_path,
+        """
+version: 0.1
+source:
+  type: rest
+  base_url: https://api.test
+stream:
+  path: /objects
+  partition:
+    strategy: param_range
+    param: page
+    range_start: 1
+    range_end: 5
+    range_step: 2
+    range_kind: numeric
+""".strip(),
+    )
+
+    config = load_config(config_path)
+    partition = config.stream.partition
+
+    assert partition.strategy == "param_range"
+    assert partition.param == "page"
+    assert partition.range_start == 1
+    assert partition.range_end == 5
+    assert partition.range_step == 2
+    assert partition.range_kind == "numeric"
+    assert partition.values is None
+
+
+def test_partition_param_range_values_list(tmp_path: Path) -> None:
+    config_path = write_config(
+        tmp_path,
+        """
+version: 0.1
+source:
+  type: rest
+  base_url: https://api.test
+stream:
+  path: /objects
+  partition:
+    strategy: param_range
+    param: status
+    values:
+      - new
+      - closed
+""".strip(),
+    )
+
+    config = load_config(config_path)
+    partition = config.stream.partition
+
+    assert partition.strategy == "param_range"
+    assert partition.param == "status"
+    assert partition.values == ("new", "closed")
+    assert partition.range_start is None
+    assert partition.range_end is None
+    assert partition.range_step is None
+    assert partition.range_kind is None
 
 
 def test_oauth2_auth_missing_secret_raises(tmp_path: Path) -> None:

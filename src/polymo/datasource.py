@@ -254,10 +254,13 @@ def _infer_schema(config: RestSourceConfig) -> StructType:
 
 
 def _sample_stream(config: RestSourceConfig) -> List[Mapping[str, Any]]:
+    windows = _plan_partitions(config)
+    first_window = windows[0] if windows else None
+
     with RestClient(
         base_url=config.base_url, auth=config.auth, options=config.options
     ) as client:
-        iterator = client.fetch_records(config.stream)
+        iterator = client.fetch_records(config.stream, window=first_window)
         first_page = next(iterator, [])
         if isinstance(first_page, list):
             return first_page[:50]

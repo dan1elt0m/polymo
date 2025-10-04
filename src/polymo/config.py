@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Mapping, Tuple
+from typing import Any, Dict, List, Literal, Optional, Mapping, Sequence, Tuple
 import re
 
 import yaml
@@ -123,7 +123,7 @@ class PartitionConfig:
 
     strategy: Literal["none", "pagination", "param_range", "endpoints"] = "none"
     param: Optional[str] = None
-    values: Optional[str] = None
+    values: Optional[str | Sequence[str]] = None
     range_start: Optional[Any] = None  # Can be int or str for date ranges
     range_end: Optional[Any] = None  # Can be int or str for date ranges
     range_step: Optional[int] = None
@@ -298,10 +298,14 @@ def config_to_dict(config: RestSourceConfig) -> Dict[str, Any]:
     }
 
     partition = stream.partition
+    partition_values = partition.values
+    if isinstance(partition_values, tuple):
+        partition_values = list(partition_values)
+
     stream_dict["partition"] = {
         "strategy": partition.strategy,
         "param": partition.param,
-        "values": partition.values,
+        "values": partition_values,
         "range_start": partition.range_start,
         "range_end": partition.range_end,
         "range_step": partition.range_step,
@@ -873,32 +877,58 @@ def _parse_partition(raw: Any) -> PartitionConfig:
                 "'partition.param' must be provided for param_range strategy"
             )
 
+        def _normalize_range_kind(value: Any, *, default: Optional[str] = None) -> Optional[str]:
+            if value is None:
+                return default
+            text = str(value).strip().lower()
+            if not text:
+                return default
+            if text not in {"numeric", "date"}:
+                raise ConfigError(
+                    "'partition.range_kind' must be either 'numeric' or 'date'"
+                )
+            return "date" if text == "date" else "numeric"
+
+        def _normalize_range_step(value: Any) -> Optional[int]:
+            if value is None:
+                return None
+            try:
+                result = int(value)
+            except (TypeError, ValueError):
+                raise ConfigError(
+                    "'partition.range_step' must be a positive integer"
+                ) from None
+            if result <= 0:
+                raise ConfigError(
+                    "'partition.range_step' must be a positive integer"
+                )
+            return result
+
+        raw_values = raw.get("values")
+        if isinstance(raw_values, (list, tuple)):
+            cleaned_values = [str(item).strip() for item in raw_values if str(item).strip()]
+            values = tuple(cleaned_values) if cleaned_values else None
+        elif raw_values is not None:
+            text = str(raw_values).strip()
+            values = text or None
+
         range_start = raw.get("range_start")
         range_end = raw.get("range_end")
+        if values is None:
+            if range_start is None or range_end is None:
+                raise ConfigError(
+                    "param_range partition requires either 'values' or both 'range_start' and 'range_end'"
+                )
+            range_kind = _normalize_range_kind(raw.get("range_kind", "numeric"), default="numeric")
+            range_step = _normalize_range_step(raw.get("range_step"))
+        else:
+            if (range_start is None) ^ (range_end is None):
+                raise ConfigError(
+                    "Provide both 'partition.range_start' and 'partition.range_end' when defining a range"
+                )
+            range_kind = _normalize_range_kind(raw.get("range_kind"))
+            range_step = _normalize_range_step(raw.get("range_step"))
 
-        if range_start is None:
-            raise ConfigError(
-                "'partition.range_start' must be provided for param_range strategy"
-            )
-        if range_end is None:
-            raise ConfigError(
-                "'partition.range_end' must be provided for param_range strategy"
-            )
-
-        range_kind = raw.get("range_kind", "numeric")
-        if range_kind not in {"numeric", "date"}:
-            raise ConfigError(
-                "'partition.range_kind' must be either 'numeric' or 'date'"
-            )
-
-        # Parse step if provided
-        if "range_step" in raw:
-            step_value = raw.get("range_step")
-            if not isinstance(step_value, int) or step_value <= 0:
-                raise ConfigError("'partition.range_step' must be a positive integer")
-            range_step = step_value
-
-        # Optional templates
         value_template = _maybe_str(
             raw.get("value_template"), "partition.value_template"
         )

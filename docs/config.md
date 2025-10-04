@@ -205,6 +205,10 @@ You can keep one state file per connector or share it—Polymo creates directori
 
 The repository includes `examples/incremental-state.json` as a ready-to-copy template.
 
+## Benchmarks
+
+Curious how Polymo compares to hand-rolled solutions? Check out `notebooks/polymo_vs_udf_benchmark.ipynb`. It spins up a local FastAPI service with simulated latency and contrasts Polymo’s paginated reader with both a Python UDTF (fetching 200 rows at a time) and a per-row Spark UDF. With the default 100 ms delay and 5,000 records, Polymo finishes roughly 9× faster than the per-row UDF and still leads the UDTF path. Tune `PAGE_DELAY`, page size, and dataset length to match your API.
+
 ### Schema vs. infer_schema
 
 ```yaml

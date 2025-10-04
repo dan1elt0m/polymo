@@ -102,6 +102,7 @@ stream:
 - `polymo builder` is a small web app (FastAPI + React) that guides you through every step.
 - `examples/` contains ready-made configs you can copy, tweak, and use for smoke tests.
 - Run `pytest -k stream_reader_batches` for a quick smoke test of the streaming reader without needing an external API.
+- `notebooks/polymo_vs_udf_benchmark.ipynb` benchmarks Polymo’s DataSource, and a per-row Spark UDF. With the default settings (50ms simulated latency, pagination enabled) Polymo finishes ~9× faster than the per-row UDF. Adjust the notebook parameters to reflect your own API.
 
 ## Run the Builder in Docker
 - Build the dev-friendly image and launch the Builder with hot reload:
