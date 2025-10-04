@@ -1,5 +1,19 @@
 # Builder UI Walkthrough
 
+<p align="center">
+  <a href="ui_landing.png">
+    <img src="ui_landing.png" alt="Polymo Builder UI landing screen" width="880">
+  </a>
+</p>
+
+<!-- Centered clickable screenshot -->
+<p align="center">
+  <a href="ui.png">
+    <img src="ui.png" alt="Polymo Builder UI - connector preview screen" width="860">
+  </a>
+</p>
+
+
 If you are happiest filling out forms instead of wrangling YAML, the Builder UI is for you. It lives alongside Polymo and gives you a guided, visual way to design a connector from start to finish.
 
 ## Getting set up
