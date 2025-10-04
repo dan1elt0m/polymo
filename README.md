@@ -14,8 +14,8 @@ Polymo is a helper for pyspark that turns everyday web APIs into tables you can 
 - **Speedy and efficient.** Polymo handles batch requests and pagination automatically, so you get your data faster than with per-row UDFs.
 
 ## Pick your path
-- **Mostly clicking?** Open the [Builder UI](builder-ui.md) and follow the guided screens. It is the easiest way to create a connector from scratch.
-- **Prefer a checklist?** Read the [Configuration guide](config.md) for a plain-language tour of every field in the YAML file.
+- **Mostly clicking?** Open the [Builder UI](docs/builder-ui.md) and follow the guided screens. It is the easiest way to create a connector from scratch.
+- **Prefer a checklist?** Read the [Configuration guide](docs/config.md) for a plain-language tour of every field in the YAML file.
 
 ## Before you start
 - Install Polymo with `pip install polymo`. If you want the Builder UI, add the extras: `pip install "polymo[builder]"`.
