@@ -22,6 +22,21 @@ df = (
 df.show()
 ```
 
+Structured Streaming works out of the box:
+
+```python
+stream_df = (
+    spark.readStream.format("polymo")
+    .option("config_path", "./config.yml")
+    .option("stream_batch_size", 100)
+    .option("stream_progress_path", "/tmp/polymo-progress.json")
+    .load()
+)
+
+query = stream_df.writeStream.format("memory").outputMode("append").queryName("polymo")
+query.start()
+```
+
 Key ideas:
 - `config_path` points to the YAML file.
 - Pass sensitive values (tokens, keys) with `.option(...)` so they never touch the config file.
