@@ -16,12 +16,28 @@ Polymo is a helper for pyspark that turns everyday web APIs into tables you can 
 ## Pick your path
 - **Mostly clicking?** Open the [Builder UI](builder-ui.md) and follow the guided screens. It is the easiest way to create a connector from scratch.
 - **Prefer a checklist?** Read the [Configuration guide](config.md) for a plain-language tour of every field in the YAML file.
-- **Power user?** Jump straight to the [CLI](cli.md) or the [Python helpers](api.md) to automate things.
 
 ## Before you start
 - Install Polymo with `pip install polymo`. If you want the Builder UI, add the extras: `pip install "polymo[builder]"`.
 - Make sure you have access to the API you care about (base URL, token if needed, and any sample request parameters).
 - Check that PySpark version 4 or newer is available. Polymo uses Spark under the hood to keep data consistent.
+
+### Builder UI preview
+
+<p align="center">
+  <a href="docs/ui_landing.png">
+    <img src="docs/ui_landing.png" alt="Polymo Builder UI landing screen" width="880">
+  </a>
+</p>
+
+
+<!-- Centered clickable screenshot -->
+<p align="center">
+  <a href="docs/ui.png">
+    <img src="docs/ui.png" alt="Polymo Builder UI - connector preview screen" width="860">
+  </a>
+</p>
+
 
 ## Quick tour
 
@@ -32,6 +48,7 @@ Polymo is a helper for pyspark that turns everyday web APIs into tables you can 
 5. **Use it in Spark.** Load the file with the short code snippet below or copy/paste from the Builder’s tips panel.
 
 The Builder keeps a local library of every connector you work on. Use the header’s connector picker to hop between drafts, open the library to rename or export them, and never worry about losing your place. The header even shows the installed Polymo version for quick support checks.
+
 
 ```python
 from pyspark.sql import SparkSession
@@ -71,17 +88,6 @@ Use the same runtime options as `read` (tokens, OAuth2 client secrets, increment
 
 Want a quick check without writing code? Run `polymo smoke --streaming` and the CLI will execute a one-off micro-batch using the bundled JSONPlaceholder example (or a YAML you pass in).
 
-### Builder UI preview
-
-<!-- Centered clickable screenshot -->
-<p align="center">
-  <a href="docs/ui.png">
-    <img src="docs/ui.png" alt="Polymo Builder UI - connector preview screen" width="860">
-  </a>
-</p>
-
-<!-- Simpler fallback (remove if you keep the HTML version) -->
-<!-- ![Polymo Builder UI - connector preview screen](docs/ui.png) -->
 
 ### Incremental syncs in one minute
 - Add `cursor_param` and `cursor_field` under `incremental:` in your YAML to tell Polymo which API field to track.
