@@ -26,7 +26,7 @@ Polymo is a helper for pyspark that turns everyday web APIs into tables you can 
 4. **Save the connector.** Download the YAML config or write it directly to your project folder. Tokens stay out of the file and are passed in later.
 5. **Use it in Spark.** Load the file with the short code snippet below or copy/paste from the Builder’s tips panel.
 
-The Builder keeps a local library of every connector you work on. Use the header’s connector picker to hop between drafts, open the library to rename or export them, and never worry about losing your place.
+The Builder keeps a local library of every connector you work on. Use the header’s connector picker to hop between drafts, open the library to rename or export them, and never worry about losing your place. The header also shows the Polymo version so you always know which build you’re on.
 
 ```python
 from pyspark.sql import SparkSession

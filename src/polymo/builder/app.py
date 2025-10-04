@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from functools import partial
-from importlib import resources
+from importlib import metadata, resources
 from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
@@ -218,6 +218,14 @@ def create_app() -> FastAPI:
         except ConfigError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return FormatResponse(yaml=dump_config(config))
+
+    @app.get("/api/meta")
+    async def get_meta() -> Dict[str, str]:
+        try:
+            version = metadata.version("polymo")
+        except metadata.PackageNotFoundError:  # pragma: no cover - dev installs
+            version = "dev"
+        return {"version": version}
 
     return app
 

@@ -78,6 +78,7 @@ const App: React.FC = () => {
 	const [saveDirName, setSaveDirName] = React.useState<string | null>(null);
 	const [isRenamingConnector, setIsRenamingConnector] = React.useState(false);
 	const [connectorNameDraft, setConnectorNameDraft] = React.useState('');
+	const [appVersion, setAppVersion] = React.useState<string | null>(null);
 
 	// Removed autoCreatedRef and auto-create behavior so refresh returns to landing screen
 	// const autoCreatedRef = React.useRef(false);
@@ -85,6 +86,25 @@ const App: React.FC = () => {
 	// feature detection for directory picker
 	const dirPickerSupported = typeof window !== 'undefined' && 'showDirectoryPicker' in window;
 	const initialLoadRef = React.useRef(true);
+
+	React.useEffect(() => {
+		let cancelled = false;
+		(async () => {
+			try {
+				const response = await fetch('/api/meta');
+				if (!response.ok) return;
+				const payload = (await response.json()) as { version?: string };
+				if (!cancelled && payload?.version) {
+					setAppVersion(payload.version);
+				}
+			} catch {
+				/* ignore */
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, []);
 
 	const currentConnector = React.useMemo(() => (
 		savedConnectors.find((entry) => entry.id === activeConnectorId) ?? null
@@ -764,19 +784,24 @@ const App: React.FC = () => {
 		<div key={effectiveTheme} className="min-h-screen flex flex-col bg-background text-background-foreground dark:bg-slate-1 dark:text-slate-12 transition-colors theme-fade">
 			<header className="sticky top-0 z-20 border-b border-border bg-surface/95 backdrop-blur dark:bg-[#1d2026] dark:border-[#2c313a] transition-colors">
 				<div className="flex w-full items-center justify-between px-4 py-2">
-					<div className="flex items-center gap-2">
-						<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-5 shadow-soft overflow-hidden dark:bg-blue-7/40">
-							<img
-								src={import.meta.env.DEV ? "/favicon.ico" : "/static/favicon.ico"}
-								alt="polymo Logo"
-								className="h-7 w-7 object-contain"
-							/>
-						</div>
-						<div className="leading-tight select-none">
-							<p className="text-[11px] font-medium tracking-wide text-muted uppercase">polymo</p>
+				<div className="flex items-center gap-2">
+					<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-5 shadow-soft overflow-hidden dark:bg-blue-7/40">
+						<img
+							src={import.meta.env.DEV ? "/favicon.ico" : "/static/favicon.ico"}
+							alt="polymo Logo"
+							className="h-7 w-7 object-contain"
+						/>
+					</div>
+					<div className="leading-tight select-none">
+						<p className="text-[11px] font-medium tracking-wide text-muted uppercase">polymo</p>
+						<div className="flex items-baseline gap-2">
 							<h1 className="text-base font-semibold text-slate-12 dark:text-drac-foreground">Connector Builder</h1>
+							{appVersion && (
+								<span className="text-[11px] font-medium text-slate-11 dark:text-drac-muted">v{appVersion}</span>
+							)}
 						</div>
 					</div>
+				</div>
 				<div className="flex items-center gap-3">
 					{currentConnector && (
 						<div className="flex items-center gap-2 rounded-full border border-border/70 bg-background/80 px-3 py-1.5 text-sm text-slate-12 dark:border-drac-border/60 dark:bg-[#1f232b] dark:text-drac-foreground">
