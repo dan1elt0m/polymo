@@ -71,6 +71,18 @@ Use the same runtime options as `read` (tokens, OAuth2 client secrets, increment
 
 Want a quick check without writing code? Run `polymo smoke --streaming` and the CLI will execute a one-off micro-batch using the bundled JSONPlaceholder example (or a YAML you pass in).
 
+### Builder UI preview
+
+<!-- Centered clickable screenshot -->
+<p align="center">
+  <a href="docs/ui.png">
+    <img src="docs/ui.png" alt="Polymo Builder UI - connector preview screen" width="860">
+  </a>
+</p>
+
+<!-- Simpler fallback (remove if you keep the HTML version) -->
+<!-- ![Polymo Builder UI - connector preview screen](docs/ui.png) -->
+
 ### Incremental syncs in one minute
 - Add `cursor_param` and `cursor_field` under `incremental:` in your YAML to tell Polymo which API field to track.
 - Pass `.option("incremental_state_path", ...)` when reading with Spark. Local paths and remote URLs (S3, GCS, Azure, etc.) work out of the box.

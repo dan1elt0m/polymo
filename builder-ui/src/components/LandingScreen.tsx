@@ -10,6 +10,8 @@ const EXAMPLE_CONNECTORS = [
   { name: "JSON Placeholder Multiple Endpoints", path: "/static/examples/jsonplaceholder_endpoints.yml", description: "Fetch posts, comments, and users" },
 ];
 
+const exampleTestId = (name: string): string => name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+
 interface SavedConnectorSummary {
   id: string;
   name: string;
@@ -195,6 +197,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
                 const dropdown = document.getElementById("example-dropdown");
                 dropdown?.classList.toggle("hidden");
               }}
+              data-testid="landing-example-toggle"
             >
               <span>Select an example connector</span>
               <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
@@ -212,6 +215,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
                     type="button"
                     onClick={() => handleLoadExample(example.path, example.name)}
                     className="flex w-full items-center justify-between rounded-lg border-b border-border/70 bg-background px-4 py-2 text-sm text-slate-12 hover:bg-blue-5/10 transition dark:border-drac-border/70 dark:bg-[#1f232b]/80 dark:text-drac-foreground dark:hover:bg-blue-9/10"
+                    data-testid={`landing-example-${exampleTestId(example.name)}`}
                   >
                     <div className="flex flex-col">
                       <span className="font-medium">{example.name}</span>

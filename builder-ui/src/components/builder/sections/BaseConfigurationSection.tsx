@@ -21,6 +21,7 @@ export const BaseConfigurationSection: React.FC<BaseConfigurationSectionProps> =
           placeholder="https://api.example.com"
           value={state.baseUrl}
           onChange={(e) => onUpdateState({ baseUrl: e.target.value })}
+          data-testid="base-url-input"
         />
       </label>
 
@@ -35,9 +36,9 @@ export const BaseConfigurationSection: React.FC<BaseConfigurationSectionProps> =
           placeholder="/v1/orders"
           value={state.streamPath}
           onChange={(e) => onUpdateState({ streamPath: e.target.value })}
+          data-testid="stream-path-input"
         />
       </label>
     </div>
   );
 };
-

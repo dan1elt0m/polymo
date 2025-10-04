@@ -18,6 +18,13 @@ export const ParamRow: React.FC<ParamRowProps> = ({
   onRemove,
 }) => {
   const [tempKey, setTempKey] = React.useState(originalKey);
+  const safeKey = React.useMemo(() => {
+    const normalized = (originalKey || "param")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    return normalized || "param";
+  }, [originalKey]);
 
   React.useEffect(() => {
     setTempKey(originalKey);
@@ -30,7 +37,10 @@ export const ParamRow: React.FC<ParamRowProps> = ({
   }, [tempKey, originalKey, value, onUpdateKey]);
 
   return (
-    <li className="group relative rounded-xl border border-border/60 dark:border-drac-border/60 bg-background/60 dark:bg-[#262c35] backdrop-blur-sm px-4 py-4 shadow-inner transition-all duration-200 hover:border-blue-7/60 dark:hover:border-drac-accent/60 hover:shadow-sm">
+    <li
+      className="group relative rounded-xl border border-border/60 dark:border-drac-border/60 bg-background/60 dark:bg-[#262c35] backdrop-blur-sm px-4 py-4 shadow-inner transition-all duration-200 hover:border-blue-7/60 dark:hover:border-drac-accent/60 hover:shadow-sm"
+      data-testid={`param-row-${safeKey}`}
+    >
       <div className="grid gap-4 md:grid-cols-2">
         <div className="flex flex-col gap-1.5">
           <label className="text-[11px] tracking-wide text-muted dark:text-drac-muted font-medium flex items-center gap-1">
@@ -49,6 +59,7 @@ export const ParamRow: React.FC<ParamRowProps> = ({
                 (e.target as HTMLInputElement).blur();
               }
             }}
+            data-testid={`param-name-input-${safeKey}`}
           />
         </div>
         <div className="flex flex-col gap-1.5">
@@ -61,6 +72,7 @@ export const ParamRow: React.FC<ParamRowProps> = ({
             placeholder="value"
             value={value}
             onValueChange={(newValue) => onUpdateValue(originalKey, originalKey, newValue)}
+            data-testid={`param-value-input-${safeKey}`}
           />
         </div>
       </div>
@@ -77,4 +89,3 @@ export const ParamRow: React.FC<ParamRowProps> = ({
     </li>
   );
 };
-

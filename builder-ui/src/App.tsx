@@ -861,6 +861,7 @@ const App: React.FC = () => {
 						type="button"
 						className="rounded-full px-3 py-1.5 text-xs font-medium border border-border bg-background text-slate-12 hover:bg-blue-3/40 dark:border-drac-border/50 dark:bg-[#1f232b] dark:text-drac-foreground dark:hover:bg-blue-9/20 transition"
 						onClick={openConnectorLibrary}
+						data-testid="open-connector-library"
 					>
 						Connectors
 					</button>
@@ -914,12 +915,13 @@ const App: React.FC = () => {
 										>
 											{isValidating ? 'Validating…' : 'Validate'}
 										</button>
-										<button
-											type="button"
-											className="inline-flex items-center gap-1 rounded-full bg-blue-9 px-5 py-2 text-sm font-semibold text-white shadow-soft transition hover:bg-blue-10 disabled:opacity-50 disabled:cursor-not-allowed"
-											onClick={() => setShowSaveModal(true)}
-											disabled={busy}
-										>
+						<button
+							type="button"
+							className="inline-flex items-center gap-1 rounded-full bg-blue-9 px-5 py-2 text-sm font-semibold text-white shadow-soft transition hover:bg-blue-10 disabled:opacity-50 disabled:cursor-not-allowed"
+							onClick={() => setShowSaveModal(true)}
+							disabled={busy}
+							data-testid="open-export-modal"
+						>
 											Export
 										</button>
 									</div>
@@ -1014,13 +1016,14 @@ const App: React.FC = () => {
 						<div className="space-y-4">
 							<label className="flex flex-col gap-2">
 								<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/80">File Name</span>
-								<input
-									type="text"
-									className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-slate-12 shadow-sm focus-visible:border-blue-7 dark:border-drac-border dark:bg-drac-surface dark:text-drac-foreground"
-									value={saveFileName}
-									onChange={(e) => setSaveFileName(e.target.value)}
-									placeholder="config.yml"
-								/>
+							<input
+								type="text"
+								className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-slate-12 shadow-sm focus-visible:border-blue-7 dark:border-drac-border dark:bg-drac-surface dark:text-drac-foreground"
+								value={saveFileName}
+								onChange={(e) => setSaveFileName(e.target.value)}
+								placeholder="config.yml"
+								data-testid="export-file-name-input"
+							/>
 							</label>
 							<div className="flex items-center gap-3">
 								<button
@@ -1053,6 +1056,7 @@ const App: React.FC = () => {
 								className="rounded-full px-5 py-2 text-sm font-semibold bg-blue-9 text-white hover:bg-blue-10 shadow-soft transition disabled:opacity-50"
 								onClick={() => { setShowSaveModal(false); handleSave(saveFileName); }}
 								disabled={isSaving || !saveFileName.trim()}
+								data-testid="confirm-export"
 							>
 								{isSaving ? 'Saving…' : 'Save File'}
 							</button>

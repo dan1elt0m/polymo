@@ -62,12 +62,13 @@ export const SamplePreview: React.FC<SamplePreviewProps> = ({
 				<div className="flex items-center justify-between gap-3 min-w-0 flex-wrap">
 					<h2 className="text-lg font-semibold text-slate-12 truncate">Data Preview</h2>
 					<div className="flex items-center gap-2">
-						<button
-							type="button"
-							className="rounded-full border border-border px-4 py-2 text-sm font-semibold text-slate-12 transition hover:border-blue-7 hover:text-blue-11 disabled:opacity-50"
-							onClick={onPreview}
-							disabled={isBusy}
-						>
+					<button
+						type="button"
+						className="rounded-full border border-border px-4 py-2 text-sm font-semibold text-slate-12 transition hover:border-blue-7 hover:text-blue-11 disabled:opacity-50"
+						onClick={onPreview}
+						disabled={isBusy}
+						data-testid="data-preview-button"
+					>
 							{isBusy ? "Working…" : "Preview"}
 						</button>
 						<button
@@ -114,6 +115,7 @@ export const SamplePreview: React.FC<SamplePreviewProps> = ({
 							)}
 							onClick={() => onViewChange(SAMPLE_VIEWS.TABLE)}
 							disabled={!hasTableData || isBusy}
+							data-testid="view-tab-dataframe"
 						>
 							DataFrame
 						</button>
@@ -125,6 +127,7 @@ export const SamplePreview: React.FC<SamplePreviewProps> = ({
 							)}
 							onClick={() => onViewChange(SAMPLE_VIEWS.JSON)}
 							disabled={!hasTableData || isBusy}
+							data-testid="view-tab-records"
 						>
 							Records
 						</button>
@@ -136,6 +139,7 @@ export const SamplePreview: React.FC<SamplePreviewProps> = ({
 							)}
 							onClick={() => onViewChange(SAMPLE_VIEWS.RAW)}
 							disabled={!hasRawData || isBusy}
+							data-testid="view-tab-raw"
 						>
 							Raw API
 						</button>

@@ -27,6 +27,7 @@ export const ParamsSection: React.FC<ParamsSectionProps> = ({ params, onAddParam
         onClick={() => setIsOpen((value) => !value)}
         aria-expanded={isOpen}
         aria-controls={TOGGLE_ID}
+        data-testid="query-params-toggle"
       >
         <span className="flex items-center gap-2">
           Query Parameters
@@ -79,4 +80,3 @@ export const ParamsSection: React.FC<ParamsSectionProps> = ({ params, onAddParam
     </div>
   );
 };
-
