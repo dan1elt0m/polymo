@@ -550,7 +550,7 @@ wheels = [
 
 [[package]]
 name = "polymo"
-version = "0.2.0"
+version = "0.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "fsspec" },
@@ -560,13 +560,6 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-all = [
-    { name = "fastapi" },
-    { name = "jinja2" },
-    { name = "pyarrow" },
-    { name = "pyspark" },
-    { name = "uvicorn" },
-]
 builder = [
     { name = "fastapi" },
     { name = "jinja2" },
@@ -600,7 +593,6 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.26" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "jinja2", marker = "extra == 'builder'", specifier = ">=3.1.6" },
-    { name = "polymo", extras = ["builder", "smoke"], marker = "extra == 'all'" },
     { name = "pyarrow", marker = "extra == 'builder'", specifier = ">=13" },
     { name = "pyarrow", marker = "extra == 'smoke'", specifier = ">=13" },
     { name = "pyspark", marker = "extra == 'builder'", specifier = ">=4" },
@@ -608,7 +600,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.1" },
     { name = "uvicorn", marker = "extra == 'builder'", specifier = ">=0.24" },
 ]
-provides-extras = ["builder", "smoke", "all"]
+provides-extras = ["builder", "smoke"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8.4.2" }]
