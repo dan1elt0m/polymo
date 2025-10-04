@@ -22,23 +22,6 @@ Polymo is a helper for pyspark that turns everyday web APIs into tables you can 
 - Make sure you have access to the API you care about (base URL, token if needed, and any sample request parameters).
 - Check that PySpark version 4 or newer is available. Polymo uses Spark under the hood to keep data consistent.
 
-### Builder UI preview
-
-<p align="center">
-  <a href="docs/ui_landing.png">
-    <img src="docs/ui_landing.png" alt="Polymo Builder UI landing screen" width="880">
-  </a>
-</p>
-
-
-<!-- Centered clickable screenshot -->
-<p align="center">
-  <a href="docs/ui.png">
-    <img src="docs/ui.png" alt="Polymo Builder UI - connector preview screen" width="860">
-  </a>
-</p>
-
-
 ## Quick tour
 
 1. **Launch the Builder (optional but recommended).** Run `polymo builder --port 9000` and open the provided link in your browser.
@@ -88,36 +71,20 @@ Use the same runtime options as `read` (tokens, OAuth2 client secrets, increment
 
 Want a quick check without writing code? Run `polymo smoke --streaming` and the CLI will execute a one-off micro-batch using the bundled JSONPlaceholder example (or a YAML you pass in).
 
+### Builder UI preview
 
-### Incremental syncs in one minute
-- Add `cursor_param` and `cursor_field` under `incremental:` in your YAML to tell Polymo which API field to track.
-- Pass `.option("incremental_state_path", ...)` when reading with Spark. Local paths and remote URLs (S3, GCS, Azure, etc.) work out of the box.
-- On the first run, seed a starting value with `.option("incremental_start_value", "...")`. Future runs reuse the stored cursor automatically.
-- Override the stored entry name with `.option("incremental_state_key", "...")` if you share a state file across connectors.
-- Skip the state path to keep cursors only in memory during the Spark session, or disable that cache with `.option("incremental_memory_state", "false")` if you always want a cold start.
+<p align="center">
+  <a href="docs/ui_landing.png">
+    <img src="docs/ui_landing.png" alt="Polymo Builder UI landing screen" width="880">
+  </a>
+</p>
 
-### Handling flaky APIs with retries
-- Add an `error_handler` block under `stream:` when you want to customise retries. By default Polymo retries 5× on HTTP `5XX` and `429` responses with exponential backoff.
-- Override the defaults to catch extra status codes or adjust the timing:
-
-```yaml
-stream:
-  path: /orders
-  error_handler:
-    max_retries: 6
-    retry_statuses:
-      - 5XX
-      - 429
-      - 404
-    retry_on_timeout: true
-    retry_on_connection_errors: true
-    backoff:
-      initial_delay_seconds: 1
-      max_delay_seconds: 60
-      multiplier: 1.8
-```
-
-- Omit the block to keep the safe defaults. The Builder UI exposes the same fields if you prefer toggles over YAML edits.
+<!-- Centered clickable screenshot -->
+<p align="center">
+  <a href="docs/ui.png">
+    <img src="docs/ui.png" alt="Polymo Builder UI - connector preview screen" width="860">
+  </a>
+</p>
 
 ## What’s inside this project
 - `src/polymo/` keeps the logic that speaks to APIs and hands data to Spark.
