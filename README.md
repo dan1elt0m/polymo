@@ -22,6 +22,18 @@ Polymo is a helper for pyspark that turns everyday web APIs into tables you can 
 - Make sure you have access to the API you care about (base URL, token if needed, and any sample request parameters).
 - Check that PySpark version 4 or newer is available. Polymo uses Spark under the hood to keep data consistent.
 
+## Supported features
+- Declarative REST connectors defined in YAML or through the Builder, with path placeholders, runtime option templates, and environment variable helpers.
+- Browser-based Builder UI with autosave, preview modes (table, records, raw API), schema copy, and a synced YAML editor.
+- Lightweight CLI including `polymo builder` for launching the UI and `polymo smoke` for batch or streaming validation runs.
+- Authentication helpers covering no auth, bearer tokens, API keys injected as parameters, and OAuth2 client-credentials exchanges with scoped requests.
+- Pagination engines for single-shot, offset, page, cursor, next-link, and HTTP `Link` header patterns, plus partition-aware hints when totals are exposed.
+- Workload partitioning via pagination hints, explicit endpoint fan-out, or parameter ranges (numeric and date) for parallel Spark reads.
+- Incremental sync support with cursor parameters, JSON state files on local or remote storage, optional memory caching, and overrideable state keys.
+- Schema controls that auto-infer types or accept Spark SQL schemas, along with record selectors, filtering expressions, and schema-based casting for nested responses.
+- Structured Streaming compatibility with `spark.readStream`, tunable batch sizing, durable progress tracking, and a streaming smoke test mode.
+- Resilient error handling through configurable retry counts, status code lists, timeout handling, and exponential backoff settings.
+
 ## Quick tour
 
 1. **Launch the Builder (optional but recommended).** Run `polymo builder --port 9000` and open the provided link in your browser.
