@@ -116,16 +116,30 @@ pagination:
 
 If the total count hints are missing, Polymo falls back to a single Spark partition.
 
-#### Additional Spark partition strategies
+### Partition block
 
-Partitioning is opt-in and configured through Spark reader options:
+Define a `partition` block under `stream` to split the workload explicitly:
 
-- `.option("partition_strategy", "pagination")` – enables the page/offset partitioning described above. Requires the pagination hints to be present in the YAML.
-- `.option("partition_strategy", "param_range")` – generates one partition per query-parameter value. Combine with:
-  - `.option("partition_param", "created_at")`
-  - either `.option("partition_values", "2024-01-01,2024-01-02")` or range options such as `.option("partition_range_start", "2024-01-01")`, `.option("partition_range_end", "2024-01-07")`, `.option("partition_range_kind", "date")`, `.option("partition_range_step", "1")`
-  - Optional templates: `.option("partition_value_template", "{{value}}T00:00:00Z")` or `.option("partition_extra_template", '{"until": "{{value}}T23:59:59Z"}')`
-- `.option("partition_strategy", "endpoints")` – fans out over multiple endpoints. Provide `.option("partition_endpoints", '[{"name":"users","path":"/users"},{"name":"repos","path":"/repos"}]')`. Each partition sets `endpoint_name` and fetches the specified path (with optional `params`). Shape the schema accordingly, for example `endpoint_name STRING, data STRING` to capture heterogenous payloads.
+```yaml
+partition:
+  strategy: endpoints
+  endpoints:
+    - posts:/posts
+    - comments:/comments
+    - users:/users
+```
+
+Supported strategies:
+
+- **pagination** – mirrors the pagination hints in the YAML. Including total counts (as shown above) lets Spark plan one partition per page; without the hints Polymo still works, but Spark keeps the job single-partition.
+- **param_range** – generates a partition per value. Supply either `values: 1,2,3` or range fields (`range_start`, `range_end`, `range_step`, and optional `range_kind: date`). `value_template` and `extra_template` let you shape request parameters.
+- **endpoints** – fans out over multiple paths. Each item can be `/path` or `name:/path`; the name shows up as `endpoint_name` in previews and Spark rows.
+
+The Builder writes this block for you, and it exports cleanly in the YAML download. You can declare it by hand too—see `examples/jsonplaceholder_endpoints.yml` for full sample.
+
+#### Overriding via runtime options
+
+For backward compatibility you can still force partitioning at runtime. Any `.option("partition_strategy", ...)` call overrides the YAML block. The auxiliary options (`partition_param`, `partition_values`, `partition_endpoints`, and so on) are unchanged.
 
 ### Incremental fields
 
