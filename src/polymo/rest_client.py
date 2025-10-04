@@ -34,6 +34,7 @@ from pyspark.sql.types import (
 
 from .config import (
     AuthConfig,
+    ConfigError,
     ErrorHandlerConfig,
     PaginationConfig,
     RecordSelectorConfig,
@@ -134,6 +135,10 @@ class RestClient:
         headers = {"User-Agent": USER_AGENT}
         if self.auth.type == "bearer" and self.auth.token:
             headers["Authorization"] = f"Bearer {self.auth.token}"
+        elif self.auth.type == "oauth2":
+            access_token = self._obtain_oauth2_token()
+            headers["Authorization"] = f"Bearer {access_token}"
+            self._oauth2_token = access_token
 
         self._client = httpx.Client(base_url=self.base_url, headers=headers, timeout=self.timeout)
 
@@ -203,6 +208,56 @@ class RestClient:
             persist_state=persist_state,
             observe_records=observe_records,
         )
+
+    def _obtain_oauth2_token(self) -> str:
+        if not self.auth.token_url:
+            raise ConfigError("OAuth2 auth requires 'token_url'")
+        if not self.auth.client_id:
+            raise ConfigError("OAuth2 auth requires 'client_id'")
+
+        client_secret = self.auth.client_secret
+        if not client_secret:
+            secret = self.options.get("oauth_client_secret") if self.options else None
+            if isinstance(secret, str) and secret.strip():
+                client_secret = secret.strip()
+        if not client_secret:
+            raise ConfigError(
+                "OAuth2 auth requires a client secret provided via config or runtime option 'oauth_client_secret'",
+            )
+
+        data: Dict[str, Any] = {
+            "grant_type": "client_credentials",
+            "client_id": self.auth.client_id,
+            "client_secret": client_secret,
+        }
+        if self.auth.scope:
+            data["scope"] = " ".join(self.auth.scope)
+        if self.auth.audience:
+            data["audience"] = self.auth.audience
+        if self.auth.extra_params:
+            for key, value in self.auth.extra_params.items():
+                data[str(key)] = value
+
+        try:
+            response = httpx.post(self.auth.token_url, data=data, timeout=self.timeout)
+        except httpx.HTTPError as exc:
+            raise ConfigError(f"OAuth2 token request failed: {exc}") from exc
+
+        if response.status_code >= 400:
+            detail = response.text.strip()
+            raise ConfigError(
+                f"OAuth2 token request failed with status {response.status_code}: {detail or 'no response body'}",
+            )
+
+        try:
+            payload = response.json()
+        except ValueError as exc:  # pragma: no cover - unexpected server response
+            raise ConfigError("OAuth2 token response was not valid JSON") from exc
+
+        access_token = payload.get("access_token")
+        if not isinstance(access_token, str) or not access_token.strip():
+            raise ConfigError("OAuth2 token response missing 'access_token'")
+        return access_token.strip()
 
     def peek_page(self, stream: StreamConfig) -> Optional[RestPage]:
         """Return the first page without mutating incremental state."""

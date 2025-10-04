@@ -33,8 +33,14 @@ class ConfigError(ValueError):
 class AuthConfig:
     """Authentication configuration for REST requests."""
 
-    type: Literal["none", "bearer"] = "none"
+    type: Literal["none", "bearer", "oauth2"] = "none"
     token: str | None = None
+    token_url: str | None = None
+    client_id: str | None = None
+    client_secret: str | None = None
+    scope: Tuple[str, ...] = field(default_factory=tuple)
+    audience: str | None = None
+    extra_params: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -196,11 +202,9 @@ def parse_config(
     if source.get("type") != "rest":
         raise ConfigError("Only REST sources are supported for now")
 
-    # token decides.
-    if token:
-        auth = AuthConfig(type="bearer", token=token)
-    else:
-        auth = AuthConfig()
+    runtime_options: Dict[str, Any] = dict(options or {})
+
+    auth = _parse_auth_config(source.get("auth"), token, runtime_options)
 
     base_url = source.get("base_url")
     if not isinstance(base_url, str) or not base_url:
@@ -212,8 +216,6 @@ def parse_config(
         raise ConfigError("A stream must be defined")
 
     stream = _parse_stream(stream_raw)
-
-    runtime_options = dict(options or {})
 
     return RestSourceConfig(
         version=version,
@@ -236,7 +238,20 @@ def config_to_dict(config: RestSourceConfig) -> Dict[str, Any]:
     }
     if config.auth.type == "bearer":
         # Expose only the auth type, never the token.
-        source["auth"] = {"type": config.auth.type}
+        source["auth"] = {"type": "bearer"}
+    elif config.auth.type == "oauth2":
+        auth_block: Dict[str, Any] = {"type": "oauth2"}
+        if config.auth.token_url:
+            auth_block["token_url"] = config.auth.token_url
+        if config.auth.client_id:
+            auth_block["client_id"] = config.auth.client_id
+        if config.auth.scope:
+            auth_block["scope"] = list(config.auth.scope)
+        if config.auth.audience:
+            auth_block["audience"] = config.auth.audience
+        if config.auth.extra_params:
+            auth_block["extra_params"] = dict(config.auth.extra_params)
+        source["auth"] = auth_block
 
     stream = config.stream
     stream_dict: Dict[str, Any] = {
@@ -313,15 +328,101 @@ def dump_config(config: RestSourceConfig) -> str:
     return yaml.safe_dump(data, sort_keys=False)
 
 
-def _parse_auth(auth: dict) -> AuthConfig:  # Deprecated – retained for backward compatibility (unused)
-    token = auth.get("token")
-    auth_type = auth.get("type")
+def _parse_auth_config(
+    raw_auth: Any,
+    runtime_token: Optional[str],
+    runtime_options: Dict[str, Any],
+) -> AuthConfig:
+    token_value = runtime_token.strip() if isinstance(runtime_token, str) and runtime_token.strip() else None
+
+    if raw_auth is None:
+        if token_value:
+            return AuthConfig(type="bearer", token=token_value)
+        return AuthConfig()
+
+    if not isinstance(raw_auth, Mapping):
+        raise ConfigError("'source.auth' must be a mapping when provided")
+
+    auth_type = raw_auth.get("type") or ("bearer" if token_value else "none")
+    if auth_type not in {"none", "bearer", "oauth2"}:
+        raise ConfigError(f"Unsupported auth type: {auth_type}")
+
+    if auth_type == "none":
+        return AuthConfig()
+
     if auth_type == "bearer":
-        if not isinstance(token, str):
-            raise ConfigError("'token' must be a string")
-        if token == "":
-            raise ConfigError("'token' cannot be empty")
-    return AuthConfig(type=auth_type, token=token)
+        raw_token = raw_auth.get("token")
+        raw_token = raw_token.strip() if isinstance(raw_token, str) else None
+        token = token_value or raw_token
+        if not token:
+            raise ConfigError("Bearer auth requires a token supplied via config or runtime options")
+        return AuthConfig(type="bearer", token=token)
+
+    # OAuth2 client credentials
+    token_url = raw_auth.get("token_url")
+    if not isinstance(token_url, str) or not token_url.strip():
+        raise ConfigError("'source.auth.token_url' must be provided for oauth2 auth")
+
+    client_id = raw_auth.get("client_id")
+    if not isinstance(client_id, str) or not client_id.strip():
+        raise ConfigError("'source.auth.client_id' must be provided for oauth2 auth")
+
+    client_secret = raw_auth.get("client_secret")
+    if isinstance(client_secret, str):
+        client_secret = client_secret.strip() or None
+        if client_secret and client_secret.startswith("{{") and client_secret.endswith("}}"):
+            client_secret = None
+    elif client_secret is not None:
+        client_secret = str(client_secret)
+
+    secret_from_options = runtime_options.pop("oauth_client_secret", None)
+    if isinstance(secret_from_options, str):
+        secret_from_options = secret_from_options.strip() or None
+    elif secret_from_options is not None:
+        secret_from_options = str(secret_from_options)
+
+    client_secret = client_secret or token_value or secret_from_options
+    if not client_secret:
+        raise ConfigError(
+            "OAuth2 auth requires a client secret supplied via config ('client_secret') or runtime option 'oauth_client_secret'",
+        )
+
+    scope_raw = raw_auth.get("scope")
+    scope: Tuple[str, ...] = ()
+    if isinstance(scope_raw, str):
+        scope = tuple(part for part in scope_raw.replace(",", " ").split() if part)
+    elif isinstance(scope_raw, (list, tuple)):
+        collected: List[str] = []
+        for item in scope_raw:
+            if not isinstance(item, str):
+                raise ConfigError("Each scope entry must be a string")
+            trimmed = item.strip()
+            if trimmed:
+                collected.append(trimmed)
+        scope = tuple(collected)
+    elif scope_raw not in (None, {}):
+        raise ConfigError("'source.auth.scope' must be a string or list of strings")
+
+    audience_raw = raw_auth.get("audience")
+    audience = audience_raw.strip() if isinstance(audience_raw, str) and audience_raw.strip() else None
+
+    extra_params_raw = raw_auth.get("extra_params")
+    extra_params: Dict[str, Any] = {}
+    if extra_params_raw is not None:
+        if not isinstance(extra_params_raw, Mapping):
+            raise ConfigError("'source.auth.extra_params' must be a mapping when provided")
+        for key, value in extra_params_raw.items():
+            extra_params[str(key)] = value
+
+    return AuthConfig(
+        type="oauth2",
+        token_url=token_url.strip(),
+        client_id=client_id.strip(),
+        client_secret=client_secret,
+        scope=scope,
+        audience=audience,
+        extra_params=extra_params,
+    )
 
 
 def _parse_stream(raw: Any) -> StreamConfig:

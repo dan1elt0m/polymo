@@ -280,6 +280,13 @@ export const runtimeOptionsAtom = atom((get) => {
     }
   }
 
+  if (formState.authType === 'oauth2') {
+    const secret = formState.authToken.trim();
+    if (secret) {
+      manualOptions['oauth_client_secret'] = secret;
+    }
+  }
+
   const partitionStrategy = formState.partitionStrategy || 'none';
   const strategy = partitionStrategy.trim() as typeof formState.partitionStrategy;
   if (strategy && strategy !== 'none') {

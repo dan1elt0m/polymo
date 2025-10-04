@@ -18,7 +18,7 @@ export const AuthenticationSection: React.FC<AuthenticationSectionProps> = ({
   const [isOpen, setIsOpen] = React.useState(false);
 
   React.useEffect(() => {
-    if (state.authType === "bearer" || state.authType === "api_key") {
+    if (state.authType === "bearer" || state.authType === "api_key" || state.authType === "oauth2") {
       setIsOpen(true);
     }
   }, [state.authType]);
@@ -30,11 +30,21 @@ export const AuthenticationSection: React.FC<AuthenticationSectionProps> = ({
       if (nextType === "none") {
         patch.authToken = "";
         patch.authApiKeyParamName = state.authApiKeyParamName;
+        patch.authTokenUrl = "";
+        patch.authClientId = "";
+        patch.authScopes = "";
+        patch.authAudience = "";
+        patch.authExtraParams = "";
         setBearerToken("");
       }
 
       if (nextType === "bearer") {
         patch.authApiKeyParamName = state.authApiKeyParamName;
+        patch.authTokenUrl = "";
+        patch.authClientId = "";
+        patch.authScopes = "";
+        patch.authAudience = "";
+        patch.authExtraParams = "";
       }
 
       if (nextType === "api_key") {
@@ -42,6 +52,21 @@ export const AuthenticationSection: React.FC<AuthenticationSectionProps> = ({
         if (!state.authApiKeyParamName) {
           patch.authApiKeyParamName = "api_key";
         }
+        patch.authTokenUrl = "";
+        patch.authClientId = "";
+        patch.authScopes = "";
+        patch.authAudience = "";
+        patch.authExtraParams = "";
+        setBearerToken("");
+      }
+
+      if (nextType === "oauth2") {
+        patch.authToken = "";
+        patch.authTokenUrl = "";
+        patch.authClientId = "";
+        patch.authScopes = "";
+        patch.authAudience = "";
+        patch.authExtraParams = "";
         setBearerToken("");
       }
 
@@ -100,6 +125,7 @@ export const AuthenticationSection: React.FC<AuthenticationSectionProps> = ({
                   <option value="none">None</option>
                   <option value="bearer">Bearer Token</option>
                   <option value="api_key">API Key</option>
+                  <option value="oauth2">OAuth 2.0 (Client Credentials)</option>
                 </select>
                 <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-10 dark:text-drac-muted">
                   <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
@@ -151,6 +177,93 @@ export const AuthenticationSection: React.FC<AuthenticationSectionProps> = ({
                     placeholder="your-api-key"
                     value={state.authToken}
                     onChange={(event) => handleBearerTokenChange(event.target.value)}
+                  />
+                </label>
+              </div>
+            )}
+
+            {state.authType === "oauth2" && (
+              <div className="grid gap-5 md:grid-cols-2">
+                <label className="flex flex-col gap-2 md:col-span-1">
+                  <div className="flex items-center gap-1">
+                    <span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Token URL</span>
+                    <InfoTooltip text="OAuth2 token endpoint used for the client credentials grant." />
+                  </div>
+                  <input
+                    type="url"
+                    className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
+                    placeholder="https://example.com/oauth/token"
+                    value={state.authTokenUrl || ''}
+                    onChange={(event) => onUpdateState({ authTokenUrl: event.target.value })}
+                  />
+                </label>
+
+                <label className="flex flex-col gap-2 md:col-span-1">
+                  <div className="flex items-center gap-1">
+                    <span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Client ID</span>
+                    <InfoTooltip text="Public client identifier used when requesting the token." />
+                  </div>
+                  <input
+                    type="text"
+                    className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
+                    placeholder="client-id"
+                    value={state.authClientId || ''}
+                    onChange={(event) => onUpdateState({ authClientId: event.target.value })}
+                  />
+                </label>
+
+                <label className="flex flex-col gap-2 md:col-span-2">
+                  <div className="flex items-center gap-1">
+                    <span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Client Secret</span>
+                    <InfoTooltip text="Secret stored only in this session and passed as a runtime option ('oauth_client_secret')." />
+                  </div>
+                  <input
+                    type="password"
+                    className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
+                    placeholder="your-client-secret"
+                    value={state.authToken}
+                    onChange={(event) => handleBearerTokenChange(event.target.value)}
+                  />
+                </label>
+
+                <label className="flex flex-col gap-2">
+                  <div className="flex items-center gap-1">
+                    <span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Scopes</span>
+                    <InfoTooltip text="Optional list of scopes separated by spaces or commas." />
+                  </div>
+                  <input
+                    type="text"
+                    className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
+                    placeholder="read write"
+                    value={state.authScopes || ''}
+                    onChange={(event) => onUpdateState({ authScopes: event.target.value })}
+                  />
+                </label>
+
+                <label className="flex flex-col gap-2">
+                  <div className="flex items-center gap-1">
+                    <span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Audience</span>
+                    <InfoTooltip text="Optional audience parameter included with the token request." />
+                  </div>
+                  <input
+                    type="text"
+                    className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
+                    placeholder="https://api.example.com"
+                    value={state.authAudience || ''}
+                    onChange={(event) => onUpdateState({ authAudience: event.target.value })}
+                  />
+                </label>
+
+                <label className="flex flex-col gap-2 md:col-span-2">
+                  <div className="flex items-center gap-1">
+                    <span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Extra Params (JSON)</span>
+                    <InfoTooltip text="Optional JSON object merged into the token request body." />
+                  </div>
+                  <textarea
+                    className="min-h-[90px] rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm leading-snug text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
+                    placeholder='{\"resource\": \"https://graph.microsoft.com\"}'
+                    value={state.authExtraParams || ''}
+                    onChange={(event) => onUpdateState({ authExtraParams: event.target.value })}
                   />
                 </label>
               </div>

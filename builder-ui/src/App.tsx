@@ -442,10 +442,16 @@ const App: React.FC = () => {
 				setYamlText(payload.yaml);
 			} else {
 				const nextState = configToFormState(payload.config);
-				// Preserve existing auth token & type since backend strips secrets.
+				// Preserve existing auth details since backend strips secrets.
 				if (configFormState.authType !== 'none') {
 					nextState.authType = configFormState.authType;
-					nextState.authToken = configFormState.authToken; // keep token in form state
+					nextState.authToken = configFormState.authToken;
+					nextState.authApiKeyParamName = configFormState.authApiKeyParamName;
+					nextState.authTokenUrl = configFormState.authTokenUrl;
+					nextState.authClientId = configFormState.authClientId;
+					nextState.authScopes = configFormState.authScopes;
+					nextState.authAudience = configFormState.authAudience;
+					nextState.authExtraParams = configFormState.authExtraParams;
 				}
 				setConfigFormState(nextState);
 			}
@@ -457,9 +463,11 @@ const App: React.FC = () => {
 		async ({ updateYaml = false, applyResponse = true }: { updateYaml?: boolean; applyResponse?: boolean } = {}) => {
 			setIsValidating(true);
 			try {
+				const shouldSendToken = configFormState.authType === 'bearer' || configFormState.authType === 'oauth2';
+				const authSecret = shouldSendToken ? bearerToken : '';
 				const payload = await validateConfigRequest({
 					...configPayload,
-					token: bearerToken,
+					...(authSecret ? { token: authSecret } : {}),
 					options: runtimeOptions,
 				});
 
@@ -476,7 +484,7 @@ const App: React.FC = () => {
 				setIsValidating(false);
 			}
 		},
-		[applyValidationPayload, configPayload, setIsValidating, setYamlText, bearerToken, runtimeOptions]
+		[applyValidationPayload, configFormState.authType, configPayload, setIsValidating, setYamlText, bearerToken, runtimeOptions]
 	);
 
 	const handleValidate = React.useCallback(async () => {
@@ -517,9 +525,11 @@ const App: React.FC = () => {
 			// Don't apply the validation response to form state during preview
 			await runValidation({ updateYaml: builderView === "yaml", applyResponse: false });
 			setStatus({ tone: "info", message: "Fetching sample..." });
+				const shouldSendToken = configFormState.authType === 'bearer' || configFormState.authType === 'oauth2';
+				const authSecret = shouldSendToken ? bearerToken : '';
 				const payload = await sampleRequest({
 					...configPayload,
-					token: bearerToken,
+					...(authSecret ? { token: authSecret } : {}),
 					limit: nextLimit,
 					options: runtimeOptions,
 				});
@@ -550,7 +560,7 @@ const App: React.FC = () => {
 			setSample((prev) => ({ ...prev, loading: false }));
 			setStatus({ tone: "error", message: formatError(error) });
 		}
-	}, [builderView, configPayload, runValidation, sample.limit, sample.stream, setSample, setStatus, streamOptions, bearerToken, runtimeOptions]);
+	}, [builderView, configFormState.authType, configPayload, runValidation, sample.limit, sample.stream, setSample, setStatus, streamOptions, bearerToken, runtimeOptions]);
 
 	const handleYamlChange = React.useCallback(
 		(value: string) => {
@@ -586,6 +596,12 @@ const App: React.FC = () => {
 							if (configFormState.authType !== 'none') {
 								nextState.authType = configFormState.authType;
 								nextState.authToken = configFormState.authToken;
+								nextState.authApiKeyParamName = configFormState.authApiKeyParamName;
+								nextState.authTokenUrl = configFormState.authTokenUrl;
+								nextState.authClientId = configFormState.authClientId;
+								nextState.authScopes = configFormState.authScopes;
+								nextState.authAudience = configFormState.authAudience;
+								nextState.authExtraParams = configFormState.authExtraParams;
 							}
 							setConfigFormState(nextState);
 							setBuilderView("ui");

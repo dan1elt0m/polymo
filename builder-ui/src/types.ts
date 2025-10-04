@@ -123,9 +123,14 @@ export interface RawPagePayload {
 export interface ConfigFormState {
   version: string;
   baseUrl: string;
-  authType: 'none' | 'bearer' | 'api_key';
+  authType: 'none' | 'bearer' | 'api_key' | 'oauth2';
   authToken: string;
   authApiKeyParamName?: string; // name of the query parameter for api_key auth
+  authTokenUrl?: string;
+  authClientId?: string;
+  authScopes?: string;
+  authAudience?: string;
+  authExtraParams?: string;
   streamPath: string;
   params: Record<string, string>;
   paginationType: 'none' | 'link_header' | 'offset' | 'cursor' | 'page';

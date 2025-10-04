@@ -230,12 +230,62 @@ export function formStateToConfig(formState: ConfigFormState): RestSourceConfig 
     effectiveStreamPath = `/${effectiveStreamPath}`;
   }
 
+  const authBlock = (() => {
+    if (formState.authType === 'bearer') {
+      return { type: 'bearer' };
+    }
+    if (formState.authType === 'oauth2') {
+      const tokenUrl = formState.authTokenUrl?.trim();
+      const clientId = formState.authClientId?.trim();
+      if (!tokenUrl || !clientId) {
+        return undefined;
+      }
+      const block: Record<string, any> = {
+        type: 'oauth2',
+        token_url: tokenUrl,
+        client_id: clientId,
+      };
+
+      const scopes = (formState.authScopes || '')
+        .split(/[\s,]+/)
+        .map((scope) => scope.trim())
+        .filter((scope) => scope.length > 0);
+      if (scopes.length) {
+        block.scope = scopes;
+      }
+
+      const audience = formState.authAudience?.trim();
+      if (audience) {
+        block.audience = audience;
+      }
+
+      const extraRaw = formState.authExtraParams?.trim();
+      if (extraRaw) {
+        try {
+          const parsed = JSON.parse(extraRaw);
+          if (parsed && typeof parsed === 'object') {
+            block.extra_params = parsed;
+          }
+        } catch {
+          // ignore invalid JSON; validation will surface the error elsewhere
+        }
+      }
+
+      if (formState.authToken.trim()) {
+        block.client_secret = '{{ options.oauth_client_secret }}';
+      }
+
+      return block;
+    }
+    return undefined;
+  })();
+
   return {
     version: formState.version,
     source: {
       type: 'rest',
       base_url: formState.baseUrl,
-      // Auth intentionally excluded from persisted config (token supplied separately)
+      ...(authBlock ? { auth: authBlock } : {}),
     },
     stream: {
       path: effectiveStreamPath,
@@ -435,11 +485,27 @@ export function configToFormState(config: RestSourceConfig): ConfigFormState {
   const rawStreamPath = (config.stream as any).path || '';
   const streamPath = partitionStrategy === 'endpoints' && rawStreamPath === '/' ? '' : rawStreamPath;
 
+  const authType = (config.auth?.type as ConfigFormState['authType']) || 'none';
+  const authTokenUrl = authType === 'oauth2' ? config.auth?.token_url ?? '' : '';
+  const authClientId = authType === 'oauth2' ? config.auth?.client_id ?? '' : '';
+  const authScopes = authType === 'oauth2' && config.auth?.scope?.length
+    ? config.auth.scope.join(' ')
+    : '';
+  const authAudience = authType === 'oauth2' ? config.auth?.audience ?? '' : '';
+  const authExtraParams = authType === 'oauth2' && config.auth?.extra_params && Object.keys(config.auth.extra_params).length
+    ? JSON.stringify(config.auth.extra_params, null, 2)
+    : '';
+
   return {
     version: config.version,
     baseUrl: config.source.base_url,
-    authType: (config.source as any).auth?.type || 'none',
-    authToken: '', // token never returned by API
+    authType,
+    authToken: '', // secrets are never persisted
+    authTokenUrl,
+    authClientId,
+    authScopes,
+    authAudience,
+    authExtraParams,
     streamPath,
     params: stringParams,
     headers: stringHeaders,
@@ -542,6 +608,29 @@ export function validateFormState(formState: ConfigFormState): string[] {
 
   if (formState.authType === 'bearer' && !formState.authToken.trim()) {
     errors.push('Bearer token is required when using bearer authentication');
+  }
+
+  if (formState.authType === 'oauth2') {
+    if (!formState.authTokenUrl?.trim()) {
+      errors.push('OAuth2 token URL is required');
+    }
+    if (!formState.authClientId?.trim()) {
+      errors.push('OAuth2 client ID is required');
+    }
+    if (!formState.authToken.trim()) {
+      errors.push('OAuth2 client secret is required (stored only for this session)');
+    }
+    const extraRaw = formState.authExtraParams?.trim();
+    if (extraRaw) {
+      try {
+        const parsed = JSON.parse(extraRaw);
+        if (!parsed || typeof parsed !== 'object') {
+          errors.push('OAuth2 extra params must be a JSON object');
+        }
+      } catch {
+        errors.push('OAuth2 extra params must be valid JSON');
+      }
+    }
   }
 
   if (!formState.inferSchema && !formState.schema.trim()) {

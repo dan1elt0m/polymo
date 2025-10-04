@@ -72,6 +72,32 @@ headers:
 - Optional. Handy for APIs that expect versioning or custom IDs.
 - Supports the same templating and environment shortcuts as parameters.
 
+### Authentication
+
+Add an `auth` block under `source` when the API requires credentials:
+
+```yaml
+source:
+  type: rest
+  base_url: https://api.example.com
+  auth:
+    type: oauth2
+    token_url: https://auth.example.com/oauth/token
+    client_id: my-client-id
+    scope:
+      - read
+      - write
+```
+
+Supported methods:
+
+- **none** – default; no auth added to requests.
+- **bearer** – each request carries an `Authorization: Bearer <token>` header. Supply the token at runtime with `.option("token", "...")`; the Builder keeps the token in memory only.
+- **api_key** – Polymo injects the API key as a query parameter. Set `authType` to `api_key`, choose the parameter name, and supply the value at runtime (the Builder uses `.option("<param>", "...")` behind the scenes).
+- **oauth2** – Implements the client-credentials flow. Provide `token_url`, `client_id`, optional `scope`, `audience`, and `extra_params` (a JSON object merged into the token request). The client secret should be passed at runtime via the Spark option `.option("oauth_client_secret", "...")`; exported YAML references it as `{{ options.oauth_client_secret }}` so secrets remain out of the file.
+
+The Builder mirrors these options and stores secrets only for the current browser session. When you re-open a saved connector, re-enter the secret before previewing or exporting.
+
 ### Pagination
 
 ```yaml
@@ -216,6 +242,8 @@ spark.read.format("polymo")
 ```
 
 Inside your config you can reference `{{ options.owner }}` or `{{ options.token }}`. Keep tokens out of the YAML—pass them through `.option("token", ...)` instead.
+
+For OAuth2, supply the client secret the same way: `.option("oauth_client_secret", os.environ["CLIENT_SECRET"])`. The exported YAML references it as `{{ options.oauth_client_secret }}` so the value never touches disk.
 
 ## Putting it all together
 

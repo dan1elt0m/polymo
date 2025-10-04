@@ -167,3 +167,58 @@ stream:
 
     config_yaml = dump_config(config)
     assert "error_handler:" in config_yaml
+
+
+def test_oauth2_auth_uses_runtime_secret(tmp_path: Path) -> None:
+    config_path = write_config(
+        tmp_path,
+        """
+version: 0.1
+source:
+  type: rest
+  base_url: https://api.oauth
+  auth:
+    type: oauth2
+    token_url: https://auth.example.com/token
+    client_id: my-client
+    scope:
+      - read
+      - write
+stream:
+  name: sample
+  path: /resources
+""".strip(),
+    )
+
+    config = load_config(config_path, options={"oauth_client_secret": "s3cret"})
+    assert config.auth.type == "oauth2"
+    assert config.auth.token_url == "https://auth.example.com/token"
+    assert config.auth.client_id == "my-client"
+    assert config.auth.client_secret == "s3cret"
+    assert config.auth.scope == ("read", "write")
+
+    config_dict = config_to_dict(config)
+    assert config_dict["source"]["auth"]["type"] == "oauth2"
+    assert "client_secret" not in config_dict["source"]["auth"]
+
+
+def test_oauth2_auth_missing_secret_raises(tmp_path: Path) -> None:
+    config_path = write_config(
+        tmp_path,
+        """
+version: 0.1
+source:
+  type: rest
+  base_url: https://api.oauth
+  auth:
+    type: oauth2
+    token_url: https://auth.example.com/token
+    client_id: my-client
+stream:
+  name: sample
+  path: /resources
+""".strip(),
+    )
+
+    with pytest.raises(ConfigError):
+        load_config(config_path)
