@@ -1336,17 +1336,24 @@ wheels = [
 
 [[package]]
 name = "polymo"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "." }
 dependencies = [
     { name = "fsspec" },
     { name = "httpx" },
     { name = "jinja2" },
-    { name = "notebook" },
     { name = "pyyaml" },
 ]
 
 [package.optional-dependencies]
+benchmark = [
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "notebook" },
+    { name = "pyarrow" },
+    { name = "pyspark" },
+    { name = "uvicorn" },
+]
 builder = [
     { name = "fastapi" },
     { name = "jinja2" },
@@ -1376,20 +1383,25 @@ docs = [
 
 [package.metadata]
 requires-dist = [
+    { name = "fastapi", marker = "extra == 'benchmark'", specifier = ">=0.110" },
     { name = "fastapi", marker = "extra == 'builder'", specifier = ">=0.110" },
     { name = "fsspec", specifier = ">=2025.9.0" },
     { name = "httpx", specifier = ">=0.26" },
+    { name = "httpx", marker = "extra == 'benchmark'", specifier = ">=0.26" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "jinja2", marker = "extra == 'builder'", specifier = ">=3.1.6" },
-    { name = "notebook", specifier = ">=7.4.7" },
+    { name = "notebook", marker = "extra == 'benchmark'", specifier = ">=7.4.7" },
+    { name = "pyarrow", marker = "extra == 'benchmark'", specifier = ">=13" },
     { name = "pyarrow", marker = "extra == 'builder'", specifier = ">=13" },
     { name = "pyarrow", marker = "extra == 'smoke'", specifier = ">=13" },
+    { name = "pyspark", marker = "extra == 'benchmark'", specifier = ">=4" },
     { name = "pyspark", marker = "extra == 'builder'", specifier = ">=4" },
     { name = "pyspark", marker = "extra == 'smoke'", specifier = ">=4" },
     { name = "pyyaml", specifier = ">=6.0.1" },
+    { name = "uvicorn", marker = "extra == 'benchmark'", specifier = ">=0.24" },
     { name = "uvicorn", marker = "extra == 'builder'", specifier = ">=0.24" },
 ]
-provides-extras = ["builder", "smoke"]
+provides-extras = ["builder", "benchmark", "smoke"]
 
 [package.metadata.requires-dev]
 dev = [
