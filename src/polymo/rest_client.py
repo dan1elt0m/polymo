@@ -62,6 +62,18 @@ class RestPage:
     headers: Mapping[str, str]
 
 
+@dataclass(frozen=True)
+class PaginationWindow:
+    """Optional cursor to limit pagination to a specific slice."""
+
+    page: Optional[int] = None
+    offset: Optional[int] = None
+    max_pages: Optional[int] = None
+    extra_params: Optional[Mapping[str, Any]] = None
+    path_override: Optional[str] = None
+    endpoint_name: Optional[str] = None
+
+
 class _RetryPolicy:
     """Evaluate retry behaviour for HTTP responses and request errors."""
 
@@ -128,13 +140,25 @@ class RestClient:
     def close(self) -> None:
         self._client.close()
 
-    def fetch_records(self, stream: StreamConfig) -> Iterator[List[Mapping[str, Any]]]:
+    def fetch_records(
+        self,
+        stream: StreamConfig,
+        *,
+        window: Optional[PaginationWindow] = None,
+    ) -> Iterator[List[Mapping[str, Any]]]:
         """Yield pages of JSON records for the provided stream definition."""
 
-        for page in self.fetch_pages(stream):
+        for page in self.fetch_pages(stream, window=window):
             yield page.records
 
-    def fetch_pages(self, stream: StreamConfig) -> Iterator[RestPage]:
+    def fetch_pages(
+        self,
+        stream: StreamConfig,
+        *,
+        window: Optional[PaginationWindow] = None,
+        persist_state: bool = True,
+        observe_records: bool = True,
+    ) -> Iterator[RestPage]:
         """Yield pages with rich metadata for the provided stream definition."""
 
         template_context: Dict[str, Any] = {
@@ -175,7 +199,27 @@ class RestClient:
             request_headers=request_headers if request_headers else None,
             stream=stream,
             declared_schema=declared_schema,
+            pagination_window=window,
+            persist_state=persist_state,
+            observe_records=observe_records,
         )
+
+    def peek_page(self, stream: StreamConfig) -> Optional[RestPage]:
+        """Return the first page without mutating incremental state."""
+
+        generator = self.fetch_pages(
+            stream,
+            window=PaginationWindow(max_pages=1),
+            persist_state=False,
+            observe_records=False,
+        )
+        try:
+            return next(generator, None)
+        finally:
+            try:
+                generator.close()
+            except Exception:
+                pass
 
     def _iterate_pages(
         self,
@@ -186,6 +230,9 @@ class RestClient:
         request_headers: Optional[Dict[str, str]],
         stream: StreamConfig,
         declared_schema: Optional[StructType],
+        pagination_window: Optional[PaginationWindow] = None,
+        persist_state: bool = True,
+        observe_records: bool = True,
     ) -> Iterator[RestPage]:
         tracker = _IncrementalTracker(
             base_url=self.base_url,
@@ -197,12 +244,33 @@ class RestClient:
 
         retry_policy = _RetryPolicy(stream.error_handler)
 
-        next_url: Optional[str] = initial_path
+        window_page = getattr(pagination_window, "page", None) if pagination_window else None
+        window_offset = getattr(pagination_window, "offset", None) if pagination_window else None
+        max_pages = getattr(pagination_window, "max_pages", None) if pagination_window else None
+        extra_params = (
+            dict(pagination_window.extra_params)
+            if pagination_window and pagination_window.extra_params
+            else {}
+        )
+        path_override = getattr(pagination_window, "path_override", None) if pagination_window else None
+
+        base_path = path_override or initial_path
+
+        base_params = dict(query_params)
+        if extra_params:
+            base_params.update(extra_params)
+        query_params = base_params
+
+        next_url: Optional[str] = base_path
         include_params = True
 
         # Track pagination-specific state between requests.
         offset_value = pagination.start_offset if pagination.type == "offset" else 0
+        if window_offset is not None and pagination.type == "offset":
+            offset_value = window_offset
         page_number = pagination.start_page if pagination.type == "page" else 1
+        if window_page is not None and pagination.type == "page":
+            page_number = window_page
         cursor_to_apply: Optional[str] = pagination.initial_cursor if pagination.type == "cursor" else None
 
         if pagination.type == "offset" and pagination.limit_param and pagination.page_size is not None:
@@ -212,6 +280,8 @@ class RestClient:
         if pagination.type == "cursor" and pagination.cursor_param and cursor_to_apply is not None:
             query_params[pagination.cursor_param] = cursor_to_apply
             cursor_to_apply = None
+
+        pages_emitted = 0
 
         try:
             while next_url:
@@ -248,7 +318,8 @@ class RestClient:
                 if not isinstance(records, list):
                     raise ValueError("Expected API response to be a list of records")
 
-                tracker.observe(records)
+                if observe_records:
+                    tracker.observe(records)
 
                 yield RestPage(
                     records=records,
@@ -258,12 +329,16 @@ class RestClient:
                     headers=dict(response.headers),
                 )
 
+                pages_emitted += 1
+                if max_pages is not None and pages_emitted >= max_pages:
+                    break
+
                 # Advance pagination state based on configured strategy.
                 if pagination.type == "none":
                     next_url = None
                 elif pagination.type == "link_header":
                     next_url = _next_page(response, pagination)
-                    include_params = next_url == initial_path if next_url else True
+                    include_params = next_url == base_path if next_url else True
                 elif pagination.type == "offset":
                     if pagination.stop_on_empty_response and not records:
                         next_url = None
@@ -273,14 +348,14 @@ class RestClient:
                             next_url = None
                         else:
                             offset_value += step
-                            next_url = initial_path
+                            next_url = base_path
                             include_params = True
                 elif pagination.type == "page":
                     if pagination.stop_on_empty_response and not records:
                         next_url = None
                     else:
                         page_number += 1
-                        next_url = initial_path
+                        next_url = base_path
                         include_params = True
                 elif pagination.type == "cursor":
                     next_link = None
@@ -305,14 +380,15 @@ class RestClient:
                             next_url = None
                         else:
                             cursor_to_apply = str(next_cursor)
-                            next_url = initial_path
+                            next_url = base_path
                             include_params = True
                             if pagination.stop_on_empty_response and not records:
                                 next_url = None
                 else:
                     next_url = None
         finally:
-            tracker.persist()
+            if persist_state:
+                tracker.persist()
 
     def __enter__(self) -> "RestClient":
         return self

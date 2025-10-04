@@ -21,7 +21,8 @@ from ..config import (
     dump_config,
     parse_config,
 )
-from ..rest_client import RestClient
+from ..datasource import _plan_partitions
+from ..rest_client import PaginationWindow, RestClient
 
 PACKAGE_ROOT = resources.files(__package__)
 TEMPLATES = Jinja2Templates(directory=str(PACKAGE_ROOT.joinpath("templates")))
@@ -242,30 +243,40 @@ def _collect_rest_preview(config: RestSourceConfig, limit: int) -> Tuple[List[Di
     pages: List[Dict[str, Any]] = []
     total_records = 0
 
+    windows = _plan_partitions(config)
+    window_sequence: List[Optional[PaginationWindow]] = windows if windows else [None]
+
     try:
         with RestClient(base_url=config.base_url, auth=config.auth, options=config.options) as client:
-            for index, page in enumerate(client.fetch_pages(config.stream), start=1):
-                remaining = max(0, limit - total_records)
-                if remaining <= 0:
-                    break
+            page_counter = 0
+            for window in window_sequence:
+                for page in client.fetch_pages(config.stream, window=window):
+                    remaining = max(0, limit - total_records)
+                    if remaining <= 0:
+                        break
 
-                page_records = list(page.records)
-                if remaining < len(page_records):
-                    page_records = page_records[:remaining]
+                    page_records = list(page.records)
+                    if remaining < len(page_records):
+                        page_records = page_records[:remaining]
 
-                total_records += len(page_records)
+                    total_records += len(page_records)
+                    page_counter += 1
 
-                pages.append(
-                    {
-                        "page": index,
+                    entry = {
+                        "page": page_counter,
                         "url": page.url,
                         "status_code": page.status_code,
                         "headers": dict(page.headers),
                         "records": page_records,
                         "payload": page.payload,
                     }
-                )
+                    if window and window.endpoint_name:
+                        entry["endpoint"] = window.endpoint_name
 
+                    pages.append(entry)
+
+                    if total_records >= limit:
+                        break
                 if total_records >= limit:
                     break
         return pages, None

@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import math
+from dataclasses import replace
+from datetime import datetime, timedelta
 from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence
 
 import pyarrow as pa
@@ -15,13 +18,11 @@ from pyspark.sql.types import (
     StringType,
     StructField,
     StructType,
-_parse_datatype_string
+    _parse_datatype_string,
 )
 
-from .config import ConfigError, RestSourceConfig, load_config
-from .rest_client import RestClient
-
-
+from .config import ConfigError, PaginationConfig, PartitionConfig, RestSourceConfig, load_config
+from .rest_client import PaginationWindow, RestClient, RestPage
 
 
 class ApiReader(DataSource):
@@ -50,10 +51,12 @@ class ApiReader(DataSource):
     def reader(self, schema: StructType) -> DataSourceReader:
         return RestDataSourceReader(self._config, self.schema())
 
+
 class RestInputPartition(InputPartition):
-    def __init__(self, config: RestSourceConfig) -> None:
+    def __init__(self, config: RestSourceConfig, window: Optional[PaginationWindow] = None) -> None:
         super().__init__(value=None)
         self.config = config
+        self.window = window
 
 
 class RestDataSourceReader(DataSourceReader):
@@ -64,14 +67,14 @@ class RestDataSourceReader(DataSourceReader):
         self._schema = schema
 
     def partitions(self) -> Sequence[InputPartition]:
-        # Create one partition for the stream
-        return [
-            RestInputPartition(self._config)
-        ]
+        windows = _plan_partitions(self._config)
+        if windows:
+            return [RestInputPartition(self._config, window=w) for w in windows]
+        return [RestInputPartition(self._config)]
 
     def read(self, partition: InputPartition) -> Iterator[pa.RecordBatch]:
         assert isinstance(partition, RestInputPartition)
-        yield from _read_partition(partition.config, self._schema)
+        yield from _read_partition(partition.config, self._schema, partition.window)
 
 
 def _load_source_config(options: Mapping[str, str]) -> RestSourceConfig:
@@ -90,6 +93,14 @@ def _load_source_config(options: Mapping[str, str]) -> RestSourceConfig:
 
 
 def _infer_schema(config: RestSourceConfig) -> StructType:
+    if config.stream.partition and config.stream.partition.strategy == "endpoints":
+        return StructType(
+            [
+                StructField("endpoint_name", StringType(), True),
+                StructField("data", StringType(), True),
+            ]
+        )
+
     sample_records = _sample_stream(config)
     if not sample_records:
         return StructType([])
@@ -119,15 +130,483 @@ def _sample_stream(config: RestSourceConfig) -> List[Mapping[str, Any]]:
         return []
 
 
-def _read_partition(config: RestSourceConfig, schema: StructType) -> Iterator[pa.RecordBatch]:
+def _plan_partitions(config: RestSourceConfig) -> List[PaginationWindow]:
+    partition = config.stream.partition
+    strategy = partition.strategy if partition else "none"
+
+    if strategy == "none":
+        partition = _partition_from_options(config.options, partition)
+        strategy = partition.strategy
+        if strategy == "none":
+            return []
+        config = replace(config, stream=replace(config.stream, partition=partition))
+
+    if strategy == "pagination":
+        return _plan_pagination_partitions(config)
+    if strategy == "param_range":
+        return _plan_param_range_partitions(config)
+    if strategy == "endpoints":
+        return _plan_endpoint_partitions(config)
+    return []
+
+
+def _partition_from_options(
+    options: Mapping[str, Any],
+    fallback: Optional[PartitionConfig] = None,
+) -> PartitionConfig:
+    strategy_raw = str(options.get("partition_strategy", "")).strip()
+    if not strategy_raw:
+        return fallback or PartitionConfig()
+
+    strategy = strategy_raw
+
+    if strategy == "pagination":
+        return PartitionConfig(strategy="pagination")
+
+    if strategy == "param_range":
+        param_raw = options.get("partition_param")
+        values_raw = options.get("partition_values")
+        range_start_raw = options.get("partition_range_start")
+        range_end_raw = options.get("partition_range_end")
+        range_step_raw = options.get("partition_range_step")
+        range_kind_raw = options.get("partition_range_kind")
+        value_template_raw = options.get("partition_value_template")
+        extra_template_raw = options.get("partition_extra_template")
+
+        def _clean_str(value: Any) -> Optional[str]:
+            if value is None:
+                return None
+            text = str(value).strip()
+            return text or None
+
+        range_step = None
+        if range_step_raw is not None and str(range_step_raw).strip():
+            try:
+                range_step = int(str(range_step_raw).strip())
+            except ValueError as exc:  # pragma: no cover - defensive casting
+                raise ConfigError("partition_range_step must be an integer") from exc
+
+        cleaned_kind = _clean_str(range_kind_raw)
+        if cleaned_kind and cleaned_kind not in {"numeric", "date"}:
+            raise ConfigError("partition_range_kind must be 'numeric' or 'date'")
+
+        return PartitionConfig(
+            strategy="param_range",
+            param=_clean_str(param_raw),
+            values=_clean_str(values_raw),
+            range_start=_clean_str(range_start_raw),
+            range_end=_clean_str(range_end_raw),
+            range_step=range_step,
+            range_kind=cleaned_kind or None,
+            value_template=_clean_str(value_template_raw),
+            extra_template=_clean_str(extra_template_raw),
+        )
+
+    if strategy == "endpoints":
+        endpoints_raw = options.get("partition_endpoints")
+        if endpoints_raw is None:
+            raise ConfigError("partition_endpoints is required for endpoints strategy")
+
+        entries = _parse_endpoint_entries(endpoints_raw)
+        endpoints: List[str] = []
+        for entry in entries:
+            name = str(entry.get("name") or "").strip()
+            path = str(entry.get("path") or "").strip()
+            if not path:
+                raise ConfigError("Each endpoint must include a path when using endpoints strategy")
+            endpoints.append(f"{name}:{path}" if name else path)
+
+        return PartitionConfig(strategy="endpoints", endpoints=tuple(endpoints))
+
+    raise ConfigError(f"Unsupported partition strategy: {strategy}")
+
+
+def _plan_pagination_partitions(config: RestSourceConfig) -> List[PaginationWindow]:
+    pagination = config.stream.pagination
+    if pagination.type not in {"page", "offset"}:
+        return []
+
+    page_size = pagination.page_size
+    if page_size is None or page_size <= 0:
+        return []
+
+    has_total_hint = any(
+        (
+            pagination.total_pages_path,
+            pagination.total_pages_header,
+            pagination.total_records_path,
+            pagination.total_records_header,
+        )
+    )
+    if not has_total_hint:
+        return []
+
+    with RestClient(base_url=config.base_url, auth=config.auth, options=config.options) as client:
+        first_page = client.peek_page(config.stream)
+
+    if first_page is None:
+        return []
+
+    total_pages = _resolve_total_pages(first_page, config.stream.pagination, page_size)
+    if total_pages is None or total_pages <= 1:
+        return []
+
+    windows: List[PaginationWindow] = []
+    if pagination.type == "page":
+        start_page = pagination.start_page or 1
+        for index in range(total_pages):
+            windows.append(PaginationWindow(page=start_page + index, max_pages=1))
+    else:  # offset pagination
+        start_offset = pagination.start_offset or 0
+        for index in range(total_pages):
+            offset = start_offset + index * page_size
+            windows.append(PaginationWindow(offset=offset, max_pages=1))
+
+    return windows
+
+
+def _plan_param_range_partitions(config: RestSourceConfig) -> List[PaginationWindow]:
+    partition = config.stream.partition
+
+    if not partition.param:
+        raise ConfigError("partition_strategy='param_range' requires 'param' to be set")
+
+    param = partition.param
+
+    values = _parse_partition_values(partition.values)
+    if not values:
+        # Generate values from range configuration if explicit values not provided
+        values = _generate_range_values_from_config(partition)
+
+    if not values:
+        raise ConfigError(
+            "partition_strategy='param_range' requires either 'values' or range configuration"
+        )
+
+    template_str = partition.value_template
+    extra_template_str = partition.extra_template
+
+    windows: List[PaginationWindow] = []
+    for value in values:
+        formatted = _apply_value_template(value, template_str)
+        extra_params: Dict[str, Any] = {param: formatted}
+        if extra_template_str:
+            extra_params.update(_render_extra_params(extra_template_str, formatted))
+        windows.append(PaginationWindow(extra_params=extra_params))
+
+    return windows
+
+
+def _plan_endpoint_partitions(config: RestSourceConfig) -> List[PaginationWindow]:
+    partition = config.stream.partition
+
+    if not partition.endpoints:
+        raise ConfigError("partition_strategy='endpoints' requires 'endpoints' to be defined")
+
+    windows: List[PaginationWindow] = []
+
+    # Handle the case where endpoints is a tuple of strings
+    for endpoint in partition.endpoints:
+        # Simple format - just path
+        if ":" in endpoint:
+            # Format: "name:/path"
+            parts = endpoint.split(":", 1)
+            name = parts[0].strip()
+            path = parts[1].strip()
+            windows.append(
+                PaginationWindow(
+                    path_override=path,
+                    endpoint_name=name,
+                )
+            )
+        else:
+            # Just use the endpoint as both name and path
+            windows.append(
+                PaginationWindow(
+                    path_override=endpoint,
+                    endpoint_name=endpoint,
+                )
+            )
+
+    return windows
+
+
+def _resolve_total_pages(
+    page: RestPage,
+    pagination: PaginationConfig,
+    page_size: int,
+) -> Optional[int]:
+    payload = page.payload
+    headers = page.headers
+
+    total_pages_candidate = _coerce_positive_int(
+        _extract_value_from_path(payload, pagination.total_pages_path)
+        if pagination.total_pages_path
+        else None
+    )
+    if total_pages_candidate is None and pagination.total_pages_header:
+        total_pages_candidate = _coerce_positive_int(headers.get(pagination.total_pages_header))
+
+    if total_pages_candidate is not None and total_pages_candidate > 0:
+        return total_pages_candidate
+
+    total_records_candidate = _coerce_positive_int(
+        _extract_value_from_path(payload, pagination.total_records_path)
+        if pagination.total_records_path
+        else None
+    )
+    if total_records_candidate is None and pagination.total_records_header:
+        total_records_candidate = _coerce_positive_int(headers.get(pagination.total_records_header))
+
+    if total_records_candidate is None or total_records_candidate <= 0:
+        return None
+
+    return max(1, math.ceil(total_records_candidate / page_size))
+
+
+def _extract_value_from_path(payload: Any, path: Sequence[str]) -> Any:
+    if not path:
+        return None
+    try:
+        from polymo.rest_client import _first_value_from_path
+
+        return _first_value_from_path(payload, path)
+    except Exception:
+        return None
+
+
+def _coerce_positive_int(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        converted = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return converted if converted >= 0 else None
+
+
+def _parse_partition_values(raw: Any) -> List[str]:
+    if raw is None:
+        return []
+    if isinstance(raw, (list, tuple)):
+        return [str(item) for item in raw]
+
+    text = str(raw).strip()
+    if not text:
+        return []
+
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return [chunk.strip() for chunk in text.split(",") if chunk.strip()]
+
+    if isinstance(parsed, list):
+        return [str(item) for item in parsed]
+    if isinstance(parsed, (str, int, float)):
+        return [str(parsed)]
+    return []
+
+
+def _generate_range_values(options: Mapping[str, Any]) -> List[str]:
+    start_raw = options.get("partition_range_start")
+    end_raw = options.get("partition_range_end")
+    if start_raw is None or end_raw is None:
+        return []
+
+    kind = str(options.get("partition_range_kind", "numeric")).strip().lower()
+    step_raw = options.get("partition_range_step")
+
+    if kind in {"numeric", "number", "int", "integer"}:
+        start = int(str(start_raw))
+        end = int(str(end_raw))
+        step = int(str(step_raw)) if step_raw is not None else 1
+        if step <= 0:
+            raise ConfigError("partition_range_step must be greater than 0 for numeric ranges")
+
+        values: List[str] = []
+        if start <= end:
+            current = start
+            while current <= end:
+                values.append(str(current))
+                current += step
+        else:
+            current = start
+            while current >= end:
+                values.append(str(current))
+                current -= step
+        return values
+
+    if kind in {"date", "day", "daily"}:
+        start_date = datetime.fromisoformat(str(start_raw)).date()
+        end_date = datetime.fromisoformat(str(end_raw)).date()
+        step_days = int(str(step_raw)) if step_raw is not None else 1
+        if step_days <= 0:
+            raise ConfigError("partition_range_step must be greater than 0 for date ranges")
+
+        delta = timedelta(days=step_days)
+        values = []
+        if start_date <= end_date:
+            current = start_date
+            while current <= end_date:
+                values.append(current.isoformat())
+                current += delta
+        else:
+            current = start_date
+            while current >= end_date:
+                values.append(current.isoformat())
+                current -= delta
+        return values
+
+    raise ConfigError(
+        "partition_range_kind must be 'numeric' or 'date' when using partition_strategy='param_range'"
+    )
+
+
+def _generate_range_values_from_config(partition) -> List[str]:
+    """Generate range values from the partition configuration."""
+    start_raw = partition.range_start
+    end_raw = partition.range_end
+    if start_raw is None or end_raw is None:
+        return []
+
+    kind = partition.range_kind or "numeric"
+    step_raw = partition.range_step
+
+    if kind in {"numeric", "number", "int", "integer"} or kind is None:
+        try:
+            start = int(str(start_raw))
+            end = int(str(end_raw))
+            step = int(str(step_raw)) if step_raw is not None else 1
+        except (ValueError, TypeError):
+            raise ConfigError("Range values must be valid integers for numeric ranges")
+
+        if step <= 0:
+            raise ConfigError("range_step must be greater than 0 for numeric ranges")
+
+        values: List[str] = []
+        if start <= end:
+            current = start
+            while current <= end:
+                values.append(str(current))
+                current += step
+        else:
+            current = start
+            while current >= end:
+                values.append(str(current))
+                current -= step
+        return values
+
+    if kind == "date":
+        try:
+            start_date = datetime.fromisoformat(str(start_raw)).date()
+            end_date = datetime.fromisoformat(str(end_raw)).date()
+            step_days = int(str(step_raw)) if step_raw is not None else 1
+        except (ValueError, TypeError):
+            raise ConfigError("Range values must be valid ISO dates for date ranges")
+
+        if step_days <= 0:
+            raise ConfigError("range_step must be greater than 0 for date ranges")
+
+        delta = timedelta(days=step_days)
+        values = []
+        if start_date <= end_date:
+            current = start_date
+            while current <= end_date:
+                values.append(current.isoformat())
+                current += delta
+        else:
+            current = start_date
+            while current >= end_date:
+                values.append(current.isoformat())
+                current -= delta
+        return values
+
+    raise ConfigError(
+        "range_kind must be 'numeric' or 'date' when using partition_strategy='param_range'"
+    )
+
+
+def _apply_value_template(value: str, template: Optional[str]) -> str:
+    if not template:
+        return value
+    return template.replace("{{value}}", value)
+
+
+def _render_extra_params(template: str, value: str) -> Dict[str, Any]:
+    rendered = template.replace("{{value}}", value)
+    try:
+        payload = json.loads(rendered)
+    except json.JSONDecodeError as exc:  # pragma: no cover - defensive
+        raise ConfigError("partition_extra_template must be valid JSON") from exc
+    if not isinstance(payload, Mapping):
+        raise ConfigError("partition_extra_template must resolve to a JSON object")
+    return {str(key): str(payload[key]) for key in payload}
+
+
+def _parse_endpoint_entries(raw: Any) -> List[Dict[str, Any]]:
+    if isinstance(raw, (list, tuple)):
+        entries = [entry for entry in raw if isinstance(entry, Mapping)]
+        return [dict(entry) for entry in entries]
+
+    text = str(raw).strip()
+    if not text:
+        return []
+
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        entries: List[Dict[str, Any]] = []
+        for chunk in text.split(","):
+            if not chunk.strip():
+                continue
+            if ":" not in chunk:
+                raise ConfigError(
+                    "partition_endpoints string format must be 'name:/path,name:/other'"
+                )
+            name, path = chunk.split(":", 1)
+            entries.append({"name": name.strip(), "path": path.strip()})
+        return entries
+
+    if isinstance(parsed, Mapping):
+        return [dict(parsed)]
+    if isinstance(parsed, list):
+        results: List[Dict[str, Any]] = []
+        for item in parsed:
+            if not isinstance(item, Mapping):
+                raise ConfigError("partition_endpoints entries must be objects with name/path")
+            entry = dict(item)
+            params = entry.get("params")
+            if isinstance(params, str):
+                params = json.loads(params)
+                entry["params"] = params
+            results.append(entry)
+        return results
+
+    raise ConfigError("partition_endpoints must be a JSON array or comma-separated name:path list")
+
+
+def _read_partition(
+    config: RestSourceConfig,
+    schema: StructType,
+    window: Optional[PaginationWindow] = None,
+) -> Iterator[pa.RecordBatch]:
     """Read data from the stream."""
     with RestClient(base_url=config.base_url, auth=config.auth, options=config.options) as client:
-        for page in client.fetch_records(config.stream):
+        endpoint_name = window.endpoint_name if window else None
+
+        for page in client.fetch_records(config.stream, window=window):
             if not page:
                 continue
 
-            # Single stream format: use original record structure
-            batch = _records_to_batch(page, schema)
+            if endpoint_name is not None:
+                records: List[Mapping[str, Any]] = [
+                    {"endpoint_name": endpoint_name, "data": record}
+                    for record in page
+                ]
+            else:
+                records = page
+
+            batch = _records_to_batch(records, schema)
 
             if batch.num_rows:
                 yield batch

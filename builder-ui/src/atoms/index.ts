@@ -34,12 +34,82 @@ export const DEFAULT_SAMPLE_STATE: SampleState = {
 };
 export const sampleAtom = atom<SampleState>(DEFAULT_SAMPLE_STATE);
 
+const deriveEndpointOptions = (raw: string): string[] => {
+	const text = raw.trim();
+	if (!text) return [];
+
+	const labels: string[] = [];
+	const seen = new Set<string>();
+	const addLabel = (label?: string, fallback?: string) => {
+		const candidate = (label ?? fallback ?? '').trim();
+		if (!candidate) return;
+		const key = candidate.toLowerCase();
+		if (seen.has(key)) return;
+		seen.add(key);
+		labels.push(candidate);
+	};
+
+	const handleStringEntry = (entry: string) => {
+		const trimmed = entry.trim();
+		if (!trimmed) return;
+		if (trimmed.includes(':')) {
+			const idx = trimmed.indexOf(':');
+			const name = trimmed.slice(0, idx);
+			const path = trimmed.slice(idx + 1);
+			addLabel(name, path);
+			return;
+		}
+		addLabel(trimmed);
+	};
+
+	try {
+		const parsed = JSON.parse(text);
+		if (Array.isArray(parsed)) {
+			for (const entry of parsed) {
+				if (typeof entry === 'string') {
+					handleStringEntry(entry);
+					continue;
+				}
+				if (entry && typeof entry === 'object') {
+					const name = typeof (entry as any).name === 'string' ? (entry as any).name : undefined;
+					const path = typeof (entry as any).path === 'string' ? (entry as any).path : undefined;
+					if (name || path) {
+						addLabel(name, path);
+					}
+				}
+			}
+			return labels;
+		}
+	} catch {
+		// Fallback to delimiter parsing.
+	}
+
+	for (const chunk of text.split(/[\n,]+/)) {
+		handleStringEntry(chunk);
+	}
+
+	return labels;
+};
+
+const deriveStreamOptionFromPath = (path: string): string => {
+	const trimmed = path.trim();
+	if (!trimmed) return '';
+	const normalised = trimmed.startsWith('/') ? trimmed.slice(1) : trimmed;
+	const replaced = normalised.replace(/\/+/, '_');
+	return replaced || 'stream';
+};
+
 export const streamOptionsAtom = atom((get) => {
 	const state = get(configFormStateAtom);
-	const path = state.streamPath.trim();
-	if (!path) return [] as string[];
-	const derived = (path.startsWith('/') ? path.slice(1) : path).replace(/\/+/, '_') || 'stream';
-	return [derived];
+	if (state.partitionStrategy === 'endpoints') {
+		const options = deriveEndpointOptions(state.partitionEndpoints || '');
+		if (options.length) {
+			return options;
+		}
+	}
+
+	const derived = deriveStreamOptionFromPath(state.streamPath);
+	return derived ? [derived] : [];
 });
 
 export const configPayloadAtom = atom((get) => {
@@ -108,6 +178,33 @@ export const formStateToYamlAtom = atom((get) => {
   ) {
     delete ordered.stream.record_selector;
   }
+  const partition = (cfg.stream as any).partition;
+  if (partition && partition.strategy && partition.strategy !== 'none') {
+    const partitionBlock: Record<string, any> = { strategy: partition.strategy };
+
+    if (partition.param) partitionBlock.param = partition.param;
+    if (partition.values) partitionBlock.values = partition.values;
+
+    if (partition.range_start !== undefined && partition.range_start !== null) {
+      partitionBlock.range_start = partition.range_start;
+    }
+    if (partition.range_end !== undefined && partition.range_end !== null) {
+      partitionBlock.range_end = partition.range_end;
+    }
+    if (partition.range_step !== undefined && partition.range_step !== null) {
+      partitionBlock.range_step = partition.range_step;
+    }
+    if (partition.range_kind) partitionBlock.range_kind = partition.range_kind;
+
+    if (partition.value_template) partitionBlock.value_template = partition.value_template;
+    if (partition.extra_template) partitionBlock.extra_template = partition.extra_template;
+
+    if (Array.isArray(partition.endpoints) && partition.endpoints.length) {
+      partitionBlock.endpoints = [...partition.endpoints];
+    }
+
+    ordered.stream.partition = partitionBlock;
+  }
   if (cfg.source.auth) {
     ordered.source.auth = { ...cfg.source.auth };
   }
@@ -125,12 +222,31 @@ const INCREMENTAL_OPTION_KEYS = new Set([
   'incremental_memory_state',
 ]);
 
+const PARTITION_OPTION_KEYS = new Set([
+  'partition_strategy',
+  'partition_param',
+  'partition_values',
+  'partition_range_start',
+  'partition_range_end',
+  'partition_range_step',
+  'partition_range_kind',
+  'partition_value_template',
+  'partition_extra_template',
+  'partition_endpoints',
+]);
+
 export const runtimeOptionsAtom = atom((get) => {
   const formState = get(configFormStateAtom);
   const manualOptions = { ...get(readerOptionsAtom) };
 
   // Remove special keys managed by the incremental form fields
   for (const key of INCREMENTAL_OPTION_KEYS) {
+    if (key in manualOptions) {
+      delete manualOptions[key];
+    }
+  }
+
+  for (const key of PARTITION_OPTION_KEYS) {
     if (key in manualOptions) {
       delete manualOptions[key];
     }
@@ -161,6 +277,56 @@ export const runtimeOptionsAtom = atom((get) => {
     const token = formState.authToken.trim();
     if (paramName && token) {
       manualOptions[paramName] = token;
+    }
+  }
+
+  const partitionStrategy = formState.partitionStrategy || 'none';
+  const strategy = partitionStrategy.trim() as typeof formState.partitionStrategy;
+  if (strategy && strategy !== 'none') {
+    manualOptions['partition_strategy'] = strategy;
+
+    if (strategy === 'pagination') {
+      // no additional options required; pagination hints come from YAML.
+    } else if (strategy === 'param_range') {
+      const paramName = formState.partitionParam?.trim();
+      if (paramName) {
+        manualOptions['partition_param'] = paramName;
+      }
+
+      const rawValues = formState.partitionValues?.trim();
+      if (rawValues) {
+        manualOptions['partition_values'] = rawValues;
+      } else {
+        const rangeStart = formState.partitionRangeStart?.trim();
+        const rangeEnd = formState.partitionRangeEnd?.trim();
+        if (rangeStart && rangeEnd) {
+          manualOptions['partition_range_start'] = rangeStart;
+          manualOptions['partition_range_end'] = rangeEnd;
+          const rangeKind = formState.partitionRangeKind?.trim();
+          if (rangeKind) {
+            manualOptions['partition_range_kind'] = rangeKind;
+          }
+          const rangeStep = formState.partitionRangeStep?.trim();
+          if (rangeStep) {
+            manualOptions['partition_range_step'] = rangeStep;
+          }
+        }
+      }
+
+      const template = formState.partitionValueTemplate?.trim();
+      if (template) {
+        manualOptions['partition_value_template'] = template;
+      }
+
+      const extraTemplate = formState.partitionExtraTemplate?.trim();
+      if (extraTemplate) {
+        manualOptions['partition_extra_template'] = extraTemplate;
+      }
+    } else if (strategy === 'endpoints') {
+      const endpoints = formState.partitionEndpoints?.trim();
+      if (endpoints) {
+        manualOptions['partition_endpoints'] = endpoints;
+      }
     }
   }
 

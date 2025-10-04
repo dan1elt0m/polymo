@@ -7,6 +7,7 @@ const EXAMPLE_CONNECTORS = [
   { name: "JSON Placeholder", path: "/static/examples/jsonplaceholder.yml", description: "Sample posts and user data" },
   { name: "REST Countries", path: "/static/examples/countries.yml", description: "Country information and statistics" },
   { name: "Weather API", path: "/static/examples/weather.yml", description: "Current weather and forecast data" },
+  { name: "JSON Placeholder Multiple Endpoints", path: "/static/examples/jsonplaceholder-endpoints.yml", description: "Fetch posts, comments, and users" },
 ];
 
 interface SavedConnectorSummary {

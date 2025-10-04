@@ -19,6 +19,11 @@ export interface PaginationConfig {
   cursor_header?: string | null;
   initial_cursor?: string | null;
   stop_on_empty_response?: boolean | null;
+  // Added pagination metadata hint fields used for partition planning & UI
+  total_pages_path?: string[] | null;
+  total_pages_header?: string | null;
+  total_records_path?: string[] | null;
+  total_records_header?: string | null;
 }
 
 export interface IncrementalConfig {
@@ -41,6 +46,19 @@ export interface ErrorHandlerConfig {
   backoff: BackoffConfig;
 }
 
+export interface PartitionConfig {
+  strategy: 'none' | 'pagination' | 'param_range' | 'endpoints';
+  param?: string | null;
+  values?: string | null;
+  range_start?: number | string | null;
+  range_end?: number | string | null;
+  range_step?: number | null;
+  range_kind?: 'numeric' | 'date' | null;
+  value_template?: string | null;
+  extra_template?: string | null;
+  endpoints?: string[] | null;
+}
+
 export interface StreamConfig {
   // name removed from persisted config; backend derives internally
   path: string;
@@ -52,6 +70,7 @@ export interface StreamConfig {
   schema?: string | null;
   record_selector: RecordSelectorConfig;
   error_handler?: ErrorHandlerConfig;
+  partition?: PartitionConfig;
 }
 
 export interface SourceConfig {
@@ -123,6 +142,20 @@ export interface ConfigFormState {
   paginationCursorHeader?: string;
   paginationInitialCursor?: string;
   paginationStopOnEmptyResponse: boolean;
+  paginationTotalPagesPath?: string;
+  paginationTotalPagesHeader?: string;
+  paginationTotalRecordsPath?: string;
+  paginationTotalRecordsHeader?: string;
+  partitionStrategy: 'none' | 'pagination' | 'param_range' | 'endpoints';
+  partitionParam?: string;
+  partitionValues?: string;
+  partitionRangeStart?: string;
+  partitionRangeEnd?: string;
+  partitionRangeStep?: string;
+  partitionRangeKind?: 'numeric' | 'date';
+  partitionValueTemplate?: string;
+  partitionExtraTemplate?: string;
+  partitionEndpoints?: string;
   incrementalMode: string;
   incrementalCursorParam: string;
   incrementalCursorField: string;

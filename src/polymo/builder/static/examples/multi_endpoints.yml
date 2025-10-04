@@ -1,0 +1,17 @@
+version: "0.1"
+source:
+  type: rest
+  base_url: https://jsonplaceholder.typicode.com
+stream:
+  path: /
+  infer_schema: true
+  pagination:
+    type: none
+  record_selector:
+    field_path: []
+  partition:
+    strategy: endpoints
+    endpoints:
+      - posts:/posts
+      - comments:/comments
+      - users:/users

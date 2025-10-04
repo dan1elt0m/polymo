@@ -21,7 +21,7 @@ from pyspark.sql.types import (
     StringType,
     StructField,
     StructType,
-    TimestampType,
+    TimestampType, VariantType,
 )
 
 
@@ -54,6 +54,10 @@ class PaginationConfig:
     cursor_header: Optional[str] = None
     initial_cursor: Optional[str] = None
     stop_on_empty_response: bool = True
+    total_pages_path: Tuple[str, ...] = field(default_factory=tuple)
+    total_pages_header: Optional[str] = None
+    total_records_path: Tuple[str, ...] = field(default_factory=tuple)
+    total_records_header: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -107,6 +111,22 @@ class ErrorHandlerConfig:
 
 
 @dataclass(frozen=True)
+class PartitionConfig:
+    """Partition strategy configuration."""
+
+    strategy: Literal["none", "pagination", "param_range", "endpoints"] = "none"
+    param: Optional[str] = None
+    values: Optional[str] = None
+    range_start: Optional[Any] = None  # Can be int or str for date ranges
+    range_end: Optional[Any] = None  # Can be int or str for date ranges
+    range_step: Optional[int] = None
+    range_kind: Optional[Literal["numeric", "date"]] = None
+    value_template: Optional[str] = None
+    extra_template: Optional[str] = None
+    endpoints: Tuple[str, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
 class StreamConfig:
     """Definition of a logical stream within the REST connector."""
 
@@ -120,6 +140,7 @@ class StreamConfig:
     schema: str | None = None
     record_selector: RecordSelectorConfig = field(default_factory=RecordSelectorConfig)
     error_handler: ErrorHandlerConfig = field(default_factory=ErrorHandlerConfig)
+    partition: PartitionConfig = field(default_factory=PartitionConfig)
 
 
 @dataclass(frozen=True)
@@ -260,6 +281,20 @@ def config_to_dict(config: RestSourceConfig) -> Dict[str, Any]:
         },
     }
 
+    partition = stream.partition
+    stream_dict["partition"] = {
+        "strategy": partition.strategy,
+        "param": partition.param,
+        "values": partition.values,
+        "range_start": partition.range_start,
+        "range_end": partition.range_end,
+        "range_step": partition.range_step,
+        "range_kind": partition.range_kind,
+        "value_template": partition.value_template,
+        "extra_template": partition.extra_template,
+        "endpoints": list(partition.endpoints),
+    }
+
     return {
         "version": config.version,
         "source": source,
@@ -294,7 +329,22 @@ def _parse_stream(raw: Any) -> StreamConfig:
         raise ConfigError("Each stream must be a mapping")
 
     path = raw.get("path")
-    if not isinstance(path, str) or not path.startswith("/"):
+
+    # Check if we're using endpoint partitioning
+    partition_data = raw.get("partition", {})
+    using_endpoint_partitioning = (
+        isinstance(partition_data, dict) and
+        partition_data.get("strategy") == "endpoints" and
+        partition_data.get("endpoints")
+    )
+
+    # Only validate path if not using endpoint partitioning or if path is provided
+    if path is None:
+        if not using_endpoint_partitioning:
+            raise ConfigError("Stream 'path' is required unless using endpoint partitioning")
+        # Use a placeholder path that will be overridden by endpoint partitioning
+        path = "/"
+    elif not isinstance(path, str) or not path.startswith("/"):
         raise ConfigError("Stream 'path' must be an absolute path starting with '/'")
 
     # Derive name if not supplied
@@ -322,6 +372,8 @@ def _parse_stream(raw: Any) -> StreamConfig:
     incremental = _parse_incremental(raw.get("incremental"))
     record_selector = _parse_record_selector(raw.get("record_selector"))
     error_handler = _parse_error_handler(raw.get("error_handler"))
+    partition = _parse_partition(raw.get("partition"))
+
     infer_schema = raw.get("infer_schema")
     schema = raw.get("schema")
     if not infer_schema and not schema:
@@ -349,6 +401,7 @@ def _parse_stream(raw: Any) -> StreamConfig:
         schema=schema,
         record_selector=record_selector,
         error_handler=error_handler,
+        partition=partition,
     )
 
 
@@ -379,6 +432,10 @@ def _parse_pagination(raw: Any) -> PaginationConfig:
     stop_on_empty = _maybe_bool(
         raw.get("stop_on_empty_response"), "pagination.stop_on_empty_response", default=True
     )
+    total_pages_path = _maybe_path(raw.get("total_pages_path"), "pagination.total_pages_path")
+    total_pages_header = _maybe_str(raw.get("total_pages_header"), "pagination.total_pages_header")
+    total_records_path = _maybe_path(raw.get("total_records_path"), "pagination.total_records_path")
+    total_records_header = _maybe_str(raw.get("total_records_header"), "pagination.total_records_header")
 
     if pag_type == "offset":
         if offset_param is None:
@@ -415,6 +472,10 @@ def _parse_pagination(raw: Any) -> PaginationConfig:
         cursor_header=cursor_header,
         initial_cursor=initial_cursor,
         stop_on_empty_response=stop_on_empty,
+        total_pages_path=total_pages_path,
+        total_pages_header=total_pages_header,
+        total_records_path=total_records_path,
+        total_records_header=total_records_header,
     )
 
 
@@ -445,6 +506,14 @@ def _pagination_to_dict(config: PaginationConfig) -> Dict[str, Any]:
         payload["initial_cursor"] = config.initial_cursor
     if not config.stop_on_empty_response:
         payload["stop_on_empty_response"] = False
+    if config.total_pages_path:
+        payload["total_pages_path"] = list(config.total_pages_path)
+    if config.total_pages_header:
+        payload["total_pages_header"] = config.total_pages_header
+    if config.total_records_path:
+        payload["total_records_path"] = list(config.total_records_path)
+    if config.total_records_header:
+        payload["total_records_header"] = config.total_records_header
 
     return payload
 
@@ -622,6 +691,96 @@ def _parse_error_handler(raw: Any) -> ErrorHandlerConfig:
     )
 
 
+def _parse_partition(raw: Any) -> PartitionConfig:
+    """Parse the partition configuration from a raw config dict."""
+    if raw is None:
+        return PartitionConfig()
+
+    if not isinstance(raw, dict):
+        raise ConfigError("'partition' must be a mapping when provided")
+
+    strategy = raw.get("strategy", "none")
+    allowed_strategies = {"none", "pagination", "param_range", "endpoints"}
+    if strategy not in allowed_strategies:
+        raise ConfigError(f"Unsupported partition strategy: {strategy}")
+
+    # Default values
+    param = None
+    values = None
+    range_start = None
+    range_end = None
+    range_step = None
+    range_kind = None
+    value_template = None
+    extra_template = None
+    endpoints = ()
+
+    # Strategy-specific validation and parsing
+    if strategy == "param_range":
+        param = _maybe_str(raw.get("param"), "partition.param")
+        if not param:
+            raise ConfigError("'partition.param' must be provided for param_range strategy")
+
+        range_start = raw.get("range_start")
+        range_end = raw.get("range_end")
+
+        if range_start is None:
+            raise ConfigError("'partition.range_start' must be provided for param_range strategy")
+        if range_end is None:
+            raise ConfigError("'partition.range_end' must be provided for param_range strategy")
+
+        range_kind = raw.get("range_kind", "numeric")
+        if range_kind not in {"numeric", "date"}:
+            raise ConfigError("'partition.range_kind' must be either 'numeric' or 'date'")
+
+        # Parse step if provided
+        if "range_step" in raw:
+            step_value = raw.get("range_step")
+            if not isinstance(step_value, int) or step_value <= 0:
+                raise ConfigError("'partition.range_step' must be a positive integer")
+            range_step = step_value
+
+        # Optional templates
+        value_template = _maybe_str(raw.get("value_template"), "partition.value_template")
+        extra_template = _maybe_str(raw.get("extra_template"), "partition.extra_template")
+
+    elif strategy == "endpoints":
+        raw_endpoints = raw.get("endpoints")
+        if not raw_endpoints:
+            raise ConfigError("'partition.endpoints' must be provided for endpoints strategy")
+
+        if isinstance(raw_endpoints, str):
+            # Handle comma-separated string format
+            endpoint_list = [e.strip() for e in raw_endpoints.split(",") if e.strip()]
+            if not endpoint_list:
+                raise ConfigError("'partition.endpoints' must not be empty")
+            endpoints = tuple(endpoint_list)
+        elif isinstance(raw_endpoints, (list, tuple)):
+            # Handle array format
+            endpoint_list = []
+            for endpoint in raw_endpoints:
+                if not isinstance(endpoint, str) or not endpoint.strip():
+                    raise ConfigError("Each endpoint in 'partition.endpoints' must be a non-empty string")
+                endpoint_list.append(endpoint.strip())
+            endpoints = tuple(endpoint_list)
+        else:
+            raise ConfigError("'partition.endpoints' must be a list of strings or a comma-separated string")
+
+    return PartitionConfig(
+        strategy=strategy,
+        param=param,
+        values=values,
+        range_start=range_start,
+        range_end=range_end,
+        range_step=range_step,
+        range_kind=range_kind,
+        value_template=value_template,
+        extra_template=extra_template,
+        endpoints=endpoints,
+    )
+
+
+
 def _normalize_status_spec(value: Any) -> str:
     if isinstance(value, int):
         code = value
@@ -697,7 +856,6 @@ def _coerce_env(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _coerce_env(item) for key, item in value.items()}
     return value
-
 
 def _resolve_env(name: str) -> str:
     from os import getenv
@@ -785,5 +943,7 @@ def _parse_simple_type(type_spec: str):
         return TimestampType()
     if normalized == "date":
         return DateType()
+    if normalized == "variant":
+        return VariantType()
 
-    raise ValueError(f"Unsupported type expression '{type_spec}' without Spark runtime")
+    raise ValueError(f"Unsupported type expression '{type_spec}'")

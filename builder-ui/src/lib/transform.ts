@@ -104,6 +104,132 @@ export function formStateToConfig(formState: ConfigFormState): RestSourceConfig 
     },
   } satisfies ErrorHandlerConfig;
 
+  // Create partition config if strategy is not 'none'
+  const partitionConfig = (() => {
+    if (formState.partitionStrategy === 'none') {
+      return undefined;
+    }
+
+    const config: Record<string, any> = {
+      strategy: formState.partitionStrategy
+    };
+
+    if (formState.partitionStrategy === 'pagination') {
+      // No additional fields needed for pagination strategy
+      return config;
+    }
+
+    if (formState.partitionStrategy === 'param_range') {
+      const param = formState.partitionParam?.trim();
+      if (param) {
+        config.param = param;
+      }
+
+      // NEW: serialize explicit values list (overrides range generation on backend)
+      const rawValues = formState.partitionValues?.trim();
+      if (rawValues) {
+        config.values = rawValues; // keep raw string; backend can parse CSV or JSON
+      }
+
+      if (!rawValues) { // only serialize range fields if no explicit values provided
+        if (formState.partitionRangeKind === 'numeric') {
+          const start = parseOptionalInteger(formState.partitionRangeStart);
+          if (start !== undefined) {
+            config.range_start = start;
+          }
+
+          const end = parseOptionalInteger(formState.partitionRangeEnd);
+            if (end !== undefined) {
+              config.range_end = end;
+            }
+
+          const step = parseOptionalPositiveInt(formState.partitionRangeStep);
+          if (step !== undefined) {
+            config.range_step = step;
+          }
+        } else if (formState.partitionRangeKind === 'date') {
+          // For date ranges, keep as string
+          const start = formState.partitionRangeStart?.trim();
+          if (start) {
+            config.range_start = start;
+          }
+
+          const end = formState.partitionRangeEnd?.trim();
+          if (end) {
+            config.range_end = end;
+          }
+
+          const step = parseOptionalPositiveInt(formState.partitionRangeStep);
+          if (step !== undefined) {
+            config.range_step = step;
+          }
+
+          config.range_kind = 'date';
+        }
+      }
+
+      const valueTemplate = formState.partitionValueTemplate?.trim();
+      if (valueTemplate) {
+        config.value_template = valueTemplate;
+      }
+
+      const extraTemplate = formState.partitionExtraTemplate?.trim();
+      if (extraTemplate) {
+        config.extra_template = extraTemplate;
+      }
+    }
+
+    if (formState.partitionStrategy === 'endpoints') {
+      const endpointsStr = formState.partitionEndpoints?.trim();
+      if (endpointsStr) {
+        let endpoints: string[] = [];
+        // Try JSON first
+        try {
+          const parsed = JSON.parse(endpointsStr);
+          if (Array.isArray(parsed)) {
+            if (parsed.every(item => typeof item === 'string')) {
+              endpoints = parsed.map(s => s.trim()).filter(s => s.length > 0);
+            } else if (parsed.every(item => typeof item === 'object' && item)) {
+              // Support array of objects with name/path (ignore params for now)
+              endpoints = parsed
+                .map(obj => {
+                  const name = (obj as any).name?.trim();
+                  const path = (obj as any).path?.trim();
+                  if (!path) return null;
+                  return name ? `${name}:${path}` : path;
+                })
+                .filter((v): v is string => !!v);
+            }
+          }
+        } catch {
+          // Not JSON �� fallback to splitting by newlines or commas
+          endpoints = endpointsStr
+            .split(/[,\n]/)
+            .map(e => e.trim())
+            .filter(e => e.length > 0);
+        }
+
+        if (endpoints.length > 0) {
+          config.endpoints = endpoints;
+        }
+      }
+    }
+
+    return config;
+  })();
+
+  const trimmedStreamPath = formState.streamPath.trim();
+  const endpointsConfigured = !!formState.partitionEndpoints?.trim();
+  let effectiveStreamPath = trimmedStreamPath;
+
+  if (!effectiveStreamPath && formState.partitionStrategy === 'endpoints' && endpointsConfigured) {
+    effectiveStreamPath = '/';
+  }
+
+  if (effectiveStreamPath && !effectiveStreamPath.startsWith('/')) {
+    effectiveStreamPath = `/${effectiveStreamPath}`;
+  }
+
   return {
     version: formState.version,
     source: {
@@ -112,7 +238,7 @@ export function formStateToConfig(formState: ConfigFormState): RestSourceConfig 
       // Auth intentionally excluded from persisted config (token supplied separately)
     },
     stream: {
-      path: formState.streamPath,
+      path: effectiveStreamPath,
       params: cleanParams,
       headers: cleanHeaders,
       pagination: (() => {
@@ -126,8 +252,24 @@ export function formStateToConfig(formState: ConfigFormState): RestSourceConfig 
           if (limitParam) {
             pagination.limit_param = limitParam;
           }
-          if (formState.paginationStopOnEmptyResponse === false) {
+          if (!formState.paginationStopOnEmptyResponse) { // simplified
             pagination.stop_on_empty_response = false;
+          }
+          const totalPagesPath = parsePathInput(formState.paginationTotalPagesPath);
+          if (totalPagesPath) {
+            (pagination as any).total_pages_path = totalPagesPath;
+          }
+          const totalPagesHeader = formState.paginationTotalPagesHeader?.trim();
+          if (totalPagesHeader) {
+            (pagination as any).total_pages_header = totalPagesHeader;
+          }
+          const totalRecordsPath = parsePathInput(formState.paginationTotalRecordsPath);
+          if (totalRecordsPath) {
+            (pagination as any).total_records_path = totalRecordsPath;
+          }
+          const totalRecordsHeader = formState.paginationTotalRecordsHeader?.trim();
+          if (totalRecordsHeader) {
+            (pagination as any).total_records_header = totalRecordsHeader;
           }
         }
 
@@ -191,6 +333,7 @@ export function formStateToConfig(formState: ConfigFormState): RestSourceConfig 
         cast_to_schema_types: formState.castToSchemaTypes,
       },
       error_handler: errorHandler,
+      ...(partitionConfig ? { partition: partitionConfig } : {}),
     },
   } as any; // backend ignores missing name
 }
@@ -233,12 +376,71 @@ export function configToFormState(config: RestSourceConfig): ConfigFormState {
   const effectiveRetryOnTimeout = upstreamErrorHandler?.retry_on_timeout ?? DEFAULT_ERROR_HANDLER.retry_on_timeout;
   const effectiveRetryOnConnectionErrors = upstreamErrorHandler?.retry_on_connection_errors ?? DEFAULT_ERROR_HANDLER.retry_on_connection_errors;
 
+  // Get partition config exclusively from stream.partition
+  const partitionConfig = config.stream.partition;
+
+  // Default values for partition configuration
+  let partitionStrategy: 'none' | 'pagination' | 'param_range' | 'endpoints' = partitionConfig?.strategy ?? 'none';
+  let partitionParam = '';
+  let partitionValues = '';
+  let partitionRangeStart = '';
+  let partitionRangeEnd = '';
+  let partitionRangeStep = '';
+  let partitionRangeKind: 'numeric' | 'date' = 'numeric';
+  let partitionValueTemplate = '';
+  let partitionExtraTemplate = '';
+  let partitionEndpoints = '';
+
+  // Extract partition config from stream.partition if available
+  if (partitionConfig) {
+    partitionStrategy = partitionConfig.strategy;
+
+    if (partitionConfig.param) {
+      partitionParam = String(partitionConfig.param);
+    }
+
+    if (partitionConfig.values) {
+      partitionValues = String(partitionConfig.values);
+    }
+
+    if (partitionConfig.range_start !== undefined && partitionConfig.range_start !== null) {
+      partitionRangeStart = String(partitionConfig.range_start);
+    }
+
+    if (partitionConfig.range_end !== undefined && partitionConfig.range_end !== null) {
+      partitionRangeEnd = String(partitionConfig.range_end);
+    }
+
+    if (partitionConfig.range_step !== undefined && partitionConfig.range_step !== null) {
+      partitionRangeStep = String(partitionConfig.range_step);
+    }
+
+    if (partitionConfig.range_kind === 'date') {
+      partitionRangeKind = 'date';
+    }
+
+    if (partitionConfig.value_template) {
+      partitionValueTemplate = String(partitionConfig.value_template);
+    }
+
+    if (partitionConfig.extra_template) {
+      partitionExtraTemplate = String(partitionConfig.extra_template);
+    }
+
+    if (partitionConfig.endpoints && Array.isArray(partitionConfig.endpoints)) {
+      partitionEndpoints = partitionConfig.endpoints.join(',');
+    }
+  }
+
+  const rawStreamPath = (config.stream as any).path || '';
+  const streamPath = partitionStrategy === 'endpoints' && rawStreamPath === '/' ? '' : rawStreamPath;
+
   return {
     version: config.version,
     baseUrl: config.source.base_url,
     authType: (config.source as any).auth?.type || 'none',
     authToken: '', // token never returned by API
-    streamPath: (config.stream as any).path,
+    streamPath,
     params: stringParams,
     headers: stringHeaders,
     paginationType: config.stream.pagination?.type || 'none',
@@ -271,8 +473,27 @@ export function configToFormState(config: RestSourceConfig): ConfigFormState {
         : '',
     paginationCursorHeader: config.stream.pagination?.cursor_header || '',
     paginationInitialCursor: config.stream.pagination?.initial_cursor || '',
-    paginationStopOnEmptyResponse:
-      config.stream.pagination?.stop_on_empty_response === false ? false : true,
+    paginationStopOnEmptyResponse: (config.stream.pagination as any)?.stop_on_empty_response !== false,
+    paginationTotalPagesPath:
+      (config.stream.pagination as any)?.total_pages_path && (config.stream.pagination as any).total_pages_path.length > 0
+        ? (config.stream.pagination as any).total_pages_path.join('.')
+        : '',
+    paginationTotalPagesHeader: (config.stream.pagination as any)?.total_pages_header || '',
+    paginationTotalRecordsPath:
+      (config.stream.pagination as any)?.total_records_path && (config.stream.pagination as any).total_records_path.length > 0
+        ? (config.stream.pagination as any).total_records_path.join('.')
+        : '',
+    paginationTotalRecordsHeader: (config.stream.pagination as any)?.total_records_header || '',
+    partitionStrategy,
+    partitionParam,
+    partitionValues,
+    partitionRangeStart,
+    partitionRangeEnd,
+    partitionRangeStep,
+    partitionRangeKind,
+    partitionValueTemplate,
+    partitionExtraTemplate,
+    partitionEndpoints,
     incrementalMode: config.stream.incremental?.mode || '',
     incrementalCursorParam: config.stream.incremental?.cursor_param || '',
     incrementalCursorField: config.stream.incremental?.cursor_field || '',
@@ -307,9 +528,15 @@ export function validateFormState(formState: ConfigFormState): string[] {
     errors.push('Base URL must be a valid HTTP/HTTPS URL');
   }
 
-  if (!formState.streamPath.trim()) {
+  const trimmedPath = formState.streamPath.trim();
+  const endpointsConfigured = !!formState.partitionEndpoints?.trim();
+  const requiresPath = formState.partitionStrategy !== 'endpoints' || !endpointsConfigured;
+
+  if (requiresPath && !trimmedPath) {
     errors.push('Stream path is required');
-  } else if (!formState.streamPath.startsWith('/')) {
+  }
+
+  if (trimmedPath && !trimmedPath.startsWith('/')) {
     errors.push('Stream path must start with /');
   }
 

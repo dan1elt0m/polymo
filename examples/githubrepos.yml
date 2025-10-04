@@ -1,7 +1,7 @@
 version: 0.1
 source:
   type: rest
-  base_url: https://api.github.com/orgs/godatadriven
+  base_url: https://api.github.com/orgs/databricks
 stream:
   path: /repos
   infer_schema: true

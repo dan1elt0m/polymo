@@ -91,6 +91,42 @@ Pick one of the supported behaviours:
 
 Every pagination strategy stops when the API returns an empty list of records. Override that default by setting `stop_on_empty_response: false`.
 
+#### Partition-aware pagination
+
+When you provide either `total_pages_path`/`total_pages_header` or `total_records_path`/`total_records_header`, Polymo can estimate how many requests are required in advance. The Spark DataSource will use that information to create one input partition per page (for `page` pagination) or per offset step (for `offset` pagination), allowing Spark to read pages in parallel. For example:
+
+```yaml
+pagination:
+  type: page
+  page_size: 100
+  page_param: page
+  limit_param: per_page
+  total_pages_path: [meta, total_pages]
+```
+
+or
+
+```yaml
+pagination:
+  type: offset
+  page_size: 500
+  offset_param: offset
+  total_records_header: X-Total-Count
+```
+
+If the total count hints are missing, Polymo falls back to a single Spark partition.
+
+#### Additional Spark partition strategies
+
+Partitioning is opt-in and configured through Spark reader options:
+
+- `.option("partition_strategy", "pagination")` – enables the page/offset partitioning described above. Requires the pagination hints to be present in the YAML.
+- `.option("partition_strategy", "param_range")` – generates one partition per query-parameter value. Combine with:
+  - `.option("partition_param", "created_at")`
+  - either `.option("partition_values", "2024-01-01,2024-01-02")` or range options such as `.option("partition_range_start", "2024-01-01")`, `.option("partition_range_end", "2024-01-07")`, `.option("partition_range_kind", "date")`, `.option("partition_range_step", "1")`
+  - Optional templates: `.option("partition_value_template", "{{value}}T00:00:00Z")` or `.option("partition_extra_template", '{"until": "{{value}}T23:59:59Z"}')`
+- `.option("partition_strategy", "endpoints")` – fans out over multiple endpoints. Provide `.option("partition_endpoints", '[{"name":"users","path":"/users"},{"name":"repos","path":"/repos"}]')`. Each partition sets `endpoint_name` and fetches the specified path (with optional `params`). Shape the schema accordingly, for example `endpoint_name STRING, data STRING` to capture heterogenous payloads.
+
 ### Incremental fields
 
 ```yaml
