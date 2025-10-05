@@ -4,7 +4,11 @@
 
 # Welcome to Polymo
 
-Polymo is a helper for pyspark that turns everyday web APIs into tables you can analyse. Point it at an API, tell it what you want to grab, and Polymo does the heavy lifting of fetching the data and lining it up neatly.
+Polymo makes it super easy to ingest APIs with Pyspark. It's like slicing cake.
+
+My vision is that API ingestion doesn't need heavy, third party tools or hard to maintain custom code.
+
+Turn data infestion into data ingestion with Polymo.
 
 <!-- Centered clickable screenshot -->
 <p align="center">
