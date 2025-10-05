@@ -6,6 +6,13 @@
 
 Polymo is a helper for pyspark that turns everyday web APIs into tables you can analyse. Point it at an API, tell it what you want to grab, and Polymo does the heavy lifting of fetching the data and lining it up neatly.
 
+<!-- Centered clickable screenshot -->
+<p align="center">
+  <a href="docs/ui.png">
+    <img src="docs/ui.png" alt="Polymo Builder UI - connector preview screen" width="860">
+  </a>
+</p>
+
 ## Why people use Polymo
 - **No custom code required.** Describe your API once in a short, friendly YAML file or through the point-and-click Builder.
 - **See results before you commit.** Preview the real responses, record-by-record, so you can fix issues early.
@@ -82,21 +89,6 @@ query.start()
 Use the same runtime options as `read` (tokens, OAuth2 client secrets, incremental state paths, etc.). `stream_batch_size` caps the number of rows per micro-batch and `stream_progress_path` stores a tiny JSON file so restarts resume from the same offset.
 
 Want a quick check without writing code? Run `polymo smoke --streaming` and the CLI will execute a one-off micro-batch using the bundled JSONPlaceholder example (or a YAML you pass in).
-
-### Builder UI preview
-
-<p align="center">
-  <a href="docs/ui_landing.png">
-    <img src="docs/ui_landing.png" alt="Polymo Builder UI landing screen" width="880">
-  </a>
-</p>
-
-<!-- Centered clickable screenshot -->
-<p align="center">
-  <a href="docs/ui.png">
-    <img src="docs/ui.png" alt="Polymo Builder UI - connector preview screen" width="860">
-  </a>
-</p>
 
 ## What’s inside this project
 - `src/polymo/` keeps the logic that speaks to APIs and hands data to Spark.
