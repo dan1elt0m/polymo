@@ -17,7 +17,7 @@ Turn data infestion into data ingestion with Polymo.
   </a>
 </p>
 
-## What's the magic?
+## How does it work?
 
 Define a config file manually or use the lightweight builder UI. 
 Once you are happy with your config, all you need to do is register the Polymo reader and tell Spark where to find the config:
