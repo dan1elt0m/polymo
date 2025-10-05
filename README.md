@@ -54,24 +54,30 @@ query = stream_df.writeStream.format("memory").outputMode("append").queryName("p
 query.start()
 ```
 
-Already many features are supported: 
-- Authentication helpers covering no auth, bearer tokens, API keys injected as parameters, and OAuth2 client-credentials exchanges with scoped requests.
-- Pagination engines for single-shot, offset, page, cursor, next-link, and HTTP `Link` header patterns, plus partition-aware hints when totals are exposed.
-- Workload partitioning via pagination hints, explicit endpoint fan-out, or parameter ranges (numeric and date) for parallel Spark reads.
+Polymo is almost feature complete!
+
+- Various Authentication options
+- Many Pagination  patterns, plus automatic partition-aware reading when totals are exposed.
+- Several partitioning stategies for parallel Spark reads.
 - Incremental sync support with cursor parameters, JSON state files on local or remote storage, optional memory caching, and overrideable state keys.
 - Schema controls that auto-infer types or accept Spark SQL schemas, along with record selectors, filtering expressions, and schema-based casting for nested responses.
 - Structured Streaming compatibility with `spark.readStream`, tunable batch sizing, durable progress tracking, and a streaming smoke test mode.
-- Resilient error handling through configurable retry counts, status code lists, timeout handling, and exponential backoff settings.
+- Error handling through configurable retry counts, status code lists, timeout handling, and exponential backoff settings.
 
-## Why people use Polymo
-- **No custom code required.** Describe your API once in a short, friendly YAML file or through the point-and-click Builder.
-- **See results before you commit.** Preview the real responses, record-by-record, so you can fix issues early.
-- **Works with Spark-based tools.** When you are ready, Polymo serves the data to your analytics stack using the same interface Spark already understands.
-- **Designed for teams.** Save reusable connectors, share them across projects.
+## How to start?
+Locally you probably want to install polymo with the UI: 
 
-## Before you start
-- Install Polymo with `pip install polymo`. If you want the Builder UI, add the extras: `pip install "polymo[builder]"`.
-- Make sure you have access to the API you care about (base URL, token if needed, and any sample request parameters).
+```bash
+pip install "polymo[builder]"
+```
+
+This comes with UI deps such as pyspark
+
+Running Polymo on an existing cluster in for instance databricks doesnt require these deps.
+In that case, just install the bare minimum depa with
+```bash
+pip install polymo
+```
 
 ## Launch the builder UI 
 
