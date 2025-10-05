@@ -40,6 +40,8 @@ df.show()
 
 Structured Streaming works out of the box aswell:
 
+Does it perform? Polymo can read in batches (pages in parallel) and therefore is much faster than row based solutions like UDFs.
+
 ```python
 stream_df = (
     spark.readStream.format("polymo")
