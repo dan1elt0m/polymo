@@ -55,15 +55,7 @@ query.start()
 - Install Polymo with `pip install polymo`. If you want the Builder UI, add the extras: `pip install "polymo[builder]"`.
 - Make sure you have access to the API you care about (base URL, token if needed, and any sample request parameters).
 
-## What’s inside this project
-- `src/polymo/` keeps the logic that speaks to APIs and hands data to Spark.
-- `polymo builder` is a small web app (FastAPI + React) that guides you through every step. No need to run npm, the app is bundled with pip and ready to go.
-- `examples/` contains ready-made configs you can copy, tweak, and use for smoke tests.
-- `tests/test_datasource.py::test_stream_reader_batches` exercises the streaming reader end to end; run it with `pytest -k stream_reader_batches` for a quick smoke test.
-- `notebooks/polymo_vs_udf_benchmark.ipynb` compares two approaches: Polymo’s DataSource batch endpoint vs a per-row Spark UDF. With the default 50ms simulated latency Polymo finishes ~10× faster than the per-row UDF. Tweak `PAGE_DELAY`, `page_size`, or the dataset size to mirror your own API.
-
 ## Run the Builder in Docker
-- Build the dev-friendly image and launch the Builder with hot reload:
 
 ```bash
 docker compose up --build builder
