@@ -66,13 +66,13 @@ Already many features are supported:
 - Install Polymo with `pip install polymo`. If you want the Builder UI, add the extras: `pip install "polymo[builder]"`.
 - Make sure you have access to the API you care about (base URL, token if needed, and any sample request parameters).
 
-Launch the builder UI with 
+## Launch the builder UI 
 
 ```bash 
 polymo builder
 ```
 
-## (Optional) Run the Builder in Docker
+#### (Optional) Run the Builder in Docker
 
 ```bash
 docker compose up --build builder
