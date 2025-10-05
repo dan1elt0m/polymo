@@ -13,6 +13,8 @@ Polymo is a helper for pyspark that turns everyday web APIs into tables you can 
   </a>
 </p>
 
+Once you have defined the config, all you need to do is register the Polymo reader and tell Spark where to find the config:
+
 ```python
 from pyspark.sql import SparkSession
 from polymo import ApiReader
