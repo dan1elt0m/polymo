@@ -47,6 +47,15 @@ query = stream_df.writeStream.format("memory").outputMode("append").queryName("p
 query.start()
 ```
 
+Already many features are supported: 
+- Authentication helpers covering no auth, bearer tokens, API keys injected as parameters, and OAuth2 client-credentials exchanges with scoped requests.
+- Pagination engines for single-shot, offset, page, cursor, next-link, and HTTP `Link` header patterns, plus partition-aware hints when totals are exposed.
+- Workload partitioning via pagination hints, explicit endpoint fan-out, or parameter ranges (numeric and date) for parallel Spark reads.
+- Incremental sync support with cursor parameters, JSON state files on local or remote storage, optional memory caching, and overrideable state keys.
+- Schema controls that auto-infer types or accept Spark SQL schemas, along with record selectors, filtering expressions, and schema-based casting for nested responses.
+- Structured Streaming compatibility with `spark.readStream`, tunable batch sizing, durable progress tracking, and a streaming smoke test mode.
+- Resilient error handling through configurable retry counts, status code lists, timeout handling, and exponential backoff settings.
+
 ## Why people use Polymo
 - **No custom code required.** Describe your API once in a short, friendly YAML file or through the point-and-click Builder.
 - **See results before you commit.** Preview the real responses, record-by-record, so you can fix issues early.
