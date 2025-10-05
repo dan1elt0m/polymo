@@ -7,6 +7,7 @@
 Polymo makes it super easy to ingest APIs with Pyspark. It's like slicing cake.
 
 My vision is that API ingestion doesn't need heavy, third party tools or hard to maintain custom code.
+The heck, you don't even need Pyspark skills.
 
 
 <!-- Centered clickable screenshot -->
