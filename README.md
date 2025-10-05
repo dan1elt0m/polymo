@@ -63,6 +63,8 @@ Polymo is almost feature complete!
 - Schema controls that auto-infer types or accept Spark SQL schemas, along with record selectors, filtering expressions, and schema-based casting for nested responses.
 - Structured Streaming compatibility with `spark.readStream`, tunable batch sizing, durable progress tracking, and a streaming smoke test mode.
 - Error handling through configurable retry counts, status code lists, timeout handling, and exponential backoff settings.
+- Jinja templating of query parameters gives you a ton of flexibility
+
 
 ## How to start?
 Locally you probably want to install polymo with the UI: 
