@@ -94,10 +94,6 @@ docker compose up --build builder
 ```
 
 - The service listens on port `8000`; open <http://localhost:8000> once Uvicorn reports it is running.
-- The image already bundles PySpark and OpenJDK 21;
-- Stop with `docker compose down` and restart quickly using the cached image via `docker compose up builder`.
-
-Have fun building connectors!
 
 ## Where to Next
 Read the docs [here](https://dan1elt0m.github.io/polymo/)
