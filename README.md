@@ -13,45 +13,6 @@ Polymo is a helper for pyspark that turns everyday web APIs into tables you can 
   </a>
 </p>
 
-## Why people use Polymo
-- **No custom code required.** Describe your API once in a short, friendly YAML file or through the point-and-click Builder.
-- **See results before you commit.** Preview the real responses, record-by-record, so you can fix issues early.
-- **Works with Spark-based tools.** When you are ready, Polymo serves the data to your analytics stack using the same interface Spark already understands.
-- **Designed for teams.** Save reusable connectors, share them across projects, and keep secrets (like tokens) out of files.
-- **Speedy and efficient.** Polymo handles batch requests and pagination automatically, so you get your data faster than with per-row UDFs.
-
-## Pick your path
-- **Mostly clicking?** Open the [Builder UI](docs/builder-ui.md) and follow the guided screens. It is the easiest way to create a connector from scratch.
-- **Prefer a checklist?** Read the [Configuration guide](docs/config.md) for a plain-language tour of every field in the YAML file.
-
-## Before you start
-- Install Polymo with `pip install polymo`. If you want the Builder UI, add the extras: `pip install "polymo[builder]"`.
-- Make sure you have access to the API you care about (base URL, token if needed, and any sample request parameters).
-- Check that PySpark version 4 or newer is available. Polymo uses Spark under the hood to keep data consistent.
-
-## Supported features
-- Declarative REST connectors defined in YAML or through the Builder, with path placeholders, runtime option templates, and environment variable helpers.
-- Browser-based Builder UI with autosave, preview modes (table, records, raw API), schema copy, and a synced YAML editor.
-- Lightweight CLI including `polymo builder` for launching the UI and `polymo smoke` for batch or streaming validation runs.
-- Authentication helpers covering no auth, bearer tokens, API keys injected as parameters, and OAuth2 client-credentials exchanges with scoped requests.
-- Pagination engines for single-shot, offset, page, cursor, next-link, and HTTP `Link` header patterns, plus partition-aware hints when totals are exposed.
-- Workload partitioning via pagination hints, explicit endpoint fan-out, or parameter ranges (numeric and date) for parallel Spark reads.
-- Incremental sync support with cursor parameters, JSON state files on local or remote storage, optional memory caching, and overrideable state keys.
-- Schema controls that auto-infer types or accept Spark SQL schemas, along with record selectors, filtering expressions, and schema-based casting for nested responses.
-- Structured Streaming compatibility with `spark.readStream`, tunable batch sizing, durable progress tracking, and a streaming smoke test mode.
-- Resilient error handling through configurable retry counts, status code lists, timeout handling, and exponential backoff settings.
-
-## Quick tour
-
-1. **Launch the Builder (optional but recommended).** Run `polymo builder --port 9000` and open the provided link in your browser.
-2. **Describe your API.** Fill in a base URL like `https://jsonplaceholder.typicode.com`, pick the endpoint `/posts`, and add filters such as `_limit: 20` if you only need a sample.
-3. **Preview the data.** Press the Preview button to see a table of records, the raw API replies, and any error messages.
-4. **Save the connector.** Download the YAML config or write it directly to your project folder. Tokens stay out of the file and are passed in later.
-5. **Use it in Spark.** Load the file with the short code snippet below or copy/paste from the Builder’s tips panel.
-
-The Builder keeps a local library of every connector you work on. Use the header’s connector picker to hop between drafts, open the library to rename or export them, and never worry about losing your place. The header even shows the installed Polymo version for quick support checks.
-
-
 ```python
 from pyspark.sql import SparkSession
 from polymo import ApiReader
@@ -69,9 +30,7 @@ df = (
 df.show()
 ```
 
-### Streaming too
-
-Structured Streaming works out of the box:
+Structured Streaming works out of the box aswell:
 
 ```python
 stream_df = (
@@ -86,9 +45,15 @@ query = stream_df.writeStream.format("memory").outputMode("append").queryName("p
 query.start()
 ```
 
-Use the same runtime options as `read` (tokens, OAuth2 client secrets, incremental state paths, etc.). `stream_batch_size` caps the number of rows per micro-batch and `stream_progress_path` stores a tiny JSON file so restarts resume from the same offset.
+## Why people use Polymo
+- **No custom code required.** Describe your API once in a short, friendly YAML file or through the point-and-click Builder.
+- **See results before you commit.** Preview the real responses, record-by-record, so you can fix issues early.
+- **Works with Spark-based tools.** When you are ready, Polymo serves the data to your analytics stack using the same interface Spark already understands.
+- **Designed for teams.** Save reusable connectors, share them across projects.
 
-Want a quick check without writing code? Run `polymo smoke --streaming` and the CLI will execute a one-off micro-batch using the bundled JSONPlaceholder example (or a YAML you pass in).
+## Before you start
+- Install Polymo with `pip install polymo`. If you want the Builder UI, add the extras: `pip install "polymo[builder]"`.
+- Make sure you have access to the API you care about (base URL, token if needed, and any sample request parameters).
 
 ## What’s inside this project
 - `src/polymo/` keeps the logic that speaks to APIs and hands data to Spark.
