@@ -58,7 +58,7 @@ query.show()
 Does it perform? Polymo can read in batches (pages in parallel) and therefore is much faster than row based solutions like UDFs.
 
 
-Polymo is already almost feature complete!
+It's still early days, but Polymo already supports a lot of features!
 
 - Various Authentication options
 - Many Pagination  patterns, plus automatic partition-aware reading when totals are exposed.
