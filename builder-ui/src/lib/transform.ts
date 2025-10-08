@@ -271,10 +271,6 @@ export function formStateToConfig(formState: ConfigFormState): RestSourceConfig 
         }
       }
 
-      if (formState.authToken.trim()) {
-        block.client_secret = '{{ options.oauth_client_secret }}';
-      }
-
       return block;
     }
     return undefined;

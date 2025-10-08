@@ -48,6 +48,15 @@ df = (
 df.show()
 ```
 
+Want to keep everything in memory? Provide the config dict directly instead of writing a temporary file:
+
+```python
+import json
+
+config_dict = {...}
+df = spark.read.format("polymo").option("config_json", json.dumps(config_dict)).load()
+```
+
 ### Streaming, same config
 
 ```python

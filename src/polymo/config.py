@@ -30,6 +30,102 @@ class ConfigError(ValueError):
     """Raised when the user-provided YAML configuration is invalid."""
 
 
+_REDACTED_TOKENS = {
+    "***",
+    "****",
+    "*****",
+    "******",
+    "[redacted]",
+    "<redacted>",
+    "redacted",
+}
+
+
+def _resolve_secret_value(raw: Any) -> Tuple[Optional[str], bool]:
+    """Attempt to coerce a secret value into a usable string.
+
+    Returns a tuple of (value, is_redacted). When ``is_redacted`` is True,
+    the caller should treat the value as intentionally masked and request the
+    real secret again. The function tries a variety of access patterns to
+    support secret wrappers (e.g. Databricks DBUtils) without ever stringifying
+    the secret prematurely.
+    """
+
+    seen: set[int] = set()
+
+    def _inner(value: Any) -> Tuple[Optional[str], bool]:
+        if value is None:
+            return None, False
+
+        obj_id = id(value)
+        if obj_id in seen:
+            return None, False
+        seen.add(obj_id)
+
+        if isinstance(value, str):
+            trimmed = value.strip()
+            if not trimmed:
+                return None, False
+            if trimmed.startswith("{{") and trimmed.endswith("}}"):
+                return None, False
+
+            lowered = trimmed.lower()
+            if lowered in _REDACTED_TOKENS or set(trimmed) <= {"*"}:
+                return None, True
+
+            return trimmed, False
+
+        if isinstance(value, (bytes, bytearray)):
+            try:
+                decoded = bytes(value).decode()
+            except UnicodeDecodeError:
+                decoded = bytes(value).decode("utf-8", errors="ignore")
+            return _inner(decoded)
+
+        if callable(value):
+            try:
+                resolved = value()
+            except TypeError:
+                resolved = None
+            if resolved is not None:
+                return _inner(resolved)
+
+        attribute_candidates = (
+            "value",
+            "secret",
+            "get",
+            "get_value",
+            "getSecretValue",
+            "getSecret",
+            "get_secret_value",
+        )
+        for attr_name in attribute_candidates:
+            attr = getattr(value, attr_name, None)
+            if attr is None:
+                continue
+            if callable(attr):
+                try:
+                    resolved = attr()
+                except TypeError:
+                    continue
+            else:
+                resolved = attr
+            resolved_value, was_redacted = _inner(resolved)
+            if resolved_value is not None or was_redacted:
+                return resolved_value, was_redacted
+
+        try:
+            text_repr = str(value)
+        except Exception:
+            text_repr = None
+        if text_repr is not None and text_repr is not value:
+            return _inner(text_repr)
+
+        return None, False
+
+    return _inner(raw)
+
+
 @dataclass(frozen=True)
 class AuthConfig:
     """Authentication configuration for REST requests."""
@@ -329,7 +425,6 @@ def dump_config(config: RestSourceConfig) -> str:
     """
 
     data = config_to_dict(config)
-    data["source"].pop("auth", None)
     return yaml.safe_dump(data, sort_keys=False)
 
 
@@ -378,26 +473,20 @@ def _parse_auth_config(
     if not isinstance(client_id, str) or not client_id.strip():
         raise ConfigError("'source.auth.client_id' must be provided for oauth2 auth")
 
-    client_secret = raw_auth.get("client_secret")
-    if isinstance(client_secret, str):
-        client_secret = client_secret.strip() or None
-        if (
-            client_secret
-            and client_secret.startswith("{{")
-            and client_secret.endswith("}}")
-        ):
-            client_secret = None
-    elif client_secret is not None:
-        client_secret = str(client_secret)
+    client_secret_raw = raw_auth.get("client_secret")
+    client_secret, client_secret_redacted = _resolve_secret_value(client_secret_raw)
 
-    secret_from_options = runtime_options.pop("oauth_client_secret", None)
-    if isinstance(secret_from_options, str):
-        secret_from_options = secret_from_options.strip() or None
-    elif secret_from_options is not None:
-        secret_from_options = str(secret_from_options)
+    secret_from_options_raw = runtime_options.pop("oauth_client_secret", None)
+    secret_from_options, options_secret_redacted = _resolve_secret_value(
+        secret_from_options_raw
+    )
 
     client_secret = client_secret or token_value or secret_from_options
     if not client_secret:
+        if client_secret_redacted or options_secret_redacted:
+            raise ConfigError(
+                "OAuth2 auth received a redacted client secret. Pass the runtime secret value directly (e.g. the result of dbutils.secrets.get) so it is not masked.",
+            )
         raise ConfigError(
             "OAuth2 auth requires a client secret supplied via config ('client_secret') or runtime option 'oauth_client_secret'",
         )

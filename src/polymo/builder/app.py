@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from functools import partial
 from importlib import metadata, resources
 from typing import Any, Dict, List, Optional, Tuple
@@ -308,19 +309,25 @@ def _collect_records(
     config: RestSourceConfig, token: str | None, limit: int
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
     """Collect processed records and dtypes using PySpark DataSource."""
-    import tempfile
-    import os
-    from ..config import dump_config
 
-    # Create a temporary config file for Spark to use
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
-        config_yaml = dump_config(config)
-        f.write(config_yaml)
-        config_path = f.name
+    from ..config import config_to_dict
+
+    if config.auth and not token:
+        if config.auth.type == "bearer" and config.auth.token:
+            token = config.auth.token
+        if config.auth.type == "oauth2" and config.auth.client_secret:
+            token = config.auth.client_secret
+
+    config_dict = config_to_dict(config)
 
     spark = _get_or_create_spark()
     try:
-        df = _get_preview_df(config_path, token, spark, config.options)
+        df = _get_preview_df(
+            config_dict=config_dict,
+            token=token,
+            spark=spark,
+            reader_options=config.options
+        )
         records = df.limit(limit).collect()
         dtypes = df.dtypes
         record_dicts = [row.asDict(recursive=True) for row in records]
@@ -332,12 +339,12 @@ def _collect_records(
         return record_dicts, dtype_dicts
     finally:
         spark.stop()
-        os.unlink(config_path)
 
 
 def _get_preview_df(
-    config_path: str,
-    token: str | None,
+    *,
+    config_dict: ConfigDict,
+    token: Optional[str],
     spark: "SparkSession",
     reader_options: Dict[str, Any],
 ):
@@ -347,18 +354,22 @@ def _get_preview_df(
 
     _get_or_create_spark()
     spark.dataSource.register(ApiReader)
+    config_json = json.dumps(config_dict, sort_keys=True)
+    options: Dict[str, str] = {"config_json": config_json}
 
-    # Alternative approach: Use the DataSource directly without format registration
-    # Create the DataSource instance manually
-    options = {
-        "config_path": config_path,
-    }
     if token is not None:
         options["token"] = token
+
+    if source := config_dict.get('source', {}):
+        if auth := source.get("auth"):
+            if auth.get("type") == "oauth2":
+                options["oauth_client_secret"] = token
+
     for key, value in reader_options.items():
         if key in {"config_path", "token"}:
             continue
         options[key] = value
+
     return spark.read.format("polymo").options(**options).load()
 
 

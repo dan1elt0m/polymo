@@ -245,6 +245,8 @@ spark.read.format("polymo")
   .load()
 ```
 
+Prefer keeping everything in memory? Replace `config_path` with `.option("config_json", json.dumps(config_dict))` when you already have the config as a Python dictionary. Only one of `config_path` or `config_json` can be supplied at a time.
+
 Inside your config you can reference `{{ options.owner }}` or `{{ options.token }}`. Keep tokens out of the YAML—pass them through `.option("token", ...)` instead.
 
 For OAuth2, supply the client secret the same way: `.option("oauth_client_secret", os.environ["CLIENT_SECRET"])`. The exported YAML references it as `{{ options.oauth_client_secret }}` so the value never touches disk.

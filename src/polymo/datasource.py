@@ -33,6 +33,7 @@ from .config import (
     PartitionConfig,
     RestSourceConfig,
     load_config,
+    parse_config,
 )
 from .rest_client import PaginationWindow, RestClient, RestPage
 
@@ -209,17 +210,32 @@ class RestDataSourceStreamReader(DataSourceStreamReader):
 
 def _load_source_config(options: Mapping[str, str]) -> RestSourceConfig:
     config_path = options.get("config_path")
+    config_json = options.get("config_json")
     token = options.get("token")
-    if not config_path:
-        raise ConfigError("Option 'config_path' is required")
+
+    specified = [bool(config_path), bool(config_json)]
+    if sum(specified) > 1:
+        raise ConfigError(
+            "Specify only one of 'config_path' or 'config_json' for the Polymo data source",
+        )
 
     runtime_options = {
         key: value
         for key, value in options.items()
-        if key not in {"config_path", "token"}
+        if key not in {"config_path", "config_json", "token"}
     }
 
-    return load_config(config_path, token, runtime_options)
+    if config_json:
+        try:
+            raw_config = json.loads(config_json)
+        except json.JSONDecodeError as exc:
+            raise ConfigError(f"Invalid JSON supplied via 'config_json': {exc}") from exc
+        return parse_config(raw_config, token=token, options=runtime_options)
+
+    if config_path:
+        return load_config(config_path, token, runtime_options)
+
+    raise ConfigError("One of 'config_path' or 'config_json' must be provided")
 
 
 def _infer_schema(config: RestSourceConfig) -> StructType:
