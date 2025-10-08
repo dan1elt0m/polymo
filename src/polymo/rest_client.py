@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import posixpath
 import time
 from dataclasses import dataclass, field
@@ -133,14 +134,24 @@ class RestClient:
     options: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        headers = {"User-Agent": USER_AGENT}
+        headers = {
+            "User-Agent": USER_AGENT,
+            "Accept": "application/json",
+        }
+        self._oauth2_token: Optional[str] = None
         if self.auth.type == "bearer" and self.auth.token:
-            headers["Authorization"] = f"Bearer {self.auth.token}"
+            token_header = f"Bearer {self.auth.token}"
+            self._oauth2_token = self.auth.token
+            headers["Authorization"] = token_header
+            headers["authorization"] = token_header
         elif self.auth.type == "oauth2":
             access_token = self._obtain_oauth2_token()
-            headers["Authorization"] = f"Bearer {access_token}"
             self._oauth2_token = access_token
+            token_header = f"Bearer {access_token}"
+            headers["Authorization"] = token_header
+            headers["authorization"] = token_header
 
+        self._base_headers = dict(headers)
         self._client = httpx.Client(
             base_url=self.base_url, headers=headers, timeout=self.timeout
         )
@@ -229,31 +240,62 @@ class RestClient:
                 client_secret = secret.strip()
         if not client_secret:
             raise ConfigError(
-                "OAuth2 auth requires a client secret provided via config or runtime option 'oauth_client_secret'",
+                "OAuth2 auth requires a client secret provided via runtime option 'oauth_client_secret'",
             )
 
-        data: Dict[str, Any] = {
+
+        base_payload: Dict[str, Any] = {
             "grant_type": "client_credentials",
             "client_id": self.auth.client_id,
             "client_secret": client_secret,
         }
+
+        # Some OAuth providers (particularly bespoke Spring controllers) expect camelCase keys.
+        # Add aliases so both "client_id"/"client_secret" and "clientId"/"clientSecret" are present.
+        for canonical_key, alias_key in (("client_id", "clientId"), ("client_secret", "clientSecret")):
+            value = base_payload.get(canonical_key)
+            if value is not None:
+                base_payload.setdefault(alias_key, value)
+
         if self.auth.scope:
-            data["scope"] = " ".join(self.auth.scope)
+            base_payload["scope"] = " ".join(self.auth.scope)
         if self.auth.audience:
-            data["audience"] = self.auth.audience
+            base_payload["audience"] = self.auth.audience
         if self.auth.extra_params:
             for key, value in self.auth.extra_params.items():
-                data[str(key)] = value
+                base_payload[str(key)] = value
 
+        # httpx expects a string-only mapping for form submissions; ensure complex values are serialised.
+        form_payload = {
+            key: json.dumps(value) if isinstance(value, (list, dict)) else str(value)
+            for key, value in base_payload.items()
+        }
+
+        def _post_token_request(*, json_mode: bool) -> httpx.Response:
+            if json_mode:
+                return httpx.post(self.auth.token_url, json=base_payload, timeout=self.timeout)
+            return httpx.post(self.auth.token_url, data=form_payload, timeout=self.timeout)
+
+        json_mode_requested = False
         try:
-            response = httpx.post(self.auth.token_url, data=data, timeout=self.timeout)
+            response = _post_token_request(json_mode=False)
         except httpx.HTTPError as exc:
             raise ConfigError(f"OAuth2 token request failed: {exc}") from exc
 
+        detail = response.text.strip()
+        if response.status_code >= 400 and not json_mode_requested:
+            try:
+                json_mode_requested = True
+                response = _post_token_request(json_mode=True)
+                detail = response.text.strip()
+            except httpx.HTTPError as exc:
+                raise ConfigError(f"OAuth2 token request failed: {exc}") from exc
+
         if response.status_code >= 400:
-            detail = response.text.strip()
+            mode_hint = "JSON body" if json_mode_requested else "form body"
             raise ConfigError(
-                f"OAuth2 token request failed with status {response.status_code}: {detail or 'no response body'}",
+                "OAuth2 token request failed with status "
+                f"{response.status_code}: {detail or 'no response body'} (token request sent as {mode_hint})",
             )
 
         try:
@@ -261,10 +303,32 @@ class RestClient:
         except ValueError as exc:  # pragma: no cover - unexpected server response
             raise ConfigError("OAuth2 token response was not valid JSON") from exc
 
-        access_token = payload.get("access_token")
-        if not isinstance(access_token, str) or not access_token.strip():
+        access_token = None
+        if isinstance(payload, Mapping):
+            candidate_keys = (
+                "access_token",
+                "accessToken",
+                "AccessToken",
+                "token",
+            )
+            for key in candidate_keys:
+                value = payload.get(key)
+                if isinstance(value, str) and value.strip():
+                    access_token = value.strip()
+                    break
+
+            if access_token is None:
+                for key, value in payload.items():
+                    if not isinstance(key, str):
+                        continue
+                    if key.lower().replace("_", "") == "accesstoken" and isinstance(value, str) and value.strip():
+                        access_token = value.strip()
+                        break
+
+        if not access_token:
             raise ConfigError("OAuth2 token response missing 'access_token'")
-        return access_token.strip()
+
+        return access_token
 
     def peek_page(self, stream: StreamConfig) -> Optional[RestPage]:
         """Return the first page without mutating incremental state."""
@@ -500,10 +564,37 @@ class RestClient:
         retries_attempted = 0
         while True:
             try:
+                merged_headers = dict(self._base_headers)
+                if request_headers:
+                    sanitised_headers: Dict[str, str] = {}
+                    for header_key, header_value in request_headers.items():
+                        if header_value is None:
+                            continue
+                        value_text = str(header_value)
+                        if header_key.lower() == "authorization" and not value_text.strip():
+                            # Preserve the base OAuth header when the override is blank.
+                            continue
+                        sanitised_headers[header_key] = value_text
+
+                    merged_headers.update(sanitised_headers)
+
+                if self._oauth2_token:
+                    token_header = f"Bearer {self._oauth2_token}"
+                    merged_headers["Authorization"] = token_header
+                    merged_headers["authorization"] = token_header
+                else:
+                    base_token = (
+                        self._base_headers.get("Authorization")
+                        or self._base_headers.get("authorization")
+                    )
+                    if base_token:
+                        merged_headers["Authorization"] = base_token
+                        merged_headers["authorization"] = base_token
+
                 response = self._client.get(
                     url,
                     params=query_params if include_params else None,
-                    headers=request_headers,
+                    headers=merged_headers,
                 )
             except (httpx.TimeoutException, httpx.RequestError) as exc:
                 if policy.should_retry_exception(exc) and policy.can_retry(
@@ -529,6 +620,13 @@ class RestClient:
                     continue
 
                 message = _summarise_response_error(response)
+                request_auth = response.request.headers.get("Authorization")
+                if not request_auth:
+                    request_auth = response.request.headers.get("authorization")
+                if request_auth:
+                    message = f"{message} [Authorization header present]"
+                else:
+                    message = f"{message} [Authorization header missing]"
                 response.close()
                 raise RuntimeError(
                     f"Request to {response.url} failed with status {status_code}: {message}"
@@ -1110,8 +1208,12 @@ def _summarise_response_error(response: httpx.Response) -> str:
 
     text = response.text.strip()
     if text:
-        first_line = text.splitlines()[0]
-        if len(first_line) > 200:
-            return first_line[:197] + "..."
-        return first_line
+        snippet = text
+        if "<html" in text.lower():
+            # Roughly strip HTML tags to surface human-readable content.
+            snippet = re.sub(r"<[^>]+>", " ", text)
+        snippet = " ".join(snippet.split())  # collapse whitespace
+        if len(snippet) > 300:
+            return snippet[:297] + "..."
+        return snippet
     return "no details provided"

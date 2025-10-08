@@ -24,3 +24,4 @@ builder-ui/node_modules/
 builder-ui/playwright-report/
 builder-ui/test-results/
 *.log
+.DS_store

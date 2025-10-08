@@ -165,7 +165,7 @@ The Builder writes this block for you, and it exports cleanly in the YAML downlo
 
 #### Overriding via runtime options
 
-For backward compatibility you can still force partitioning at runtime. Any `.option("partition_strategy", ...)` call overrides the YAML block. The auxiliary options (`partition_param`, `partition_values`, `partition_endpoints`, and so on) are unchanged.
+Any `.option("partition_strategy", ...)` call overrides the YAML block. The auxiliary options (`partition_param`, `partition_values`, `partition_endpoints`, and so on) are unchanged.
 
 ### Incremental fields
 
