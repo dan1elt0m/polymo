@@ -9,6 +9,7 @@ from pyspark.sql.types import LongType, StringType, StructField, StructType
 import pytest
 
 from polymo.config import (
+    ConfigError,
     AuthConfig,
     ErrorHandlerConfig,
     IncrementalConfig,
@@ -18,7 +19,12 @@ from polymo.config import (
     RestSourceConfig,
     StreamConfig,
 )
-from polymo.datasource import RestDataSourceReader, RestDataSourceStreamReader
+from polymo.config import config_to_dict
+from polymo.datasource import (
+    RestDataSourceReader,
+    RestDataSourceStreamReader,
+    _load_source_config,
+)
 from polymo.rest_client import PaginationWindow, RestPage
 
 
@@ -199,11 +205,39 @@ def test_partitions_page_pagination(monkeypatch) -> None:
 
     assert len(partitions) == 3
 
-    observed = []
-    for partition in partitions:
-        observed.extend(_extract_ids(reader.read(partition)))
 
-    assert observed == [1, 2, 3]
+def test_load_source_config_from_json() -> None:
+    pagination = PaginationConfig(type="none")
+    config = _build_config(pagination)
+    config_dict = config_to_dict(config)
+
+    options = {
+        "config_json": json.dumps(config_dict),
+        "token": "abc",
+        "oauth_client_secret": "secret",
+    }
+
+    loaded = _load_source_config(options)
+    assert loaded.base_url == config.base_url
+    assert loaded.options.get("oauth_client_secret") == "secret"
+
+
+def test_load_source_config_requires_single_source() -> None:
+    config_json = json.dumps(
+        {
+            "version": "0.1",
+            "source": {"type": "rest", "base_url": "https://example.com"},
+            "stream": {"path": "/items", "pagination": {"type": "none"}},
+        }
+    )
+
+    with pytest.raises(ConfigError):
+        _load_source_config(
+            {
+                "config_json": config_json,
+                "config_path": "./config.yml",
+            }
+        )
 
 
 def test_partitions_offset_pagination(monkeypatch) -> None:

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-import re
 import posixpath
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -32,6 +32,7 @@ from pyspark.sql.types import (
     StructType,
     TimestampType,
 )
+
 
 from .config import (
     AuthConfig,
@@ -143,13 +144,11 @@ class RestClient:
             token_header = f"Bearer {self.auth.token}"
             self._oauth2_token = self.auth.token
             headers["Authorization"] = token_header
-            headers["authorization"] = token_header
         elif self.auth.type == "oauth2":
             access_token = self._obtain_oauth2_token()
             self._oauth2_token = access_token
             token_header = f"Bearer {access_token}"
             headers["Authorization"] = token_header
-            headers["authorization"] = token_header
 
         self._base_headers = dict(headers)
         self._client = httpx.Client(
@@ -552,6 +551,23 @@ class RestClient:
     def __exit__(self, *_: object) -> None:
         self.close()
 
+    def _resolve_authorization_header(self) -> Optional[str]:
+        """Return the Authorization header value for the current auth context."""
+
+        if self.auth.type == "bearer":
+            if not self._oauth2_token and self.auth.token:
+                self._oauth2_token = self.auth.token
+            token = self._oauth2_token
+            return f"Bearer {token}" if token else None
+
+        if self.auth.type == "oauth2":
+            if not self._oauth2_token:
+                self._oauth2_token = self._obtain_oauth2_token()
+            token = self._oauth2_token
+            return f"Bearer {token}" if token else None
+
+        return None
+
     def _request_with_retries(
         self,
         *,
@@ -564,38 +580,31 @@ class RestClient:
         retries_attempted = 0
         while True:
             try:
-                merged_headers = dict(self._base_headers)
+                final_headers = dict(self._base_headers)
                 if request_headers:
-                    sanitised_headers: Dict[str, str] = {}
                     for header_key, header_value in request_headers.items():
                         if header_value is None:
                             continue
-                        value_text = str(header_value)
-                        if header_key.lower() == "authorization" and not value_text.strip():
-                            # Preserve the base OAuth header when the override is blank.
-                            continue
-                        sanitised_headers[header_key] = value_text
+                        final_headers[header_key] = str(header_value)
 
-                    merged_headers.update(sanitised_headers)
-
-                if self._oauth2_token:
-                    token_header = f"Bearer {self._oauth2_token}"
-                    merged_headers["Authorization"] = token_header
-                    merged_headers["authorization"] = token_header
-                else:
-                    base_token = (
-                        self._base_headers.get("Authorization")
-                        or self._base_headers.get("authorization")
-                    )
-                    if base_token:
-                        merged_headers["Authorization"] = base_token
-                        merged_headers["authorization"] = base_token
-
-                response = self._client.get(
+                request = self._client.build_request(
+                    "GET",
                     url,
                     params=query_params if include_params else None,
-                    headers=merged_headers,
+                    headers=final_headers,
                 )
+
+                manual_auth_header: Optional[str] = None
+                for key, value in request.headers.items():
+                    if key.lower() == "authorization" and value:
+                        manual_auth_header = value
+                        break
+
+                effective_auth = manual_auth_header or self._resolve_authorization_header()
+                if effective_auth:
+                    request.headers["Authorization"] = effective_auth
+
+                response = self._client.send(request)
             except (httpx.TimeoutException, httpx.RequestError) as exc:
                 if policy.should_retry_exception(exc) and policy.can_retry(
                     retries_attempted
