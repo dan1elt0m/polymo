@@ -207,6 +207,35 @@ class RestDataSourceStreamReader(DataSourceStreamReader):
         except Exception:
             pass
 
+def _load_databricks_oauth_credentials(options: Mapping[str, str]) -> Optional[Tuple[str, str]]:
+    oauth_client_id_scope = options.get("oauth_client_id_scope")
+    oauth_client_id_key = options.get("oauth_client_id_key")
+    oauth_client_secret_scope = options.get("oauth_client_secret_scope")
+    oauth_client_secret_key = options.get("oauth_client_secret_key")
+    if oauth_client_id_scope and oauth_client_id_key and oauth_client_secret_scope and oauth_client_secret_key:
+        try:
+            client_id = dbutils.secrets.get(scope=oauth_client_id_scope, key=oauth_client_id_key)
+            client_secret = dbutils.secrets.get(scope=oauth_client_secret_scope, key=oauth_client_secret_key)
+            return client_id, client_secret
+        except Exception:
+            raise ConfigError(
+                f"Failed to access Databricks secrets for OAuth client credentials: "
+                f"client_id scope='{oauth_client_id_scope}' key='{oauth_client_id_key}'; "
+                f"client_secret scope='{oauth_client_secret_scope}' key='{oauth_client_secret_key}'"
+            )
+    return None
+
+def _load_databricks_token(options: Mapping[str, str]) -> Optional[str]:
+    token_scope = options.get("token_scope")
+    token_key = options.get("token_key")
+    if token_scope and token_key:
+        try:
+            return dbutils.secrets.get(scope=token_scope, key=token_key)
+        except Exception:
+            raise ConfigError(
+                f"Failed to access Databricks secret for token: scope='{token_scope}' key='{token_key}'"
+            )
+    return None
 
 def _load_source_config(options: Mapping[str, str]) -> RestSourceConfig:
     config_path = options.get("config_path")
@@ -224,6 +253,13 @@ def _load_source_config(options: Mapping[str, str]) -> RestSourceConfig:
         for key, value in options.items()
         if key not in {"config_path", "config_json", "token"}
     }
+
+    databricks_token = _load_databricks_token(options)
+    databricks_oauth_credentials = _load_databricks_oauth_credentials(options)
+    if databricks_token:
+        token = databricks_token
+    if databricks_oauth_credentials:
+        runtime_options["oauth_client_id"], runtime_options["oauth_client_secret"] = databricks_oauth_credentials
 
     if config_json:
         try:
