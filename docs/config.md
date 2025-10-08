@@ -92,7 +92,8 @@ source:
 Supported methods:
 
 - **none** – default; no auth added to requests.
-- **bearer** – each request carries an `Authorization: Bearer <token>` header. Supply the token at runtime with `.option("token", "...")`; the Builder keeps the token in memory only. Running on Databricks? To fetch secrets use `.option("token_scope", "my-scope").option("token_key", "api-token")` instead and Polymo will fetch the secret from the Databricks scope on the driver.
+- **bearer** – each request carries an `Authorization: Bearer <token>` header. Supply the token at runtime with `.option("token", "...")`; the Builder keeps the token in memory only. Running on Databricks? To fetch secrets/scope
+- use `.option("token_scope", "my-scope").option("token_key", "api-token")` instead and Polymo will fetch the secret from the Databricks scope on the driver.
 - **api_key** – Polymo injects the API key as a query parameter. Set `authType` to `api_key`, choose the parameter name, and supply the value at runtime (the Builder uses `.option("<param>", "...")` behind the scenes).
 - **oauth2** – Implements the client-credentials flow. Provide `token_url`, `client_id`, optional `scope`, `audience`, and `extra_params` (a JSON object merged into the token request). The client secret should be passed at runtime via the Spark option `.option("oauth_client_secret", "...")`; exported YAML references it as `{{ options.oauth_client_secret }}` so secrets remain out of the file. On Databricks you can supply secrets without copying them into the notebook by pointing Polymo at scopes: `.option("oauth_client_id_scope", "my-scope").option("oauth_client_id_key", "client-id")` and `.option("oauth_client_secret_scope", "my-scope").option("oauth_client_secret_key", "client-secret")` pull both values from Databricks Secrets before the request starts.
 

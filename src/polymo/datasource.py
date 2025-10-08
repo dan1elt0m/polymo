@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import math
 from dataclasses import replace
@@ -207,6 +208,15 @@ class RestDataSourceStreamReader(DataSourceStreamReader):
         except Exception:
             pass
 
+
+def _get_databricks_secret(scope: str, key: str) -> str:
+    """Gets a secret from the Databricks secret scope."""
+    from databricks.sdk import WorkspaceClient
+    w = WorkspaceClient()
+    secret_response = w.secrets.get_secret(scope=scope, key=key)
+    decoded_secret = base64.b64decode(secret_response.value).decode("utf-8")
+    return decoded_secret
+
 def _load_databricks_oauth_credentials(options: Mapping[str, str]) -> Optional[Tuple[str, str]]:
     oauth_client_id_scope = options.get("oauth_client_id_scope")
     oauth_client_id_key = options.get("oauth_client_id_key")
@@ -214,8 +224,8 @@ def _load_databricks_oauth_credentials(options: Mapping[str, str]) -> Optional[T
     oauth_client_secret_key = options.get("oauth_client_secret_key")
     if oauth_client_id_scope and oauth_client_id_key and oauth_client_secret_scope and oauth_client_secret_key:
         try:
-            client_id = dbutils.secrets.get(scope=oauth_client_id_scope, key=oauth_client_id_key)
-            client_secret = dbutils.secrets.get(scope=oauth_client_secret_scope, key=oauth_client_secret_key)
+            client_id = _get_databricks_secret(oauth_client_id_scope, oauth_client_id_key)
+            client_secret = _get_databricks_secret(oauth_client_secret_scope, oauth_client_secret_key)
             return client_id, client_secret
         except Exception:
             raise ConfigError(
