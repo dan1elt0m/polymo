@@ -92,9 +92,9 @@ source:
 Supported methods:
 
 - **none** – default; no auth added to requests.
-- **bearer** – each request carries an `Authorization: Bearer <token>` header. Supply the token at runtime with `.option("token", "...")`; the Builder keeps the token in memory only.
+- **bearer** – each request carries an `Authorization: Bearer <token>` header. Supply the token at runtime with `.option("token", "...")`; the Builder keeps the token in memory only. Running on Databricks? To fetch secrets use `.option("token_scope", "my-scope").option("token_key", "api-token")` instead and Polymo will fetch the secret from the Databricks scope on the driver.
 - **api_key** – Polymo injects the API key as a query parameter. Set `authType` to `api_key`, choose the parameter name, and supply the value at runtime (the Builder uses `.option("<param>", "...")` behind the scenes).
-- **oauth2** – Implements the client-credentials flow. Provide `token_url`, `client_id`, optional `scope`, `audience`, and `extra_params` (a JSON object merged into the token request). The client secret should be passed at runtime via the Spark option `.option("oauth_client_secret", "...")`; exported YAML references it as `{{ options.oauth_client_secret }}` so secrets remain out of the file.
+- **oauth2** – Implements the client-credentials flow. Provide `token_url`, `client_id`, optional `scope`, `audience`, and `extra_params` (a JSON object merged into the token request). The client secret should be passed at runtime via the Spark option `.option("oauth_client_secret", "...")`; exported YAML references it as `{{ options.oauth_client_secret }}` so secrets remain out of the file. On Databricks you can supply secrets without copying them into the notebook by pointing Polymo at scopes: `.option("oauth_client_id_scope", "my-scope").option("oauth_client_id_key", "client-id")` and `.option("oauth_client_secret_scope", "my-scope").option("oauth_client_secret_key", "client-secret")` pull both values from Databricks Secrets before the request starts.
 
 The Builder mirrors these options and stores secrets only for the current browser session. When you re-open a saved connector, re-enter the secret before previewing or exporting.
 
@@ -241,7 +241,7 @@ You will not see this block in YAML, but it is worth mentioning: options passed 
 spark.read.format("polymo")
   .option("config_path", "./github.yml")
   .option("owner", "dan1elt0m")
-  .option("token", os.environ["GITHUB_TOKEN"])
+  .option("token", os.environ["GITHUB_TOKEN"])            # or .option("token_scope", "creds").option("token_key", "github") on Databricks
   .load()
 ```
 
@@ -249,7 +249,7 @@ Prefer keeping everything in memory? Replace `config_path` with `.option("config
 
 Inside your config you can reference `{{ options.owner }}` or `{{ options.token }}`. Keep tokens out of the YAML—pass them through `.option("token", ...)` instead.
 
-For OAuth2, supply the client secret the same way: `.option("oauth_client_secret", os.environ["CLIENT_SECRET"])`. The exported YAML references it as `{{ options.oauth_client_secret }}` so the value never touches disk.
+For OAuth2, supply the client secret the same way: `.option("oauth_client_secret", os.environ["CLIENT_SECRET"])`. The exported YAML references it as `{{ options.oauth_client_secret }}` so the value never touches disk. When you run on Databricks, swap the environment variable for secret scopes by adding `.option("oauth_client_id_scope", "creds")`, `.option("oauth_client_id_key", "client-id")`, `.option("oauth_client_secret_scope", "creds")`, and `.option("oauth_client_secret_key", "client-secret")`.
 
 ## Putting it all together
 

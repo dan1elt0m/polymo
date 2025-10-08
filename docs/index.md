@@ -39,6 +39,7 @@ df = (
     spark.read.format("polymo")
     .option("config_path", "./config.yml")  # YAML you saved from the Builder
     .option("token", "YOUR_TOKEN")  # Only if the API needs one
+    # On Databricks, point Polymo at a secret instead: .option("token_scope", "my-scope").option("token_key", "api-token")
     # Uncomment the next lines to enable incremental syncs
     # .option("incremental_state_path", "s3://team-bucket/polymo/state.json")
     # .option("incremental_start_value", "2024-01-01T00:00:00Z")
@@ -65,6 +66,7 @@ stream_df = (
     .option("config_path", "./config.yml")
     .option("stream_batch_size", 200)
     .option("stream_progress_path", "/tmp/polymo-progress.json")
+    # Secret scopes also work for OAuth2: add oauth_client_id_scope/key and oauth_client_secret_scope/key for Databricks
     .load()
 )
 
