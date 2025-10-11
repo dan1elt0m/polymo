@@ -48,6 +48,37 @@ const slugify = (value: string): string => {
 
 const stripExtension = (name: string): string => name.replace(/\.[^.]+$/, '').trim();
 
+const buildPysparkScript = (config: RestSourceConfig): string => {
+	const configJson = JSON.stringify(config, null, 2)
+		.replace(/`/g, '\\`')
+		.replace(/"""/g, '\\"""');
+	return `import json
+
+from pyspark.sql import SparkSession
+from polymo import ApiReader, PolymoConfig
+
+config_dict = json.loads("""${configJson}""")
+config = PolymoConfig.from_dict(config_dict)
+
+spark = SparkSession.builder.getOrCreate()
+spark.dataSource.register(ApiReader)
+
+df = (
+    spark.read.format("polymo")
+    # .option("token", "YOUR_TOKEN")  # Uncomment if the API requires secrets at runtime
+    .option("config_json", json.dumps(config.reader_config()))
+    .load()
+)
+
+df.show()
+`;
+};
+
+const buildScriptFileName = (rawName: string): string => {
+	const base = stripExtension(rawName) || 'config';
+	return `${slugify(base)}.py`;
+};
+
 const App: React.FC = () => {
 	const [showLandingScreen, setShowLandingScreen] = React.useState(true);
 	const [configFormState, setConfigFormState] = useAtom(configFormStateAtom);
@@ -702,7 +733,7 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 		try {
 			await runValidation({ updateYaml: builderView === "yaml", applyResponse: false });
 			const yamlToDownload = builderView === "yaml" ? yamlText : formStateYaml;
-			await downloadYaml(yamlToDownload, targetName, saveDirHandle);
+			await downloadTextFile(yamlToDownload, targetName, saveDirHandle, 'text/yaml');
 			setStatus({ tone: "success", message: `Saved ${saveDirName ? saveDirName + '/' : ''}${targetName}` });
 			window.setTimeout(() => {
 				setStatus({ tone: "info", message: "Ready to configure" });
@@ -713,6 +744,30 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 			setIsSaving(false);
 		}
 	}, [builderView, formStateYaml, isSaving, runValidation, saveFileName, saveDirHandle, saveDirName, setIsSaving, setStatus, yamlText]);
+
+	const handleExportPySpark = React.useCallback(async () => {
+		if (isSaving) return;
+		setIsSaving(true);
+		setStatus({ tone: 'info', message: 'Validating & generating PySpark script…' });
+		try {
+			const result = await runValidation({ updateYaml: builderView === 'yaml', applyResponse: false });
+			if (!result?.valid) {
+				throw new Error(result?.message || 'Configuration is invalid');
+			}
+			const configObject = (result.config as RestSourceConfig | undefined) ?? formStateToConfig(configFormState);
+			const scriptContents = buildPysparkScript(configObject as RestSourceConfig);
+			const scriptName = buildScriptFileName(saveFileName);
+			await downloadTextFile(scriptContents, scriptName, saveDirHandle, 'text/x-python');
+			setStatus({ tone: 'success', message: `Saved ${saveDirName ? `${saveDirName}/` : ''}${scriptName}` });
+			window.setTimeout(() => {
+				setStatus({ tone: 'info', message: 'Ready to configure' });
+			}, 3000);
+		} catch (error) {
+			setStatus({ tone: 'error', message: formatError(error) });
+		} finally {
+			setIsSaving(false);
+		}
+	}, [builderView, configFormState, isSaving, runValidation, saveDirHandle, saveDirName, saveFileName, setIsSaving, setStatus]);
 
 	React.useEffect(() => {
 		const handler = (event: KeyboardEvent) => {
@@ -1063,6 +1118,14 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 							</button>
 							<button
 								type="button"
+								className="rounded-full px-4 py-2 text-sm font-medium border border-border dark:border-drac-border text-slate-12 dark:text-drac-foreground hover:bg-blue-3/60 dark:hover:bg-blue-9/35 transition disabled:opacity-50"
+								onClick={() => { setShowSaveModal(false); handleExportPySpark(); }}
+								disabled={isSaving}
+							>
+								Export PySpark
+							</button>
+							<button
+								type="button"
 								className="rounded-full px-5 py-2 text-sm font-semibold bg-blue-9 text-white hover:bg-blue-10 shadow-soft transition disabled:opacity-50"
 								onClick={() => { setShowSaveModal(false); handleSave(saveFileName); }}
 								disabled={isSaving || !saveFileName.trim()}
@@ -1092,7 +1155,7 @@ function formatError(error: unknown): string {
 	return String(error ?? "Unknown error");
 }
 
-function downloadYaml(contents: string, fileName = 'config.yml', directoryHandle?: any) {
+function downloadTextFile(contents: string, fileName = 'config.txt', directoryHandle?: any, mimeType = 'text/plain') {
 	const writeToDirectory = async () => {
 		if (!directoryHandle) return false;
 		try {
@@ -1119,7 +1182,12 @@ function downloadYaml(contents: string, fileName = 'config.yml', directoryHandle
 			if (w.showSaveFilePicker) {
 				const handle = await w.showSaveFilePicker({
 					suggestedName: fileName,
-					types: [{ description: 'YAML Files', accept: { 'text/yaml': ['.yml', '.yaml'] } }],
+					types: [
+						{
+							description: mimeType === 'text/yaml' ? 'YAML Files' : 'Text Files',
+							accept: { [mimeType]: mimeType === 'text/yaml' ? ['.yml', '.yaml'] : ['.txt', '.py', '.text'] },
+						},
+					],
 				});
 				const writable = await handle.createWritable();
 				await writable.write(contents);
@@ -1135,7 +1203,7 @@ function downloadYaml(contents: string, fileName = 'config.yml', directoryHandle
 		if (await writeToDirectory()) return;
 		if (await saveWithPicker()) return;
 		// Fallback anchor download
-		const blob = new Blob([contents], { type: 'text/yaml' });
+		const blob = new Blob([contents], { type: mimeType });
 		const url = URL.createObjectURL(blob);
 		const anchor = document.createElement('a');
 		anchor.href = url;

@@ -90,7 +90,7 @@ pip install "polymo[builder]"
 
 This comes with all UI deps such as pyspark
 
-Running Polymo on a  spark cluster doesn't require these UI deps.
+Running Polymo on a spark cluster usually doesn't require these UI deps.
 In that case, just install the bare minimum deps with
 ```bash
 pip install polymo
