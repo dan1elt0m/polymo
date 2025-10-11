@@ -1,6 +1,6 @@
 [project]
 name = "polymo"
-version = "0.8.2"
+version = "0.8.3"
 description = "Declarative REST API ingestion for PySpark"
 readme = "README.md"
 authors = [
