@@ -2,6 +2,11 @@
   <img src="builder-ui/public/logo.png" alt="Polymo" width="220">
 </p>
 
+[![test](https://github.com/dan1elt0m/polymo/actions/workflows/test.yml/badge.svg)](https://github.com/dan1elt0m/polymo/actions/workflows/test.yml)
+[![Publish Docs](https://github.com/dan1elt0m/polymo/actions/workflows/gh-pages.yml/badge.svg)](https://github.com/dan1elt0m/polymo/actions/workflows/gh-pages.yml)
+![PyPI - Python Version](https://img.shields.io/pypi/pyversions/polymo)
+![PyPI - Status](https://img.shields.io/pypi/status/polymo)
+
 # Welcome to Polymo
 
 Polymo makes it super easy to ingest APIs with Pyspark. It's like slicing cake.

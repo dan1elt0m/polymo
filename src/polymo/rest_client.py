@@ -431,6 +431,8 @@ class RestClient:
             cursor_to_apply = None
 
         pages_emitted = 0
+        seen_cursor_tokens: set[str] = set()
+        seen_next_links: set[str] = set()
 
         try:
             while next_url:
@@ -450,6 +452,12 @@ class RestClient:
                         cursor_to_apply = None
                     include_params = True
 
+                applied_cursor_value: Optional[str] = None
+                if pagination.type == "cursor" and pagination.cursor_param:
+                    current_value = query_params.get(pagination.cursor_param)
+                    if isinstance(current_value, str) and current_value:
+                        applied_cursor_value = current_value
+
                 response = self._request_with_retries(
                     url=next_url,
                     query_params=query_params,
@@ -462,6 +470,9 @@ class RestClient:
                     payload = response.json()
                 except json.JSONDecodeError as exc:
                     raise ValueError("Expected API response to be valid JSON") from exc
+
+                if applied_cursor_value:
+                    seen_cursor_tokens.add(applied_cursor_value)
 
                 records = _extract_records(
                     payload, stream.record_selector, declared_schema
@@ -509,36 +520,58 @@ class RestClient:
                         next_url = base_path
                         include_params = True
                 elif pagination.type == "cursor":
+                    include_params_next = True
+                    next_url_candidate: Optional[str] = None
+                    has_more = False
+
                     next_link = None
                     if pagination.next_url_path:
                         next_link = _first_value_from_path(
                             payload, pagination.next_url_path
                         )
+
                     if isinstance(next_link, str) and next_link:
-                        if pagination.stop_on_empty_response and not records:
-                            next_url = None
+                        if (
+                            pagination.stop_on_empty_response
+                            and not records
+                            and next_link in seen_next_links
+                        ):
                             cursor_to_apply = None
-                            include_params = False
                         else:
                             parsed = urlparse(next_link)
                             # Include query params only when following a path without its own query.
-                            include_params = not (
+                            include_params_next = not (
                                 parsed.scheme or parsed.netloc or parsed.query
                             )
-                            next_url = next_link
+                            next_url_candidate = next_link
+                            has_more = True
                             cursor_to_apply = None
+                            seen_next_links.add(next_link)
                     else:
                         next_cursor = _resolve_cursor_value_from_response(
                             response, payload, pagination
                         )
                         if next_cursor in (None, ""):
-                            next_url = None
+                            cursor_to_apply = None
                         else:
-                            cursor_to_apply = str(next_cursor)
-                            next_url = base_path
-                            include_params = True
-                            if pagination.stop_on_empty_response and not records:
-                                next_url = None
+                            cursor_value = str(next_cursor)
+                            if (
+                                pagination.stop_on_empty_response
+                                and not records
+                                and cursor_value in seen_cursor_tokens
+                            ):
+                                cursor_to_apply = None
+                            else:
+                                cursor_to_apply = cursor_value
+                                next_url_candidate = base_path
+                                include_params_next = True
+                                has_more = True
+
+                    if has_more and next_url_candidate:
+                        include_params = include_params_next
+                        next_url = next_url_candidate
+                    else:
+                        next_url = None
                 else:
                     next_url = None
         finally:

@@ -135,5 +135,3 @@ pre { @apply bg-slate-2 dark:bg-drac-surface rounded-lg p-4 text-sm overflow-x-a
 }
 
 /* Subtle dark mode hover pulse for primary action buttons */
-.dark .bg-blue-9 { transition: background-color .3s ease, box-shadow .4s ease; }
-.dark .bg-blue-9:hover { box-shadow: 0 0 0 0 rgba(189,147,249,0.0), 0 0 12px 2px rgba(189,147,249,0.35); }

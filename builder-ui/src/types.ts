@@ -1,8 +1,14 @@
 // Configuration types matching the Python backend schema
 
 export interface AuthConfig {
-  type: 'none' | 'bearer' | 'api_key';
+  type: 'none' | 'bearer' | 'oauth2' | 'api_key';
   token?: string | null;
+  token_url?: string | null;
+  client_id?: string | null;
+  client_secret?: string | null;
+  scope?: string[] | null;
+  audience?: string | null;
+  extra_params?: Record<string, any> | null;
 }
 
 export interface PaginationConfig {

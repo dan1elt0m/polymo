@@ -1,4 +1,4 @@
-import type { RestSourceConfig, ConfigFormState, ErrorHandlerConfig } from '../types';
+import type { RestSourceConfig, ConfigFormState, ErrorHandlerConfig, AuthConfig } from '../types';
 import { DEFAULT_ERROR_HANDLER } from './initial-data';
 
 /**
@@ -481,15 +481,16 @@ export function configToFormState(config: RestSourceConfig): ConfigFormState {
   const rawStreamPath = (config.stream as any).path || '';
   const streamPath = partitionStrategy === 'endpoints' && rawStreamPath === '/' ? '' : rawStreamPath;
 
-  const authType = (config.auth?.type as ConfigFormState['authType']) || 'none';
-  const authTokenUrl = authType === 'oauth2' ? config.auth?.token_url ?? '' : '';
-  const authClientId = authType === 'oauth2' ? config.auth?.client_id ?? '' : '';
-  const authScopes = authType === 'oauth2' && config.auth?.scope?.length
-    ? config.auth.scope.join(' ')
+  const authConfig = (config.source?.auth ?? (config as any).auth) as AuthConfig | undefined;
+  const authType = (authConfig?.type as ConfigFormState['authType']) || 'none';
+  const authTokenUrl = authType === 'oauth2' ? authConfig?.token_url ?? '' : '';
+  const authClientId = authType === 'oauth2' ? authConfig?.client_id ?? '' : '';
+  const authScopes = authType === 'oauth2' && authConfig?.scope?.length
+    ? authConfig.scope.join(' ')
     : '';
-  const authAudience = authType === 'oauth2' ? config.auth?.audience ?? '' : '';
-  const authExtraParams = authType === 'oauth2' && config.auth?.extra_params && Object.keys(config.auth.extra_params).length
-    ? JSON.stringify(config.auth.extra_params, null, 2)
+  const authAudience = authType === 'oauth2' ? authConfig?.audience ?? '' : '';
+  const authExtraParams = authType === 'oauth2' && authConfig?.extra_params && Object.keys(authConfig.extra_params).length
+    ? JSON.stringify(authConfig.extra_params, null, 2)
     : '';
 
   return {
