@@ -69,19 +69,6 @@ query.show()
 
 Does it perform? Polymo can read in batches (pages in parallel) and therefore is much faster than row based solutions like UDFs.
 
-
-It's still early days, but Polymo already supports a lot of features!
-
-- Various Authentication options
-- Many Pagination  patterns, plus automatic partition-aware reading when totals are exposed.
-- Several partitioning stategies for parallel Spark reads.
-- Incremental sync support with cursor parameters, JSON state files on local or remote storage, optional memory caching, and overrideable state keys.
-- Schema controls that auto-infer types or accept Spark SQL schemas, along with record selectors, filtering expressions, and schema-based casting for nested responses.
-- Structured Streaming compatibility with `spark.readStream`, tunable batch sizing, durable progress tracking, and a streaming smoke test mode.
-- Error handling through configurable retry counts, status code lists, timeout handling, and exponential backoff settings.
-- Jinja templating of query parameters gives you a ton of flexibility
-
-
 ## How to start?
 Locally you probably want to install polymo with the UI: 
 
@@ -113,5 +100,9 @@ docker compose up --build builder
 
 ## Where to Next
 Read the docs [here](https://dan1elt0m.github.io/polymo/)
+
+## Contributing
+It's still early days, but Polymo already supports a lot of features!
+Is there something missing? Raise an issue or contribute!
 
 Contributions and early feedback welcome!
