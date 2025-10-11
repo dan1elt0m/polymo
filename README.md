@@ -2,14 +2,21 @@
   <img src="builder-ui/public/logo.png" alt="Polymo" width="220">
 </p>
 
-[![test](https://github.com/dan1elt0m/polymo/actions/workflows/test.yml/badge.svg)](https://github.com/dan1elt0m/polymo/actions/workflows/test.yml)
-[![Publish Docs](https://github.com/dan1elt0m/polymo/actions/workflows/gh-pages.yml/badge.svg)](https://github.com/dan1elt0m/polymo/actions/workflows/gh-pages.yml)
-![PyPI - Python Version](https://img.shields.io/pypi/pyversions/polymo)
-![PyPI - Status](https://img.shields.io/pypi/status/polymo)
+<p align="center">
+    <em>Turn REST APIs into Spark DataFrames with just a YAML file
+</em>
+</p>
+
+<p align="center">
+  <a href="https://github.com/dan1elt0m/polymo/actions/workflows/test.yml"><img alt="test" src="https://github.com/dan1elt0m/polymo/actions/workflows/test.yml/badge.svg"></a>
+  <a href="https://github.com/dan1elt0m/polymo/actions/workflows/gh-pages.yml"><img alt="Publish Docs" src="https://github.com/dan1elt0m/polymo/actions/workflows/gh-pages.yml/badge.svg"></a>
+  <img alt="PyPI - Python Version" src="https://img.shields.io/pypi/pyversions/polymo">
+  <img alt="PyPI - Status" src="https://img.shields.io/pypi/status/polymo">
+</p>
 
 # Welcome to Polymo
 
-Polymo makes it super easy to ingest APIs with Pyspark. It's like slicing cake.
+Polymo makes it super easy to ingest APIs with Pyspark. You only need to define a YAML file.
 
 My vision is that API ingestion doesn't need heavy, third party tools or hard to maintain custom code.
 The heck, you don't even need Pyspark skills.
