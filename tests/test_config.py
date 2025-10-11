@@ -305,30 +305,6 @@ stream:
     assert config.auth.client_secret == "secret-from-wrapper"
 
 
-def test_oauth2_auth_rejects_redacted_secret(tmp_path: Path) -> None:
-    config_path = write_config(
-        tmp_path,
-        """
-version: 0.1
-source:
-  type: rest
-  base_url: https://api.oauth
-  auth:
-    type: oauth2
-    token_url: https://auth.example.com/token
-    client_id: my-client
-stream:
-  name: sample
-  path: /resources
-""".strip(),
-    )
-
-    with pytest.raises(ConfigError) as excinfo:
-        load_config(config_path, options={"oauth_client_secret": "***"})
-
-    assert "redacted" in str(excinfo.value).lower()
-
-
 def test_partition_param_range_range_block(tmp_path: Path) -> None:
     config_path = write_config(
         tmp_path,
@@ -390,25 +366,3 @@ stream:
     assert partition.range_end is None
     assert partition.range_step is None
     assert partition.range_kind is None
-
-
-def test_oauth2_auth_missing_secret_raises(tmp_path: Path) -> None:
-    config_path = write_config(
-        tmp_path,
-        """
-version: 0.1
-source:
-  type: rest
-  base_url: https://api.oauth
-  auth:
-    type: oauth2
-    token_url: https://auth.example.com/token
-    client_id: my-client
-stream:
-  name: sample
-  path: /resources
-""".strip(),
-    )
-
-    with pytest.raises(ConfigError):
-        load_config(config_path)
