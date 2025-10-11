@@ -10,8 +10,8 @@
 <p align="center">
   <a href="https://github.com/dan1elt0m/polymo/actions/workflows/test.yml"><img alt="test" src="https://github.com/dan1elt0m/polymo/actions/workflows/test.yml/badge.svg"></a>
   <a href="https://github.com/dan1elt0m/polymo/actions/workflows/gh-pages.yml"><img alt="docs" src="https://github.com/dan1elt0m/polymo/actions/workflows/gh-pages.yml/badge.svg"></a>
-  <img alt="PyPI - Python Version" src="https://img.shields.io/pypi/pyversions/polymo">
   <img alt="PyPI - Status" src="https://img.shields.io/pypi/status/polymo">
+  <img alt="PyPI - Python Version" src="https://img.shields.io/pypi/pyversions/polymo">
   <img alt="License BSD 3" src="https://img.shields.io/badge/license-BSD--3--Clause-blue?style=flat-square">
 </p>
 
