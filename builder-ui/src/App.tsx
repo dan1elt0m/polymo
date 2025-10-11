@@ -84,7 +84,9 @@ const App: React.FC = () => {
 	// const autoCreatedRef = React.useRef(false);
 
 	// feature detection for directory picker
-	const dirPickerSupported = typeof window !== 'undefined' && 'showDirectoryPicker' in window;
+const winRef = typeof window !== 'undefined' ? (window as any) : undefined;
+const dirPickerSupported = !!(winRef && typeof winRef.showDirectoryPicker === 'function');
+const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'function');
 	const initialLoadRef = React.useRef(true);
 
 	React.useEffect(() => {
@@ -1026,20 +1028,28 @@ const App: React.FC = () => {
 							/>
 							</label>
 							<div className="flex items-center gap-3">
-								<button
-									type="button"
-									className="rounded-full px-3 py-1.5 text-xs font-medium border border-border bg-background hover:border-blue-7 hover:text-blue-11 transition disabled:opacity-50"
-									onClick={handleChooseDirectory}
-									disabled={isSaving || !dirPickerSupported}
-								>
-									{dirPickerSupported ? (saveDirName ? 'Change Folder' : 'Choose Folder') : 'Folder Unsupported'}
-								</button>
+								{dirPickerSupported ? (
+									<button
+										type="button"
+										className="rounded-full px-3 py-1.5 text-xs font-medium border border-border bg-background hover:border-blue-7 hover:text-blue-11 transition"
+										onClick={handleChooseDirectory}
+										disabled={isSaving}
+									>
+										{saveDirName ? 'Change Folder' : 'Choose Folder'}
+									</button>
+								) : (
+									<span className="rounded-full border border-border px-3 py-1.5 text-xs font-medium text-slate-11 dark:text-drac-foreground/80 bg-muted/50 dark:bg-drac-surface/70">
+										Folder selection not available in this browser
+									</span>
+								)}
 								{saveDirName && dirPickerSupported && <span className="text-xs text-muted truncate max-w-[140px]" title={saveDirName}>{saveDirName}/</span>}
 							</div>
 							<p className="text-xs text-muted dark:text-drac-muted">
 								{dirPickerSupported
 									? (saveDirName ? 'Will write directly into the selected folder (if permissions granted).' : 'Select a folder for direct write or leave blank to download.')
-									: 'This browser does not support selecting a target folder; the file will download normally.'}
+									: (filePickerSupported
+										? 'Safari will prompt you to choose a location when you click Save.'
+										: 'The file will download automatically when you click Save.')}
 							</p>
 						</div>
 						<div className="flex justify-end gap-3 pt-2">

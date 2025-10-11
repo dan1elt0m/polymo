@@ -317,16 +317,32 @@ def _infer_schema(config: RestSourceConfig) -> StructType:
 
 def _sample_stream(config: RestSourceConfig) -> List[Mapping[str, Any]]:
     windows = _plan_partitions(config)
-    first_window = windows[0] if windows else None
+    window_sequence = windows if windows else [None]
+
+    sample_records: List[Mapping[str, Any]] = []
+    max_samples = 50
+    max_pages_per_window = 5
 
     with RestClient(
         base_url=config.base_url, auth=config.auth, options=config.options
     ) as client:
-        iterator = client.fetch_records(config.stream, window=first_window)
-        first_page = next(iterator, [])
-        if isinstance(first_page, list):
-            return first_page[:50]
-        return []
+        for window in window_sequence:
+            pages_checked = 0
+            iterator = client.fetch_records(config.stream, window=window)
+            for page_records in iterator:
+                pages_checked += 1
+                if isinstance(page_records, list):
+                    sample_records.extend(
+                        record
+                        for record in page_records
+                        if isinstance(record, Mapping)
+                    )
+                if sample_records:
+                    return sample_records[:max_samples]
+                if pages_checked >= max_pages_per_window:
+                    break
+
+    return []
 
 
 def _plan_partitions(config: RestSourceConfig) -> List[PaginationWindow]:
