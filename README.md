@@ -51,36 +51,47 @@ df = (
 
 df.show()
 ```
-
-Structured Streaming works out of the box aswell:
-
+Streaming works too:
 ```python
-stream_df = (
-    spark.readStream.format("polymo")
-    .option("config_path", "./config.yml")
-    .option("stream_batch_size", 100)
-    .option("stream_progress_path", "/tmp/polymo-progress.json")
-    .load()
+spark.readStream.format("polymo")
+```
+
+Prefer keeping everything in memory? Supply a config dict or build one with the bundled Pydantic helpers:
+```python
+import json
+from pyspark.sql import SparkSession
+from polymo import ApiReader, PolymoConfig
+
+spark = SparkSession.builder.getOrCreate()
+spark.dataSource.register(ApiReader)
+
+config = PolymoConfig(
+    base_url="https://jsonplaceholder.typicode.com",
+    path="/posts",
 )
 
-query = stream_df.writeStream.format("memory").outputMode("append").queryName("polymo")
-query.show()
-
+df = (
+    spark.read.format("polymo")
+    .option("config_json", json.dumps(config.reader_config()))
+    .load()
+)
 ```
+
+Use keyword arguments like `params={"limit": 100}` or `pagination={"type": "offset"}` to override parts of the stream when instantiating `PolymoConfig`.
 
 Does it perform? Polymo can read in batches (pages in parallel) and therefore is much faster than row based solutions like UDFs.
 
 ## How to start?
-Locally you probably want to install polymo with the UI: 
+Locally you probably want to install polymo along with the Builder UI: 
 
 ```bash
 pip install "polymo[builder]"
 ```
 
-This comes with UI deps such as pyspark
+This comes with all UI deps such as pyspark
 
-Running Polymo on an existing cluster in for instance databricks doesnt require these deps.
-In that case, just install the bare minimum depa with
+Running Polymo on a  spark cluster doesn't require these UI deps.
+In that case, just install the bare minimum deps with
 ```bash
 pip install polymo
 ```

@@ -49,14 +49,21 @@ df = (
 df.show()
 ```
 
-Want to keep everything in memory? Provide the config dict directly instead of writing a temporary file:
+Want to keep everything in memory? Provide the config dict directly or assemble one with the bundled Pydantic helpers:
 
 ```python
 import json
+from polymo import PolymoConfig
 
-config_dict = {...}
-df = spark.read.format("polymo").option("config_json", json.dumps(config_dict)).load()
+config = PolymoConfig(
+    base_url="https://api.example.com",
+    path="/objects",
+)
+
+df = spark.read.format("polymo").option("config_json", json.dumps(config.reader_config())).load()
 ```
+
+Need to tweak query parameters or pagination? Pass them to the constructor, e.g. `params={"limit": 50}` or `pagination={"type": "page", "page_size": 25}`.
 
 ### Streaming, same config
 

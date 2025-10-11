@@ -32,7 +32,9 @@ theme:
 nav:
   - Home: index.md
   - Builder UI: builder-ui.md
-  - Configuration: config.md
+  - Configuration:
+      - Guide: config.md
+      - Pydantic Reference: polymo_config_reference.md
   - CLI: cli.md
   - API Reference:
     - polymo: api.md

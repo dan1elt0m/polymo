@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pyspark.sql import SparkSession
-
 from .config import (
     RestSourceConfig,
     config_to_dict,
@@ -12,15 +10,36 @@ from .config import (
     parse_config,
 )
 from .datasource import ApiReader
+from .pydantic_config import (
+    PolymoConfig,
+    AuthModel,
+    BackoffModel,
+    ErrorHandlerModel,
+    IncrementalModel,
+    PaginationModel,
+    PartitionModel,
+    RecordSelectorModel,
+    SourceModel,
+    StreamModel,
+)
 
 __all__ = [
-    "register",
     "ApiReader",
     "RestSourceConfig",
     "config_to_dict",
     "dump_config",
     "load_config",
     "parse_config",
+    "PolymoConfig",
+    "SourceModel",
+    "StreamModel",
+    "PaginationModel",
+    "IncrementalModel",
+    "RecordSelectorModel",
+    "ErrorHandlerModel",
+    "BackoffModel",
+    "PartitionModel",
+    "AuthModel",
 ]
 
 
