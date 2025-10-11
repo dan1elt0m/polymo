@@ -38,7 +38,7 @@ query.start()
 ```
 
 Key ideas:
-- `config_path` points to the YAML file. If you already have the config as a Python dict, you can skip writing it to disk and send it with `.option("config_json", json.dumps(config_dict))` instead. Only one of `config_path` or `config_json` may be supplied.
+- `config_path` points to the YAML file. If you already have the config as a Python dict, you can skip writing it to disk and send it with `.option("config_json", json.dumps(config_dict))` instead—or build one with `PolymoConfig` and call `config.reader_config()`. Only one of `config_path` or `config_json` may be supplied.
 - Pass sensitive values (tokens, keys) with `.option(...)` so they never touch the config file.
 - You can add as many `.option("name", "value")` calls as you need. They show up inside templates as `{{ options.name }}`.
 

@@ -16,6 +16,28 @@ stream:
 
 That is enough to call `https://api.example.com/v1/items` once and let Polymo guess the columns from the response.
 
+Prefer code over YAML? The same structure can be built with Pydantic helpers and converted back to the canonical shape when needed:
+
+```python
+from pathlib import Path
+
+from polymo import PolymoConfig
+
+config = PolymoConfig(
+    base_url="https://api.example.com",
+    path="/v1/items",
+    params={"limit": 50},
+)
+
+# Pass to Spark without touching disk
+spark.read.format("polymo").option("config_json", json.dumps(config.reader_config())).load()
+
+# Or write the YAML whenever you need it
+Path("config.yml").write_text(config.dump_yaml())
+```
+
+`PolymoConfig` accepts any stream keyword that the YAML supports, such as ``headers``, ``pagination``, or ``record_selector``.
+
 ## Anatomy of the file
 
 | Section | Plain-language meaning |

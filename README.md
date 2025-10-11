@@ -17,7 +17,7 @@
 
 # Welcome to Polymo
 
-Polymo makes it super easy to ingest APIs with Pyspark. You only need to define a YAML file.
+Polymo makes it super easy to ingest APIs with Pyspark. You only need to define a YAML file or a Pydantic config.
 
 My vision is that API ingestion doesn't need heavy, third party tools or hard to maintain custom code.
 The heck, you don't even need Pyspark skills.
@@ -51,36 +51,45 @@ df = (
 
 df.show()
 ```
-
-Structured Streaming works out of the box aswell:
-
+Streaming works too:
 ```python
-stream_df = (
-    spark.readStream.format("polymo")
-    .option("config_path", "./config.yml")
-    .option("stream_batch_size", 100)
-    .option("stream_progress_path", "/tmp/polymo-progress.json")
-    .load()
+spark.readStream.format("polymo")
+```
+
+Prefer everything in the code? Build the config with PolymoConfig model.
+```python
+from pyspark.sql import SparkSession
+from polymo import ApiReader, PolymoConfig
+
+spark = SparkSession.builder.getOrCreate()
+spark.dataSource.register(ApiReader)
+
+jp_posts = PolymoConfig(
+    base_url="https://jsonplaceholder.typicode.com",
+    path="/posts",
 )
 
-query = stream_df.writeStream.format("memory").outputMode("append").queryName("polymo")
-query.show()
-
+df = (
+    spark.read.format("polymo")
+    .option("config_json", jp_posts.config_json())
+    .load()
+)
+df.show()
 ```
 
 Does it perform? Polymo can read in batches (pages in parallel) and therefore is much faster than row based solutions like UDFs.
 
 ## How to start?
-Locally you probably want to install polymo with the UI: 
+Locally you probably want to install polymo along with the Builder UI: 
 
 ```bash
 pip install "polymo[builder]"
 ```
 
-This comes with UI deps such as pyspark
+This comes with all UI deps such as pyspark
 
-Running Polymo on an existing cluster in for instance databricks doesnt require these deps.
-In that case, just install the bare minimum depa with
+Running Polymo on a spark cluster usually doesn't require these UI deps.
+In that case, just install the bare minimum deps with
 ```bash
 pip install polymo
 ```

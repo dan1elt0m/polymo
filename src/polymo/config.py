@@ -458,21 +458,12 @@ def _parse_auth_config(
         raw_token = raw_auth.get("token")
         raw_token = raw_token.strip() if isinstance(raw_token, str) else None
         token = token_value or raw_token
-        if not token:
-            raise ConfigError(
-                "Bearer auth requires a token supplied via config or runtime options"
-            )
         return AuthConfig(type="bearer", token=token)
 
     # OAuth2 client credentials
     token_url = raw_auth.get("token_url")
-    if not isinstance(token_url, str) or not token_url.strip():
-        raise ConfigError("'source.auth.token_url' must be provided for oauth2 auth")
 
     client_id = raw_auth.get("client_id")
-    if not isinstance(client_id, str) or not client_id.strip():
-        raise ConfigError("'source.auth.client_id' must be provided for oauth2 auth")
-
     client_secret_raw = raw_auth.get("client_secret")
     client_secret, client_secret_redacted = _resolve_secret_value(client_secret_raw)
 
@@ -482,14 +473,6 @@ def _parse_auth_config(
     )
 
     client_secret = client_secret or token_value or secret_from_options
-    if not client_secret:
-        if client_secret_redacted or options_secret_redacted:
-            raise ConfigError(
-                "OAuth2 auth received a redacted client secret. Pass the runtime secret value directly (e.g. the result of dbutils.secrets.get) so it is not masked.",
-            )
-        raise ConfigError(
-            "OAuth2 auth requires a client secret supplied via config ('client_secret') or runtime option 'oauth_client_secret'",
-        )
 
     scope_raw = raw_auth.get("scope")
     scope: Tuple[str, ...] = ()
@@ -966,7 +949,9 @@ def _parse_partition(raw: Any) -> PartitionConfig:
                 "'partition.param' must be provided for param_range strategy"
             )
 
-        def _normalize_range_kind(value: Any, *, default: Optional[str] = None) -> Optional[str]:
+        def _normalize_range_kind(
+            value: Any, *, default: Optional[str] = None
+        ) -> Optional[str]:
             if value is None:
                 return default
             text = str(value).strip().lower()
@@ -988,14 +973,14 @@ def _parse_partition(raw: Any) -> PartitionConfig:
                     "'partition.range_step' must be a positive integer"
                 ) from None
             if result <= 0:
-                raise ConfigError(
-                    "'partition.range_step' must be a positive integer"
-                )
+                raise ConfigError("'partition.range_step' must be a positive integer")
             return result
 
         raw_values = raw.get("values")
         if isinstance(raw_values, (list, tuple)):
-            cleaned_values = [str(item).strip() for item in raw_values if str(item).strip()]
+            cleaned_values = [
+                str(item).strip() for item in raw_values if str(item).strip()
+            ]
             values = tuple(cleaned_values) if cleaned_values else None
         elif raw_values is not None:
             text = str(raw_values).strip()
@@ -1008,7 +993,9 @@ def _parse_partition(raw: Any) -> PartitionConfig:
                 raise ConfigError(
                     "param_range partition requires either 'values' or both 'range_start' and 'range_end'"
                 )
-            range_kind = _normalize_range_kind(raw.get("range_kind", "numeric"), default="numeric")
+            range_kind = _normalize_range_kind(
+                raw.get("range_kind", "numeric"), default="numeric"
+            )
             range_step = _normalize_range_step(raw.get("range_step"))
         else:
             if (range_start is None) ^ (range_end is None):

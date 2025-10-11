@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Dict, Iterable, List, Mapping, Optional
+from typing import Dict, Iterable, Iterator, List, Mapping, Optional
 
 import pyarrow as pa
 from pyspark.sql.types import LongType, StringType, StructField, StructType
@@ -25,7 +25,8 @@ from polymo.datasource import (
     RestDataSourceStreamReader,
     _load_source_config,
 )
-from polymo.rest_client import PaginationWindow, RestPage
+from polymo.pydantic_config import PolymoConfig
+from polymo.rest_client import PaginationWindow, RestPage, RestClient
 
 
 class _FakeRestClient:
@@ -422,3 +423,49 @@ def test_stream_reader_batches(monkeypatch, tmp_path) -> None:
     next_rows = list(reader.read(reader.partitions(end_offset, next_end)[0]))
     assert next_rows == [(3,)]
     reader.commit(next_end)
+
+
+@pytest.mark.smoke
+def test_polymo_config_smoke(monkeypatch) -> None:
+    """Smoke test building a config via Pydantic and reading a partition."""
+
+    config_model = PolymoConfig(
+        base_url="https://api.example.com",
+        path="/objects",
+        params={"limit": 25},
+    )
+
+    config = config_model.to_rest_config()
+
+    sample_payload = [
+        {"id": 1, "name": "alpha"},
+        {"id": 2, "name": "beta"},
+    ]
+
+    class _StubClient(RestClient):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            super().__init__(*args, **kwargs)
+
+        def fetch_records(
+            self,
+            stream: StreamConfig,
+            *,
+            window: Optional[PaginationWindow] = None,
+        ) -> Iterator[List[Mapping[str, str]]]:
+            assert stream.params.get("limit") == 25
+            yield sample_payload
+
+    monkeypatch.setattr("polymo.datasource.RestClient", _StubClient)
+
+    reader = RestDataSourceReader(config, _build_id_schema())
+    partitions = reader.partitions()
+
+    assert len(partitions) == 1
+
+    batches = list(reader.read(partitions[0]))
+    assert len(batches) == 1
+
+    batch = batches[0]
+    assert batch.num_rows == 2
+    ids = batch.column(0).to_pylist()
+    assert ids == [row["id"] for row in sample_payload]

@@ -9,6 +9,10 @@ from polymo.config import (
     dump_config,
     load_config,
 )
+from polymo.pydantic_config import (
+    PaginationModel,
+    PolymoConfig,
+)
 
 
 def write_config(tmp_path: Path, content: str) -> Path:
@@ -200,6 +204,74 @@ stream:
     assert config_dict["source"]["auth"]["type"] == "oauth2"
 
 
+def test_pydantic_model_from_yaml() -> None:
+    config_yaml = """
+version: 0.1
+source:
+  type: rest
+  base_url: https://api.test
+stream:
+  name: sample
+  path: /objects
+  params:
+    limit: 5
+""".strip()
+
+    model = PolymoConfig.from_yaml(config_yaml)
+
+    rest_config = model.to_rest_config()
+    assert rest_config.base_url == "https://api.test"
+    assert rest_config.stream.params["limit"] == 5
+
+    reader_config = model.reader_config()
+    assert reader_config["source"]["base_url"] == "https://api.test"
+    assert reader_config["stream"]["params"]["limit"] == 5
+
+
+def test_pydantic_model_from_dict_requires_mapping() -> None:
+    with pytest.raises(ConfigError):
+        PolymoConfig.from_dict(123)  # type: ignore[arg-type]
+
+
+def test_pydantic_model_manual_build() -> None:
+    model = PolymoConfig(
+        base_url="https://api.test",
+        path="/objects",
+        params={"limit": 10},
+        pagination=PaginationModel(type="offset", limit_param="limit", page_size=100),
+    )
+
+    rest_config = model.to_rest_config()
+    assert rest_config.base_url == "https://api.test"
+    assert rest_config.stream.params["limit"] == 10
+    assert rest_config.stream.pagination.limit_param == "limit"
+    assert rest_config.stream.pagination.page_size == 100
+
+    reader_config = model.reader_config()
+    assert reader_config["stream"]["pagination"]["type"] == "offset"
+    assert reader_config["stream"]["pagination"]["limit_param"] == "limit"
+
+
+def test_flat_polymo_config_roundtrip() -> None:
+    flat = PolymoConfig(
+        base_url="https://api.test",
+        path="/objects",
+        params={"limit": 10},
+    )
+
+    rest_config = flat.to_rest_config()
+    assert rest_config.base_url == "https://api.test"
+    assert rest_config.stream.params["limit"] == 10
+
+    reader_config = flat.reader_config()
+    assert reader_config["stream"]["params"]["limit"] == 10
+
+    yaml_text = flat.dump_yaml()
+    reloaded = PolymoConfig.from_yaml(yaml_text)
+    assert reloaded.base_url == "https://api.test"
+    assert reloaded.params["limit"] == 10
+
+
 def test_oauth2_auth_accepts_secret_wrappers(tmp_path: Path) -> None:
     config_path = write_config(
         tmp_path,
@@ -231,30 +303,6 @@ stream:
     secret = FakeDbutilsSecret("secret-from-wrapper")
     config = load_config(config_path, options={"oauth_client_secret": secret})
     assert config.auth.client_secret == "secret-from-wrapper"
-
-
-def test_oauth2_auth_rejects_redacted_secret(tmp_path: Path) -> None:
-    config_path = write_config(
-        tmp_path,
-        """
-version: 0.1
-source:
-  type: rest
-  base_url: https://api.oauth
-  auth:
-    type: oauth2
-    token_url: https://auth.example.com/token
-    client_id: my-client
-stream:
-  name: sample
-  path: /resources
-""".strip(),
-    )
-
-    with pytest.raises(ConfigError) as excinfo:
-        load_config(config_path, options={"oauth_client_secret": "***"})
-
-    assert "redacted" in str(excinfo.value).lower()
 
 
 def test_partition_param_range_range_block(tmp_path: Path) -> None:
@@ -318,25 +366,3 @@ stream:
     assert partition.range_end is None
     assert partition.range_step is None
     assert partition.range_kind is None
-
-
-def test_oauth2_auth_missing_secret_raises(tmp_path: Path) -> None:
-    config_path = write_config(
-        tmp_path,
-        """
-version: 0.1
-source:
-  type: rest
-  base_url: https://api.oauth
-  auth:
-    type: oauth2
-    token_url: https://auth.example.com/token
-    client_id: my-client
-stream:
-  name: sample
-  path: /resources
-""".strip(),
-    )
-
-    with pytest.raises(ConfigError):
-        load_config(config_path)

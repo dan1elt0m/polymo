@@ -1,0 +1,19 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.13.0
+    hooks:
+      - id: ruff-format
+        args:
+        - "--config=pyproject.toml"
+      - id: ruff-check
+        args:
+        - "--fix"
+        - "--config=pyproject.toml"
+  - repo: local
+    hooks:
+    - id: generate-pydantic-docs
+      name: Run generate-pydantic-docs
+      entry: docs/generate_config_doc.py
+      language: python
+      additional_dependencies: ["pydantic", "pyyaml"]
+
