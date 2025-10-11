@@ -17,7 +17,7 @@
 
 # Welcome to Polymo
 
-Polymo makes it super easy to ingest APIs with Pyspark. You only need to define a YAML file.
+Polymo makes it super easy to ingest APIs with Pyspark. You only need to define a YAML file or a Pydantic config.
 
 My vision is that API ingestion doesn't need heavy, third party tools or hard to maintain custom code.
 The heck, you don't even need Pyspark skills.
@@ -56,28 +56,26 @@ Streaming works too:
 spark.readStream.format("polymo")
 ```
 
-Prefer keeping everything in memory? Supply a config dict or build one with the bundled Pydantic helpers:
+Prefer everything in the code? Build the config with PolymoConfig model.
 ```python
-import json
 from pyspark.sql import SparkSession
 from polymo import ApiReader, PolymoConfig
 
 spark = SparkSession.builder.getOrCreate()
 spark.dataSource.register(ApiReader)
 
-config = PolymoConfig(
+jp_posts = PolymoConfig(
     base_url="https://jsonplaceholder.typicode.com",
     path="/posts",
 )
 
 df = (
     spark.read.format("polymo")
-    .option("config_json", json.dumps(config.reader_config()))
+    .option("config_json", jp_posts.config_json())
     .load()
 )
+df.show()
 ```
-
-Use keyword arguments like `params={"limit": 100}` or `pagination={"type": "offset"}` to override parts of the stream when instantiating `PolymoConfig`.
 
 Does it perform? Polymo can read in batches (pages in parallel) and therefore is much faster than row based solutions like UDFs.
 

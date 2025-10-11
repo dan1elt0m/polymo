@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 import yaml
@@ -182,7 +184,7 @@ class PartitionModel(BaseModel):
         default=None,
         description="Query parameter used when partitioning by parameter range.",
     )
-    values: Optional[Sequence[str]] = Field(
+    values: Optional[Sequence[str | int]] = Field(
         default=None,
         description="Explicit values used for parameter range partitioning.",
     )
@@ -485,6 +487,14 @@ class PolymoConfig(BaseModel):
         options: Optional[Mapping[str, Any]] = None,
     ) -> Dict[str, Any]:
         return config_to_dict(self.to_rest_config(token=token, options=options))
+
+    def config_json(
+        self,
+        *,
+        token: Optional[str] = None,
+        options: Optional[Mapping[str, Any]] = None,
+    ):
+        return json.dumps(self.reader_config(token=token, options=options))
 
     def dump_yaml(
         self,

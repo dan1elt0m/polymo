@@ -8,10 +8,10 @@ import math
 from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
+from pyspark.sql import SparkSession
 from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple
 
 import pyarrow as pa
-from pyspark.sql import SparkSession
 from pyspark.sql.datasource import (
     DataSource,
     DataSourceReader,
@@ -25,7 +25,7 @@ from pyspark.sql.types import (
     StringType,
     StructField,
     StructType,
-    _parse_datatype_string,
+    DataType,
 )
 
 from .config import (
@@ -53,9 +53,8 @@ class ApiReader(DataSource):
 
     def schema(self) -> StructType:
         if self._config.stream.schema:
-            # Use user-provided schema if available
             SparkSession.builder.getOrCreate()
-            self._schema = _parse_datatype_string(self._config.stream.schema)
+            self._schema = DataType.fromDDL(self._config.stream.schema)
         if self._schema is None:
             # Always infer schema when no explicit schema is provided
             self._schema = _infer_schema(self._config)
@@ -63,10 +62,10 @@ class ApiReader(DataSource):
         return self._schema
 
     def reader(self, schema: StructType) -> DataSourceReader:
-        return RestDataSourceReader(self._config, self.schema())
+        return RestDataSourceReader(self._config, self._schema)
 
     def streamReader(self, schema: StructType) -> DataSourceStreamReader:
-        return RestDataSourceStreamReader(self._config, self.schema())
+        return RestDataSourceStreamReader(self._config, self._schema)
 
 
 class RestInputPartition(InputPartition):
@@ -212,20 +211,33 @@ class RestDataSourceStreamReader(DataSourceStreamReader):
 def _get_databricks_secret(scope: str, key: str) -> str:
     """Gets a secret from the Databricks secret scope."""
     from databricks.sdk import WorkspaceClient
+
     w = WorkspaceClient()
     secret_response = w.secrets.get_secret(scope=scope, key=key)
     decoded_secret = base64.b64decode(secret_response.value).decode("utf-8")
     return decoded_secret
 
-def _load_databricks_oauth_credentials(options: Mapping[str, str]) -> Optional[Tuple[str, str]]:
+
+def _load_databricks_oauth_credentials(
+    options: Mapping[str, str],
+) -> Optional[Tuple[str, str]]:
     oauth_client_id_scope = options.get("oauth_client_id_scope")
     oauth_client_id_key = options.get("oauth_client_id_key")
     oauth_client_secret_scope = options.get("oauth_client_secret_scope")
     oauth_client_secret_key = options.get("oauth_client_secret_key")
-    if oauth_client_id_scope and oauth_client_id_key and oauth_client_secret_scope and oauth_client_secret_key:
+    if (
+        oauth_client_id_scope
+        and oauth_client_id_key
+        and oauth_client_secret_scope
+        and oauth_client_secret_key
+    ):
         try:
-            client_id = _get_databricks_secret(oauth_client_id_scope, oauth_client_id_key)
-            client_secret = _get_databricks_secret(oauth_client_secret_scope, oauth_client_secret_key)
+            client_id = _get_databricks_secret(
+                oauth_client_id_scope, oauth_client_id_key
+            )
+            client_secret = _get_databricks_secret(
+                oauth_client_secret_scope, oauth_client_secret_key
+            )
             return client_id, client_secret
         except Exception:
             raise ConfigError(
@@ -234,6 +246,7 @@ def _load_databricks_oauth_credentials(options: Mapping[str, str]) -> Optional[T
                 f"client_secret scope='{oauth_client_secret_scope}' key='{oauth_client_secret_key}'"
             )
     return None
+
 
 def _load_databricks_token(options: Mapping[str, str]) -> Optional[str]:
     token_scope = options.get("token_scope")
@@ -246,6 +259,7 @@ def _load_databricks_token(options: Mapping[str, str]) -> Optional[str]:
                 f"Failed to access Databricks secret for token: scope='{token_scope}' key='{token_key}'"
             )
     return None
+
 
 def _load_source_config(options: Mapping[str, str]) -> RestSourceConfig:
     config_path = options.get("config_path")
@@ -269,13 +283,17 @@ def _load_source_config(options: Mapping[str, str]) -> RestSourceConfig:
     if databricks_token:
         token = databricks_token
     if databricks_oauth_credentials:
-        runtime_options["oauth_client_id"], runtime_options["oauth_client_secret"] = databricks_oauth_credentials
+        runtime_options["oauth_client_id"], runtime_options["oauth_client_secret"] = (
+            databricks_oauth_credentials
+        )
 
     if config_json:
         try:
             raw_config = json.loads(config_json)
         except json.JSONDecodeError as exc:
-            raise ConfigError(f"Invalid JSON supplied via 'config_json': {exc}") from exc
+            raise ConfigError(
+                f"Invalid JSON supplied via 'config_json': {exc}"
+            ) from exc
         return parse_config(raw_config, token=token, options=runtime_options)
 
     if config_path:
@@ -333,9 +351,7 @@ def _sample_stream(config: RestSourceConfig) -> List[Mapping[str, Any]]:
                 pages_checked += 1
                 if isinstance(page_records, list):
                     sample_records.extend(
-                        record
-                        for record in page_records
-                        if isinstance(record, Mapping)
+                        record for record in page_records if isinstance(record, Mapping)
                     )
                 if sample_records:
                     return sample_records[:max_samples]

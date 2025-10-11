@@ -90,7 +90,7 @@ Partition strategy configuration.
 | --- | --- | --- | --- |
 | `strategy` | `str` | `none` | Partitioning strategy to apply. |
 | `param` | `Optional[str]` | `None` | Query parameter used when partitioning by parameter range. |
-| `values` | `Optional[Sequence[str]]` | `None` | Explicit values used for parameter range partitioning. |
+| `values` | `Optional[Sequence[UnionType[str, int]]]` | `None` | Explicit values used for parameter range partitioning. |
 | `range_start` | `Optional[Any]` | `None` | Inclusive start value for generated partition ranges. |
 | `range_end` | `Optional[Any]` | `None` | Inclusive end value for generated partition ranges. |
 | `range_step` | `Optional[int]` | `None` | Step size used when generating partition ranges. |

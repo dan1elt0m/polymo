@@ -22,6 +22,7 @@ import {
 	DEFAULT_SAMPLE_STATE,
 } from "./atoms";
 import { configToFormState, formStateToConfig } from "./lib/transform";
+import { buildPysparkScript, buildScriptFileName } from "./lib/pysparkExport";
 import { validateConfigRequest, sampleRequest } from "./lib/api";
 import { BuilderPanel } from "./components/BuilderPanel";
 import { YamlEditor } from "./components/YamlEditor";
@@ -47,37 +48,6 @@ const slugify = (value: string): string => {
 };
 
 const stripExtension = (name: string): string => name.replace(/\.[^.]+$/, '').trim();
-
-const buildPysparkScript = (config: RestSourceConfig): string => {
-	const configJson = JSON.stringify(config, null, 2)
-		.replace(/`/g, '\\`')
-		.replace(/"""/g, '\\"""');
-	return `import json
-
-from pyspark.sql import SparkSession
-from polymo import ApiReader, PolymoConfig
-
-config_dict = json.loads("""${configJson}""")
-config = PolymoConfig.from_dict(config_dict)
-
-spark = SparkSession.builder.getOrCreate()
-spark.dataSource.register(ApiReader)
-
-df = (
-    spark.read.format("polymo")
-    # .option("token", "YOUR_TOKEN")  # Uncomment if the API requires secrets at runtime
-    .option("config_json", json.dumps(config.reader_config()))
-    .load()
-)
-
-df.show()
-`;
-};
-
-const buildScriptFileName = (rawName: string): string => {
-	const base = stripExtension(rawName) || 'config';
-	return `${slugify(base)}.py`;
-};
 
 const App: React.FC = () => {
 	const [showLandingScreen, setShowLandingScreen] = React.useState(true);
