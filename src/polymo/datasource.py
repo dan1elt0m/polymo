@@ -240,7 +240,7 @@ def _load_databricks_token(options: Mapping[str, str]) -> Optional[str]:
     token_key = options.get("token_key")
     if token_scope and token_key:
         try:
-            return dbutils.secrets.get(scope=token_scope, key=token_key)
+            return _get_databricks_secret(token_scope, token_key)
         except Exception:
             raise ConfigError(
                 f"Failed to access Databricks secret for token: scope='{token_scope}' key='{token_key}'"
