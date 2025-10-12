@@ -56,7 +56,7 @@ Streaming works too:
 spark.readStream.format("polymo")
 ```
 
-Prefer everything in the code? Build the config with PolymoConfig model.
+Prefer everything in Python? Use the PolymoConfig model.
 ```python
 from pyspark.sql import SparkSession
 from polymo import ApiReader, PolymoConfig
@@ -76,8 +76,7 @@ df = (
 )
 df.show()
 ```
-
-Does it perform? Polymo can read in batches (pages in parallel) and therefore is much faster than row based solutions like UDFs.
+Polymo reads in batches and can read pages in parallel. Therefore Polymo can be much faster than row based solutions like UDFs.
 
 ## How to start?
 Locally you probably want to install polymo along with the Builder UI: 
