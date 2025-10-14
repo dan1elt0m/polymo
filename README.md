@@ -110,6 +110,10 @@ docker compose up --build builder
 ## Where to Next
 Read the docs [here](https://dan1elt0m.github.io/polymo/)
 
+Other material:
+- Step by step example: [medium blogpost](https://medium.com/@d.e.tom89/turn-any-rest-api-into-spark-dataframes-in-minutes-with-polymo-028a48113eb1)
+
+
 ## Contributing
 It's still early days, but Polymo already supports a lot of features!
 Is there something missing? Raise an issue or contribute!
