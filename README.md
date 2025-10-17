@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-    <em>Turn REST APIs into Spark DataFrames with just a YAML file
+    <em>Turn REST APIs into Spark DataFrames with just a YAML file or Pydantic config
 </em>
 </p>
 
