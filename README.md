@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-    <em>Turn REST APIs into Spark DataFrames with just a YAML file or Pydantic config
+    <em>Single pyspark API connector for all REST API's. 
 </em>
 </p>
 
@@ -17,7 +17,7 @@
 
 # Welcome to Polymo
 
-Polymo makes it super easy to ingest APIs with Pyspark. You only need to define a YAML file or a Pydantic config.
+Declarative API ingestion wigh Pyspark.
 
 <!-- Centered clickable screenshot -->
 <p align="center">
