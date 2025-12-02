@@ -15,7 +15,7 @@
 
 # Welcome to Polymo
 
-Declarative API ingestion wigh Pyspark.
+Declarative API ingestion wigh Pyspark. Uses the new Pyspark 4 custom data sources under the hood.
 
 <!-- Centered clickable screenshot -->
 <p align="center">
