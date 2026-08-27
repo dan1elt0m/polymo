@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from functools import partial
 from importlib import metadata, resources
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 import yaml
 from fastapi import FastAPI, HTTPException, Request
@@ -24,6 +24,9 @@ from ..config import (
 )
 from ..datasource import _plan_partitions
 from ..rest_client import PaginationWindow, RestClient
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from pyspark.sql import SparkSession
 
 PACKAGE_ROOT = resources.files(__package__)
 TEMPLATES = Jinja2Templates(directory=str(PACKAGE_ROOT.joinpath("templates")))
@@ -143,9 +146,9 @@ def create_app() -> FastAPI:
     @app.get("/")
     async def index(request: Request) -> Any:
         return TEMPLATES.TemplateResponse(
+            request,
             "index.html",
             {
-                "request": request,
                 "sample_config": SAMPLE_CONFIG_YAML,
                 "sample_config_dict": SAMPLE_CONFIG_DICT,
             },
@@ -326,7 +329,7 @@ def _collect_records(
             config_dict=config_dict,
             token=token,
             spark=spark,
-            reader_options=config.options
+            reader_options=config.options,
         )
         records = df.limit(limit).collect()
         dtypes = df.dtypes
@@ -360,7 +363,7 @@ def _get_preview_df(
     if token is not None:
         options["token"] = token
 
-    if source := config_dict.get('source', {}):
+    if source := config_dict.get("source", {}):
         if auth := source.get("auth"):
             if auth.get("type") == "oauth2":
                 options["oauth_client_secret"] = token
