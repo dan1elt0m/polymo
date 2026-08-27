@@ -66,7 +66,7 @@ docs = [
     "mkdocs-material>=9.1.4",
     "mkdocs-gen-files>=0.4,<0.6",
     "mkdocs-literate-nav>=0.6.0",
-    "mkdocstrings[python]>=0.20,<0.30",
+    "mkdocstrings[python]>=0.20,<1.1",
     "mkautodoc>=0.2.0",
     "pymdown-extensions>=10.0.1",
 ]
