@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import posixpath
 import re
+import ssl
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -46,6 +48,26 @@ from .config import (
 
 
 USER_AGENT = "polymo-rest-source/0.1"
+
+
+def _default_verify() -> ssl.SSLContext | bool:
+    """TLS verification for outgoing requests.
+
+    Validates against the operating system trust store (via truststore) so
+    corporate proxy CAs installed on the machine are trusted automatically.
+    An explicit SSL_CERT_FILE/SSL_CERT_DIR override wins, and if the system
+    store cannot be used we fall back to httpx's bundled CA defaults.
+    """
+
+    if os.environ.get("SSL_CERT_FILE") or os.environ.get("SSL_CERT_DIR"):
+        return True
+    try:
+        import truststore
+
+        return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    except Exception:  # pragma: no cover - depends on host TLS setup
+        return True
+
 
 _FILTER_ENV = Environment(undefined=StrictUndefined, autoescape=False)
 _FILTER_CACHE: Dict[str, Any] = {}
@@ -152,7 +174,10 @@ class RestClient:
 
         self._base_headers = dict(headers)
         self._client = httpx.Client(
-            base_url=self.base_url, headers=headers, timeout=self.timeout
+            base_url=self.base_url,
+            headers=headers,
+            timeout=self.timeout,
+            verify=_default_verify(),
         )
 
     def close(self) -> None:
@@ -242,7 +267,6 @@ class RestClient:
                 "OAuth2 auth requires a client secret provided via runtime option 'oauth_client_secret'",
             )
 
-
         base_payload: Dict[str, Any] = {
             "grant_type": "client_credentials",
             "client_id": self.auth.client_id,
@@ -251,7 +275,10 @@ class RestClient:
 
         # Some OAuth providers (particularly bespoke Spring controllers) expect camelCase keys.
         # Add aliases so both "client_id"/"client_secret" and "clientId"/"clientSecret" are present.
-        for canonical_key, alias_key in (("client_id", "clientId"), ("client_secret", "clientSecret")):
+        for canonical_key, alias_key in (
+            ("client_id", "clientId"),
+            ("client_secret", "clientSecret"),
+        ):
             value = base_payload.get(canonical_key)
             if value is not None:
                 base_payload.setdefault(alias_key, value)
@@ -271,9 +298,20 @@ class RestClient:
         }
 
         def _post_token_request(*, json_mode: bool) -> httpx.Response:
+            verify = _default_verify()
             if json_mode:
-                return httpx.post(self.auth.token_url, json=base_payload, timeout=self.timeout)
-            return httpx.post(self.auth.token_url, data=form_payload, timeout=self.timeout)
+                return httpx.post(
+                    self.auth.token_url,
+                    json=base_payload,
+                    timeout=self.timeout,
+                    verify=verify,
+                )
+            return httpx.post(
+                self.auth.token_url,
+                data=form_payload,
+                timeout=self.timeout,
+                verify=verify,
+            )
 
         json_mode_requested = False
         try:
@@ -320,7 +358,11 @@ class RestClient:
                 for key, value in payload.items():
                     if not isinstance(key, str):
                         continue
-                    if key.lower().replace("_", "") == "accesstoken" and isinstance(value, str) and value.strip():
+                    if (
+                        key.lower().replace("_", "") == "accesstoken"
+                        and isinstance(value, str)
+                        and value.strip()
+                    ):
                         access_token = value.strip()
                         break
 
@@ -633,7 +675,9 @@ class RestClient:
                         manual_auth_header = value
                         break
 
-                effective_auth = manual_auth_header or self._resolve_authorization_header()
+                effective_auth = (
+                    manual_auth_header or self._resolve_authorization_header()
+                )
                 if effective_auth:
                     request.headers["Authorization"] = effective_auth
 
@@ -815,9 +859,11 @@ def _cast_record(record: Mapping[str, Any], schema: StructType) -> Mapping[str, 
     if not isinstance(record, Mapping):
         return record
     casted: Dict[str, Any] = dict(record)
-    for field in schema.fields:
-        if field.name in casted:
-            casted[field.name] = _cast_value(casted[field.name], field.dataType)
+    for schema_field in schema.fields:
+        if schema_field.name in casted:
+            casted[schema_field.name] = _cast_value(
+                casted[schema_field.name], schema_field.dataType
+            )
     return casted
 
 

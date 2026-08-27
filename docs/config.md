@@ -60,6 +60,15 @@ source:
 - `base_url` is the front part of every request. Leave off the trailing slash; Polymo tidies it for you.
 - Authentication details (like tokens) are **never** written here. They are supplied later when you run the connector.
 
+### TLS certificates
+
+Polymo verifies HTTPS connections against your operating system's trust
+store (via [truststore](https://truststore.readthedocs.io/)). Corporate
+proxy or self-signed CAs installed on the machine therefore work out of
+the box. To point at a specific CA bundle instead, set the standard
+`SSL_CERT_FILE` (or `SSL_CERT_DIR`) environment variable before starting
+Spark or the builder — an explicit override always wins.
+
 ## Stream block
 
 ### Path

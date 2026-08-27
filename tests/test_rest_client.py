@@ -671,3 +671,46 @@ def test_incremental_remote_state_path(
     list(second_client.fetch_records(stream))
 
     assert observed == ["baseline", "2024-05-04T00:00:00Z"]
+
+
+def test_default_verify_uses_system_trust_store(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import truststore
+
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+    monkeypatch.delenv("SSL_CERT_DIR", raising=False)
+
+    assert isinstance(rest_client_module._default_verify(), truststore.SSLContext)
+
+
+def test_default_verify_defers_to_ssl_cert_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ca_bundle = tmp_path / "ca.pem"
+    ca_bundle.write_text("")
+    monkeypatch.setenv("SSL_CERT_FILE", str(ca_bundle))
+
+    assert rest_client_module._default_verify() is True
+
+
+def test_client_verifies_against_system_trust_store(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import truststore
+
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+    monkeypatch.delenv("SSL_CERT_DIR", raising=False)
+
+    captured: dict[str, Any] = {}
+    original_client = httpx.Client
+
+    def client_factory(*args: Any, **kwargs: Any) -> httpx.Client:
+        captured.update(kwargs)
+        return original_client(*args, **kwargs)
+
+    monkeypatch.setattr("polymo.rest_client.httpx.Client", client_factory)
+
+    RestClient(base_url="https://example.com", auth=AuthConfig())
+
+    assert isinstance(captured.get("verify"), truststore.SSLContext)
