@@ -202,7 +202,7 @@ incremental:
 When `cursor_param` and `cursor_field` are populated Polymo performs an incremental sync:
 
 - On the first request Polymo seeds the query with the last cursor value it knows about. The value is read from a JSON state file that you point to with `.option("incremental_state_path", "./polymo-state.json")`.
-- The path may be local or remote (for example `s3://team-bucket/polymo/state.json`). Remote URLs require installing `fsspec`; if the library is missing Polymo raises a helpful error before making any HTTP calls.
+- The path may be local or remote (for example `s3://team-bucket/polymo/state.json`). 
 - If the state file does not exist yet, provide a fallback with `.option("incremental_start_value", "2024-01-01T00:00:00Z")`.
 - After every successful run the JSON file is updated with the newest cursor value observed in the stream. By default the entry key is `<stream name>@<base URL>`, but you can override it via `.option("incremental_state_key", "orders-prod")` when you want to share a state file between connectors.
 - The stored cursor is only used when the query parameter is not already supplied in the config (so custom templates or overrides still win).

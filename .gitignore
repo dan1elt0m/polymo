@@ -26,3 +26,5 @@ builder-ui/test-results/
 *.log
 .DS_store
 .coverage
+
+blogs/

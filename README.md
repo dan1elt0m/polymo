@@ -113,3 +113,6 @@ It's still early days, but Polymo already supports a lot of features!
 Is there something missing? Raise an issue or contribute!
 
 Contributions and early feedback welcome!
+
+---
+If Polymo helped, a ⭐ makes my day
