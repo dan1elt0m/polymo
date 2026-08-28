@@ -5,6 +5,7 @@ spark = SparkSession.getActiveSession()
 
 {% if schema_ddl %}
 SCHEMA = {{ schema_ddl | tojson }}
+
 {% endif %}
 
 {% if streaming %}

@@ -170,7 +170,11 @@ def _records(payload):
 
 {% if pagination_type == "offset" %}
 def fetch_records(extra_params=None, path=None):
+{% if limit_param and page_size %}
     """Yield records, paginating with {{ offset_param }}/{{ limit_param }}."""
+{% else %}
+    """Yield records, paginating with {{ offset_param }}."""
+{% endif %}
     url_path = path or PATH
     session = requests.Session()
     session.headers.update(HEADERS)

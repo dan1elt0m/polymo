@@ -5,10 +5,12 @@ repos:
       - id: ruff-format
         args:
         - "--config=pyproject.toml"
+        exclude: ^tests/codegen/golden/
       - id: ruff-check
         args:
         - "--fix"
         - "--config=pyproject.toml"
+        exclude: ^tests/codegen/golden/
   - repo: local
     hooks:
     - id: generate-pydantic-docs
