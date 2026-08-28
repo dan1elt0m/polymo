@@ -21,6 +21,35 @@ TIMEOUT = 30.0
 # or an Azure Key Vault / AWS Secrets Manager client.
 API_TOKEN = "REPLACE_ME"
 {% endif %}
+{% if auth_type == "oauth2" %}
+
+# Fill in your client secret. For anything beyond local testing, fetch it
+# from a secret store instead of keeping it in this file, e.g.:
+#   CLIENT_SECRET = dbutils.secrets.get("my-scope", "my-key")
+CLIENT_SECRET = "REPLACE_ME"
+TOKEN_URL = "{{ token_url }}"
+
+
+def get_token():
+    """Fetch an OAuth2 access token (client credentials grant)."""
+    payload = {
+        "grant_type": "client_credentials",
+        "client_id": "{{ client_id }}",
+        "client_secret": CLIENT_SECRET,
+{% if scope %}
+        "scope": "{{ scope }}",
+{% endif %}
+{% if audience %}
+        "audience": "{{ audience }}",
+{% endif %}
+{% for key, value in oauth_extra.items() %}
+        "{{ key }}": {{ value | tojson }},
+{% endfor %}
+    }
+    response = requests.post(TOKEN_URL, data=payload, timeout=TIMEOUT)
+    response.raise_for_status()
+    return response.json()["access_token"]
+{% endif %}
 
 # Behind a corporate TLS-intercepting proxy? `pip install truststore`
 # and uncomment the next two lines:
@@ -110,7 +139,9 @@ def fetch_records():
     """Yield records, paginating with {{ offset_param }}/{{ limit_param }}."""
     session = requests.Session()
     session.headers.update(HEADERS)
-{% if auth_type in ("bearer", "oauth2") %}
+{% if auth_type == "oauth2" %}
+    session.headers["Authorization"] = f"Bearer {get_token()}"
+{% elif auth_type == "bearer" %}
     session.headers["Authorization"] = f"Bearer {API_TOKEN}"
 {% endif %}
     offset = {{ start_offset }}
@@ -131,7 +162,9 @@ def fetch_records():
     """Yield records, paginating with {{ page_param }}."""
     session = requests.Session()
     session.headers.update(HEADERS)
-{% if auth_type in ("bearer", "oauth2") %}
+{% if auth_type == "oauth2" %}
+    session.headers["Authorization"] = f"Bearer {get_token()}"
+{% elif auth_type == "bearer" %}
     session.headers["Authorization"] = f"Bearer {API_TOKEN}"
 {% endif %}
     page = {{ start_page }}
@@ -162,7 +195,9 @@ def fetch_records():
     """Yield records, following the response cursor."""
     session = requests.Session()
     session.headers.update(HEADERS)
-{% if auth_type in ("bearer", "oauth2") %}
+{% if auth_type == "oauth2" %}
+    session.headers["Authorization"] = f"Bearer {get_token()}"
+{% elif auth_type == "bearer" %}
     session.headers["Authorization"] = f"Bearer {API_TOKEN}"
 {% endif %}
 {% if next_url_path %}
@@ -206,7 +241,9 @@ def fetch_records():
     """Yield records, following RFC 5988 Link headers (rel=next)."""
     session = requests.Session()
     session.headers.update(HEADERS)
-{% if auth_type in ("bearer", "oauth2") %}
+{% if auth_type == "oauth2" %}
+    session.headers["Authorization"] = f"Bearer {get_token()}"
+{% elif auth_type == "bearer" %}
     session.headers["Authorization"] = f"Bearer {API_TOKEN}"
 {% endif %}
     url, params = f"{BASE_URL}{PATH}", dict(PARAMS)
@@ -221,7 +258,9 @@ def fetch_records():
     """Yield records from the API (single page)."""
     session = requests.Session()
     session.headers.update(HEADERS)
-{% if auth_type in ("bearer", "oauth2") %}
+{% if auth_type == "oauth2" %}
+    session.headers["Authorization"] = f"Bearer {get_token()}"
+{% elif auth_type == "bearer" %}
     session.headers["Authorization"] = f"Bearer {API_TOKEN}"
 {% endif %}
     response = _request(session, f"{BASE_URL}{PATH}", PARAMS)

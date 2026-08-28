@@ -60,8 +60,16 @@ def _retry_condition(retry_statuses) -> str:
 def _context(config: RestSourceConfig) -> Dict[str, Any]:
     stream = config.stream
     eh = stream.error_handler
+    auth = config.auth
+    if auth.type == "oauth2" and (not auth.token_url or not auth.client_id):
+        raise CodegenError("oauth2 requires token_url and client_id")
     return {
-        "auth_type": config.auth.type,
+        "auth_type": auth.type,
+        "token_url": auth.token_url,
+        "client_id": auth.client_id,
+        "scope": " ".join(auth.scope),
+        "audience": auth.audience,
+        "oauth_extra": dict(auth.extra_params),
         "base_url": config.base_url.rstrip("/"),
         "path": stream.path,
         "params_repr": repr(dict(stream.params or {})),
