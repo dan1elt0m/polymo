@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from importlib import resources
+
 import pytest
 
 fastapi = pytest.importorskip("fastapi", reason="FastAPI is required for builder tests")
@@ -52,6 +54,20 @@ def test_yaml_payload_rejected() -> None:
     response = client.post("/api/validate", json={"config": "version: 0.1"})
 
     assert response.status_code == 422
+
+
+def test_index_serves_built_ui_bundle() -> None:
+    """GET / must serve the built React app, and that bundle must be the new,
+    codegen-era UI — not a stale build from before /api/generate existed."""
+    app = create_app()
+    client = TestClient(app)
+
+    response = client.get("/")
+    assert response.status_code == 200
+
+    static_path = resources.files("polymo.builder").joinpath("static", "main.js")
+    main_js = static_path.read_text(encoding="utf-8")
+    assert "/api/generate" in main_js
 
 
 def test_generate_returns_script() -> None:
