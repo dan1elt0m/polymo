@@ -17,6 +17,10 @@
 
 Declarative API ingestion with Pyspark. Uses the new Pyspark 4 custom data sources under the hood.
 
+## What's coming in 1.0
+
+Polymo 1.0 pivots from a runtime connector to a dev-time code generator: the builder will export a standalone Lakeflow Declarative Pipelines script with zero polymo runtime dependency, instead of a config your pipeline loads at read time. As part of this pivot, YAML configs and the Spark custom data source described below will be removed. See [docs/superpowers/specs/2026-08-28-codegen-pivot-design.md](docs/superpowers/specs/2026-08-28-codegen-pivot-design.md) for the full design.
+
 <!-- Centered clickable screenshot -->
 <p align="center">
   <a href="docs/ui.png">

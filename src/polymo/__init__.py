@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .codegen import generate
 from .config import (
     RestSourceConfig,
     config_to_dict,
@@ -25,6 +26,7 @@ from .pydantic_config import (
 
 __all__ = [
     "ApiReader",
+    "generate",
     "RestSourceConfig",
     "config_to_dict",
     "dump_config",

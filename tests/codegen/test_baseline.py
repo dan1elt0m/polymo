@@ -28,3 +28,10 @@ def test_full_script_appends_dp_wiring():
     assert "from pyspark import pipelines as dp" in script
     assert '@dp.table(name="posts")' in script
     assert "def posts()" in script
+
+
+def test_generate_exported_from_package():
+    from polymo import generate as top_level_generate
+    from polymo.codegen import generate
+
+    assert top_level_generate is generate
