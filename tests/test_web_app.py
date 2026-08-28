@@ -7,22 +7,18 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from polymo.builder import create_app  # noqa: E402
 
-SAMPLE_CONFIG = """\
-version: 0.1
-source:
-  type: rest
-  base_url: https://example.com
-stream:
-  name: posts
-  path: /posts
-"""
+SAMPLE_CONFIG_DICT = {
+    "version": "0.1",
+    "source": {"type": "rest", "base_url": "https://example.com"},
+    "stream": {"name": "posts", "path": "/posts"},
+}
 
 
 def test_validate_endpoint_success() -> None:
     app = create_app()
     client = TestClient(app)
 
-    response = client.post("/api/validate", json={"config": SAMPLE_CONFIG})
+    response = client.post("/api/validate", json={"config_dict": SAMPLE_CONFIG_DICT})
     payload = response.json()
 
     assert response.status_code == 200
@@ -46,27 +42,16 @@ def test_validate_with_config_dict() -> None:
     assert payload["valid"] is True
     assert payload["stream"] == "posts"
     assert payload["config"]["source"]["base_url"] == "https://example.com"
-    yaml_text = payload["yaml"]
-    assert ("version: 0.1" in yaml_text) or ("version: '0.1'" in yaml_text)
+    assert "yaml" not in payload
 
 
-def test_format_endpoint() -> None:
+def test_yaml_payload_rejected() -> None:
     app = create_app()
     client = TestClient(app)
 
-    config_dict = {
-        "version": "0.1",
-        "source": {"type": "rest", "base_url": "https://example.com"},
-        "stream": {"name": "posts", "path": "/posts"},
-    }
+    response = client.post("/api/validate", json={"config": "version: 0.1"})
 
-    response = client.post("/api/format", json={"config_dict": config_dict})
-    payload = response.json()
-
-    assert response.status_code == 200
-    yaml_text = payload["yaml"]
-    assert ("version: 0.1" in yaml_text) or ("version: '0.1'" in yaml_text)
-    assert "base_url: https://example.com" in yaml_text
+    assert response.status_code == 422
 
 
 def test_generate_returns_script() -> None:

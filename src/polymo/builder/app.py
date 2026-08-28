@@ -6,22 +6,15 @@ from functools import partial
 from importlib import metadata, resources
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
-import yaml
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
 from ..codegen import CodegenError, generate
-from ..config import (
-    ConfigError,
-    RestSourceConfig,
-    config_to_dict,
-    dump_config,
-    parse_config,
-)
+from ..config import ConfigError, RestSourceConfig, config_to_dict, parse_config
 from .preview import run_preview
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -31,35 +24,31 @@ PACKAGE_ROOT = resources.files(__package__)
 TEMPLATES = Jinja2Templates(directory=str(PACKAGE_ROOT.joinpath("templates")))
 STATIC_PATH = PACKAGE_ROOT.joinpath("static")
 
-SAMPLE_CONFIG = """\
-version: 0.1
-source:
-  type: rest
-  base_url: https://jsonplaceholder.typicode.com
-stream:
-  name: posts
-  path: /posts
-  params:
-    _limit: 25
-  pagination:
-    type: none
-  incremental:
-    mode: null
-    cursor_param: null
-    cursor_field: null
-  infer_schema: true
-  schema: null
-"""
-
-SAMPLE_CONFIG_OBJECT = parse_config(yaml.safe_load(SAMPLE_CONFIG))
-SAMPLE_CONFIG_DICT = config_to_dict(SAMPLE_CONFIG_OBJECT)
-SAMPLE_CONFIG_YAML = dump_config(SAMPLE_CONFIG_OBJECT)
+SAMPLE_CONFIG_DICT = {
+    "version": "0.1",
+    "source": {
+        "type": "rest",
+        "base_url": "https://jsonplaceholder.typicode.com",
+    },
+    "stream": {
+        "name": "posts",
+        "path": "/posts",
+        "params": {"_limit": 25},
+        "pagination": {"type": "none"},
+        "incremental": {
+            "mode": None,
+            "cursor_param": None,
+            "cursor_field": None,
+        },
+        "infer_schema": True,
+        "schema": None,
+    },
+}
 
 
 class ValidationRequest(BaseModel):
-    config: Optional[str] = Field(None, description="YAML configuration text")
-    config_dict: Optional[Dict[str, Any]] = Field(
-        None, description="Configuration provided as a dictionary"
+    config_dict: Dict[str, Any] = Field(
+        description="Configuration provided as a dictionary"
     )
     token: Optional[str] = Field(
         None, description="Bearer token supplied separately (not stored)"
@@ -70,24 +59,16 @@ class ValidationRequest(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    @model_validator(mode="after")
-    def _ensure_payload(self) -> "ValidationRequest":
-        if self.config is None and self.config_dict is None:
-            raise ValueError("Either 'config' or 'config_dict' must be provided")
-        return self
-
 
 class ValidationResponse(BaseModel):
     valid: bool
     stream: str | None = None
     message: Optional[str] = None
     config: Optional[Dict[str, Any]] = None
-    yaml: Optional[str] = None
 
 
 class SampleRequest(BaseModel):
-    config: Optional[str] = None
-    config_dict: Optional[Dict[str, Any]] = None
+    config_dict: Dict[str, Any]
     token: Optional[str] = None
     limit: int = Field(20, ge=1, le=500, description="Maximum records to preview")
     options: Optional[Dict[str, Any]] = Field(
@@ -95,12 +76,6 @@ class SampleRequest(BaseModel):
     )
 
     model_config = ConfigDict(extra="ignore")
-
-    @model_validator(mode="after")
-    def _ensure_payload(self) -> "SampleRequest":
-        if self.config is None and self.config_dict is None:
-            raise ValueError("Either 'config' or 'config_dict' must be provided")
-        return self
 
 
 class SampleResponse(BaseModel):
@@ -113,14 +88,6 @@ class SampleResponse(BaseModel):
         default_factory=list, description="Raw REST API responses captured per page"
     )
     rest_error: Optional[str] = None
-
-
-class FormatRequest(BaseModel):
-    config_dict: Dict[str, Any]
-
-
-class FormatResponse(BaseModel):
-    yaml: str
 
 
 class GenerateRequest(BaseModel):
@@ -159,7 +126,6 @@ def create_app() -> FastAPI:
             request,
             "index.html",
             {
-                "sample_config": SAMPLE_CONFIG_YAML,
                 "sample_config_dict": SAMPLE_CONFIG_DICT,
             },
         )
@@ -168,7 +134,7 @@ def create_app() -> FastAPI:
     async def validate_config(payload: ValidationRequest) -> ValidationResponse:
         try:
             config = _load_config_payload(
-                payload.config, payload.config_dict, payload.token, payload.options
+                payload.config_dict, payload.token, payload.options
             )
         except ConfigError as exc:
             return ValidationResponse(valid=False, stream=None, message=str(exc))
@@ -181,14 +147,13 @@ def create_app() -> FastAPI:
             stream=config.stream.name,
             message="Configuration is valid",
             config=config_dict,
-            yaml=dump_config(config),
         )
 
     @app.post("/api/sample", response_model=SampleResponse)
     async def sample_records(payload: SampleRequest) -> SampleResponse:
         try:
             config = _load_config_payload(
-                payload.config, payload.config_dict, payload.token, payload.options
+                payload.config_dict, payload.token, payload.options
             )
         except ConfigError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -225,14 +190,6 @@ def create_app() -> FastAPI:
             rest_error=None,
         )
 
-    @app.post("/api/format", response_model=FormatResponse)
-    async def format_config(payload: FormatRequest) -> FormatResponse:
-        try:
-            config = parse_config(payload.config_dict)
-        except ConfigError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return FormatResponse(yaml=dump_config(config))
-
     @app.post("/api/generate", response_model=GenerateResponse)
     async def generate_script(payload: GenerateRequest) -> GenerateResponse:
         try:
@@ -254,28 +211,11 @@ def create_app() -> FastAPI:
 
 
 def _load_config_payload(
-    config_text: Optional[str],
-    config_dict: Optional[Dict[str, Any]],
+    config_dict: Dict[str, Any],
     token: Optional[str] = None,
     options: Optional[Dict[str, Any]] = None,
 ) -> RestSourceConfig:
-    if config_dict is not None:
-        return parse_config(config_dict, token=token, options=options)
-    if config_text is None:
-        raise ConfigError("Configuration payload is missing")
-    return _parse_yaml(config_text, token=token, options=options)
-
-
-def _parse_yaml(
-    text: str,
-    token: Optional[str] = None,
-    options: Optional[Dict[str, Any]] = None,
-) -> RestSourceConfig:
-    try:
-        parsed = yaml.safe_load(text)
-    except yaml.YAMLError as exc:
-        raise ConfigError(f"Invalid YAML: {exc}") from exc
-    return parse_config(parsed, token=token, options=options)
+    return parse_config(config_dict, token=token, options=options)
 
 
 def _resolve_preview_token(
@@ -284,7 +224,7 @@ def _resolve_preview_token(
     """Fall back to a token embedded in the config's auth block, if any.
 
     The builder passes the token supplied by the UI separately from the
-    YAML/config_dict payload, but a config can also carry a token directly
+    config_dict payload, but a config can also carry a token directly
     in its auth block (e.g. round-tripped from a previously-saved config).
     """
     if not token and config.auth:
