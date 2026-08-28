@@ -184,6 +184,18 @@ def fetch_records():
         if not cursor:
             return
 {% endif %}
+{% elif pagination_type == "link_header" %}
+def fetch_records():
+    """Yield records, following RFC 5988 Link headers (rel=next)."""
+    session = requests.Session()
+    session.headers.update(HEADERS)
+    url, params = f"{BASE_URL}{PATH}", dict(PARAMS)
+    while url:
+        response = _request(session, url, params)
+        records = _records(response.json())
+        if records:
+            yield from records
+        url, params = response.links.get("next", {}).get("url"), None
 {% elif pagination_type == "none" %}
 def fetch_records():
     """Yield records from the API (single page)."""
