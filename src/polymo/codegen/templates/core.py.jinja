@@ -7,12 +7,37 @@ at runtime; edit this file freely.
 import time
 
 import requests
+{% if incremental_mode %}
+import json
+import os
+{% endif %}
 
 BASE_URL = "{{ base_url }}"
 PATH = "{{ path }}"
 PARAMS: dict = {{ params_repr }}
 HEADERS: dict = {{ headers_repr }}
 TIMEOUT = 30.0
+{% if incremental_mode %}
+
+# Where the incremental cursor is stored between runs. Point this at a
+# durable path (e.g. a Databricks Volume: /Volumes/cat/schema/vol/{{ stream_name }}.json).
+STATE_PATH = "{{ stream_name }}_state.json"
+LAST_CURSOR = {"value": None}
+
+
+def _read_state():
+    if not os.path.exists(STATE_PATH):
+        return {}
+    with open(STATE_PATH) as fh:
+        return json.load(fh)
+
+
+def _write_state(cursor):
+    if cursor is None:
+        return
+    with open(STATE_PATH, "w") as fh:
+        json.dump({"cursor": cursor}, fh)
+{% endif %}
 {% if auth_type == "bearer" %}
 
 # Fill in your token. For anything beyond local testing, fetch it from a
@@ -144,6 +169,9 @@ def fetch_records():
 {% elif auth_type == "bearer" %}
     session.headers["Authorization"] = f"Bearer {API_TOKEN}"
 {% endif %}
+{% if incremental_mode %}
+    state_cursor = _read_state().get("cursor")
+{% endif %}
     offset = {{ start_offset }}
     while True:
         params = dict(PARAMS)
@@ -151,11 +179,21 @@ def fetch_records():
         params["{{ limit_param }}"] = {{ page_size }}
 {% endif %}
         params["{{ offset_param }}"] = offset
+{% if incremental_mode %}
+        if state_cursor is not None:
+            params["{{ cursor_param_inc }}"] = state_cursor
+{% endif %}
         response = _request(session, f"{BASE_URL}{PATH}", params)
         records = _records(response.json())
         if not records:
             return
         yield from records
+{% if incremental_mode %}
+        for record in records:
+            value = record.get("{{ cursor_field }}")
+            if value is not None and (LAST_CURSOR["value"] is None or value > LAST_CURSOR["value"]):
+                LAST_CURSOR["value"] = value
+{% endif %}
         offset += {{ page_size if page_size else "len(records)" }}
 {% elif pagination_type == "page" %}
 def fetch_records():
@@ -167,6 +205,9 @@ def fetch_records():
 {% elif auth_type == "bearer" %}
     session.headers["Authorization"] = f"Bearer {API_TOKEN}"
 {% endif %}
+{% if incremental_mode %}
+    state_cursor = _read_state().get("cursor")
+{% endif %}
     page = {{ start_page }}
     while True:
         params = dict(PARAMS)
@@ -174,12 +215,22 @@ def fetch_records():
         params["{{ limit_param }}"] = {{ page_size }}
 {% endif %}
         params["{{ page_param }}"] = page
+{% if incremental_mode %}
+        if state_cursor is not None:
+            params["{{ cursor_param_inc }}"] = state_cursor
+{% endif %}
         response = _request(session, f"{BASE_URL}{PATH}", params)
         payload = response.json()
         records = _records(payload)
         if not records:
             return
         yield from records
+{% if incremental_mode %}
+        for record in records:
+            value = record.get("{{ cursor_field }}")
+            if value is not None and (LAST_CURSOR["value"] is None or value > LAST_CURSOR["value"]):
+                LAST_CURSOR["value"] = value
+{% endif %}
 {% if total_pages_path %}
         total = _dig(payload, {{ total_pages_path }})
         if total is not None and page >= int(total):
@@ -201,18 +252,34 @@ def fetch_records():
     session.headers["Authorization"] = f"Bearer {API_TOKEN}"
 {% endif %}
 {% if next_url_path %}
+{% if incremental_mode %}
+    state_cursor = _read_state().get("cursor")
+{% endif %}
     url, params = f"{BASE_URL}{PATH}", dict(PARAMS)
+{% if incremental_mode %}
+    if state_cursor is not None:
+        params["{{ cursor_param_inc }}"] = state_cursor
+{% endif %}
     while True:
         response = _request(session, url, params)
         payload = response.json()
         records = _records(payload)
         if records:
             yield from records
+{% if incremental_mode %}
+        for record in records:
+            value = record.get("{{ cursor_field }}")
+            if value is not None and (LAST_CURSOR["value"] is None or value > LAST_CURSOR["value"]):
+                LAST_CURSOR["value"] = value
+{% endif %}
         next_url = _dig(payload, {{ next_url_path }})
         if not next_url:
             return
         url, params = next_url, None
 {% else %}
+{% if incremental_mode %}
+    state_cursor = _read_state().get("cursor")
+{% endif %}
     cursor = {{ initial_cursor_repr }}
     while True:
         params = dict(PARAMS)
@@ -221,11 +288,21 @@ def fetch_records():
 {% endif %}
         if cursor is not None:
             params["{{ cursor_param }}"] = cursor
+{% if incremental_mode %}
+        if state_cursor is not None:
+            params["{{ cursor_param_inc }}"] = state_cursor
+{% endif %}
         response = _request(session, f"{BASE_URL}{PATH}", params)
         payload = response.json()
         records = _records(payload)
         if records:
             yield from records
+{% if incremental_mode %}
+        for record in records:
+            value = record.get("{{ cursor_field }}")
+            if value is not None and (LAST_CURSOR["value"] is None or value > LAST_CURSOR["value"]):
+                LAST_CURSOR["value"] = value
+{% endif %}
 {% if cursor_header %}
         cursor = response.headers.get("{{ cursor_header }}")
 {% elif cursor_path %}
@@ -246,12 +323,25 @@ def fetch_records():
 {% elif auth_type == "bearer" %}
     session.headers["Authorization"] = f"Bearer {API_TOKEN}"
 {% endif %}
+{% if incremental_mode %}
+    state_cursor = _read_state().get("cursor")
+{% endif %}
     url, params = f"{BASE_URL}{PATH}", dict(PARAMS)
+{% if incremental_mode %}
+    if state_cursor is not None:
+        params["{{ cursor_param_inc }}"] = state_cursor
+{% endif %}
     while url:
         response = _request(session, url, params)
         records = _records(response.json())
         if records:
             yield from records
+{% if incremental_mode %}
+        for record in records:
+            value = record.get("{{ cursor_field }}")
+            if value is not None and (LAST_CURSOR["value"] is None or value > LAST_CURSOR["value"]):
+                LAST_CURSOR["value"] = value
+{% endif %}
         url, params = response.links.get("next", {}).get("url"), None
 {% elif pagination_type == "none" %}
 def fetch_records():
@@ -263,6 +353,21 @@ def fetch_records():
 {% elif auth_type == "bearer" %}
     session.headers["Authorization"] = f"Bearer {API_TOKEN}"
 {% endif %}
+{% if incremental_mode %}
+    params = dict(PARAMS)
+    state_cursor = _read_state().get("cursor")
+    if state_cursor is not None:
+        params["{{ cursor_param_inc }}"] = state_cursor
+    response = _request(session, f"{BASE_URL}{PATH}", params)
+{% else %}
     response = _request(session, f"{BASE_URL}{PATH}", PARAMS)
-    yield from _records(response.json())
+{% endif %}
+    records = _records(response.json())
+    yield from records
+{% if incremental_mode %}
+    for record in records:
+        value = record.get("{{ cursor_field }}")
+        if value is not None and (LAST_CURSOR["value"] is None or value > LAST_CURSOR["value"]):
+            LAST_CURSOR["value"] = value
+{% endif %}
 {% endif %}

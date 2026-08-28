@@ -153,6 +153,9 @@ def _context(config: RestSourceConfig) -> Dict[str, Any]:
         "cursor_header": stream.pagination.cursor_header,
         "next_url_path": list(stream.pagination.next_url_path) or None,
         "initial_cursor_repr": repr(stream.pagination.initial_cursor),
+        "incremental_mode": stream.incremental.mode,
+        "cursor_param_inc": stream.incremental.cursor_param,
+        "cursor_field": stream.incremental.cursor_field,
     }
 
 

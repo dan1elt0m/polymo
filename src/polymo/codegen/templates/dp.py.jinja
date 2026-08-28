@@ -9,8 +9,12 @@ SCHEMA = {{ schema_ddl | tojson }}
 
 @dp.table(name="{{ stream_name }}")
 def {{ func_name }}():
+    rows = list(fetch_records())
+{% if incremental_mode %}
+    _write_state(LAST_CURSOR["value"])
+{% endif %}
 {% if schema_ddl %}
-    return spark.createDataFrame(list(fetch_records()), schema=SCHEMA)
+    return spark.createDataFrame(rows, schema=SCHEMA)
 {% else %}
-    return spark.createDataFrame(list(fetch_records()))
+    return spark.createDataFrame(rows)
 {% endif %}
