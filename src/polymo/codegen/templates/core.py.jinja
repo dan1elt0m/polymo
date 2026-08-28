@@ -395,3 +395,27 @@ def fetch_records(extra_params=None, path=None):
             LAST_CURSOR["value"] = value
 {% endif %}
 {% endif %}
+{% if streaming %}
+
+
+def fetch_page(page_index):
+    """Fetch one page by index; returns a list of records."""
+    session = requests.Session()
+    session.headers.update(HEADERS)
+{% if auth_type == "oauth2" %}
+    session.headers["Authorization"] = f"Bearer {get_token()}"
+{% elif auth_type == "bearer" %}
+    session.headers["Authorization"] = f"Bearer {API_TOKEN}"
+{% endif %}
+    params = dict(PARAMS)
+{% if limit_param and page_size %}
+    params["{{ limit_param }}"] = {{ page_size }}
+{% endif %}
+{% if pagination_type == "page" %}
+    params["{{ page_param }}"] = {{ start_page }} + page_index
+{% else %}
+    params["{{ offset_param }}"] = {{ start_offset }} + page_index * {{ page_size }}
+{% endif %}
+    response = _request(session, f"{BASE_URL}{PATH}", params)
+    return _records(response.json())
+{% endif %}

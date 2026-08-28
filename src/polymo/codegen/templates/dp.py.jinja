@@ -7,6 +7,45 @@ spark = SparkSession.getActiveSession()
 SCHEMA = {{ schema_ddl | tojson }}
 {% endif %}
 
+{% if streaming %}
+from pyspark.sql.datasource import DataSource, SimpleDataSourceStreamReader  # noqa: E402
+
+# Assumes SCHEMA is a comma-separated "name TYPE" DDL string (as emitted
+# above); column names are taken as the first whitespace-separated token.
+COLUMNS = [f.split()[0] for f in SCHEMA.split(",")]
+
+
+class _Reader(SimpleDataSourceStreamReader):
+    def initialOffset(self):
+        return {"page": 0}
+
+    def read(self, start):
+        page = start["page"]
+        records = fetch_page(page)
+        rows = [tuple(r.get(c) for c in COLUMNS) for r in records]
+        next_page = page + 1 if records else page
+        return iter(rows), {"page": next_page}
+
+
+class RestStreamSource(DataSource):
+    @classmethod
+    def name(cls):
+        return "{{ func_name }}_stream"
+
+    def schema(self):
+        return SCHEMA
+
+    def simpleStreamReader(self, schema):
+        return _Reader()
+
+
+spark.dataSource.register(RestStreamSource)
+
+
+@dp.table(name="{{ stream_name }}")
+def {{ func_name }}():
+    return spark.readStream.format("{{ func_name }}_stream").load()
+{% else %}
 {% if windows_repr %}
 @dp.table(name="{{ stream_name }}")
 def {{ func_name }}():
@@ -44,5 +83,6 @@ def {{ func_name }}():
     return spark.createDataFrame(rows, schema=SCHEMA)
 {% else %}
     return spark.createDataFrame(rows)
+{% endif %}
 {% endif %}
 {% endif %}

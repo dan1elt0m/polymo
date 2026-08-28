@@ -336,6 +336,7 @@ def _context(config: RestSourceConfig) -> Dict[str, Any]:
         "cursor_field": stream.incremental.cursor_field,
         "windows_repr": _py_literal(windows) if windows is not None else None,
         "partition_strategy": partition_strategy,
+        "streaming": stream.streaming,
     }
 
 
@@ -344,6 +345,13 @@ def generate_core(config: RestSourceConfig) -> str:
 
 
 def generate(config: RestSourceConfig) -> str:
+    stream = config.stream
+    if stream.streaming and (
+        not stream.schema or stream.pagination.type not in ("offset", "page")
+    ):
+        raise CodegenError(
+            "streaming requires a schema and pagination type 'offset' or 'page'"
+        )
     core = generate_core(config)
     dp_wiring = _ENV.get_template("dp.py.jinja").render(**_context(config))
     return core + "\n\n" + dp_wiring
