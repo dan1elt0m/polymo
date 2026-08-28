@@ -10,7 +10,7 @@ from typing import Any, Dict
 from jinja2 import Environment, PackageLoader, StrictUndefined
 
 from ..config import RestSourceConfig
-from ..rest_client import _render_template
+from ..rest_client import _PathFormatter, _render_template
 
 
 class CodegenError(Exception):
@@ -79,16 +79,32 @@ def _py_literal(value: Any) -> str:
 
 
 def _resolved(stream, options):
+    """Resolve templates and curly-brace path placeholders at generation time.
+
+    Mirrors `RestClient.fetch_pages` (rest_client.py) exactly, so a placeholder
+    like `/users/{user_id}/posts` with `params={"user_id": "42"}` substitutes
+    `user_id` into the path and drops it from the emitted params, instead of
+    leaving a literal `{user_id}` in PATH and a duplicate in PARAMS.
+    """
     ctx = {
         "options": dict(options or {}),
         "params": dict(stream.params or {}),
         "headers": dict(stream.headers or {}),
         "raw_params": dict(stream.params or {}),
     }
-    params = {k: _render_template(v, ctx) for k, v in (stream.params or {}).items()}
-    ctx["params"] = params
+    rendered_params = {
+        k: _render_template(v, ctx) for k, v in (stream.params or {}).items()
+    }
+    ctx["params"] = rendered_params
+
+    formatter = _PathFormatter(rendered_params)
+    rendered_path = _render_template(stream.path, ctx)
+    path = formatter.render(rendered_path)
+
+    params = {
+        k: _render_template(v, ctx) for k, v in formatter.remaining_params().items()
+    }
     headers = {k: _render_template(v, ctx) for k, v in (stream.headers or {}).items()}
-    path = _render_template(stream.path, ctx)
     return params, headers, path
 
 
