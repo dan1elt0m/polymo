@@ -63,6 +63,8 @@ def _records(payload):
     return records
 
 
+# Not used by the streaming reader below (which calls fetch_page directly);
+# kept for ad-hoc/batch runs and the builder preview.
 def fetch_records(extra_params=None, path=None):
     """Yield records, paginating with page."""
     url_path = path or PATH
@@ -118,6 +120,13 @@ class _Reader(SimpleDataSourceStreamReader):
         rows = [tuple(r.get(c) for c in COLUMNS) for r in records]
         next_page = page + 1 if records else page
         return iter(rows), {"page": next_page}
+
+    def readBetweenOffsets(self, start, end):
+        rows = []
+        for page in range(start["page"], end["page"]):
+            for r in fetch_page(page):
+                rows.append(tuple(r.get(c) for c in COLUMNS))
+        return iter(rows)
 
 
 class RestStreamSource(DataSource):

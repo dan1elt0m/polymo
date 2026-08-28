@@ -27,6 +27,13 @@ class _Reader(SimpleDataSourceStreamReader):
         next_page = page + 1 if records else page
         return iter(rows), {"page": next_page}
 
+    def readBetweenOffsets(self, start, end):
+        rows = []
+        for page in range(start["page"], end["page"]):
+            for r in fetch_page(page):
+                rows.append(tuple(r.get(c) for c in COLUMNS))
+        return iter(rows)
+
 
 class RestStreamSource(DataSource):
     @classmethod

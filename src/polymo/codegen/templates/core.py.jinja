@@ -170,6 +170,10 @@ def _records(payload):
     return records
 
 
+{% if streaming %}
+# Not used by the streaming reader below (which calls fetch_page directly);
+# kept for ad-hoc/batch runs and the builder preview.
+{% endif %}
 {% if pagination_type == "offset" %}
 def fetch_records(extra_params=None, path=None):
 {% if limit_param and page_size %}

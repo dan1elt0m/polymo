@@ -406,6 +406,10 @@ def generate(config: RestSourceConfig) -> str:
         and not stream.pagination.page_size
     ):
         raise CodegenError("streaming with offset pagination requires page_size")
+    if stream.streaming and stream.incremental.mode:
+        raise CodegenError("streaming does not support incremental state")
+    if stream.streaming and _static_windows(config):
+        raise CodegenError("streaming does not support partition strategies")
     core = generate_core(config)
     dp_wiring = _ENV.get_template("dp.py.jinja").render(**_context(config))
     return core + "\n\n" + dp_wiring
