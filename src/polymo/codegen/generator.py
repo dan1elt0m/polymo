@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast as _ast
 import re
 from typing import Any, Dict
 
@@ -30,6 +31,21 @@ def _identifier(name: str) -> str:
     return cleaned
 
 
+def _filter_expression(record_filter: str | None) -> str | None:
+    if not record_filter:
+        return None
+    expr = record_filter.strip()
+    if expr.startswith("{{") and expr.endswith("}}"):
+        expr = expr[2:-2].strip()
+    try:
+        _ast.parse(expr, mode="eval")
+    except SyntaxError as exc:
+        raise CodegenError(
+            f"record_filter is not a supported expression: {record_filter!r}"
+        ) from exc
+    return expr
+
+
 def _context(config: RestSourceConfig) -> Dict[str, Any]:
     stream = config.stream
     return {
@@ -39,6 +55,8 @@ def _context(config: RestSourceConfig) -> Dict[str, Any]:
         "headers_repr": repr(dict(stream.headers or {})),
         "stream_name": stream.name,
         "func_name": _identifier(stream.name),
+        "field_path": list(stream.record_selector.field_path) or None,
+        "record_filter_expr": _filter_expression(stream.record_selector.record_filter),
     }
 
 

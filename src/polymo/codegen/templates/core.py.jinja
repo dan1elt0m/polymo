@@ -20,6 +20,23 @@ TIMEOUT = 30.0
 
 def _records(payload):
     """Normalise a response payload to a list of dicts."""
+{% if field_path %}
+    current = [payload]
+    for segment in {{ field_path }}:
+        next_level = []
+        for item in current:
+            if segment == "*":
+                if isinstance(item, list):
+                    next_level.extend(item)
+                elif isinstance(item, dict):
+                    next_level.extend(item.values())
+            elif isinstance(item, dict) and segment in item:
+                next_level.append(item[segment])
+        current = next_level
+    records = []
+    for item in current:
+        records.extend(item if isinstance(item, list) else [item])
+{% else %}
     if isinstance(payload, list):
         records = payload
     elif isinstance(payload, dict):
@@ -30,7 +47,12 @@ def _records(payload):
                 break
     else:
         records = [payload]
-    return [r if isinstance(r, dict) else {"record": r} for r in records]
+{% endif %}
+    records = [r if isinstance(r, dict) else {"record": r} for r in records]
+{% if record_filter_expr %}
+    records = [record for record in records if ({{ record_filter_expr }})]
+{% endif %}
+    return records
 
 
 def fetch_records():
