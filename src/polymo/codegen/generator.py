@@ -46,8 +46,20 @@ def _filter_expression(record_filter: str | None) -> str | None:
     return expr
 
 
+def _retry_condition(retry_statuses) -> str:
+    checks = []
+    for spec in retry_statuses:
+        if spec.endswith("XX"):
+            base = int(spec[0]) * 100
+            checks.append(f"{base} <= status <= {base + 99}")
+        else:
+            checks.append(f"status == {int(spec)}")
+    return " or ".join(checks) or "False"
+
+
 def _context(config: RestSourceConfig) -> Dict[str, Any]:
     stream = config.stream
+    eh = stream.error_handler
     return {
         "base_url": config.base_url.rstrip("/"),
         "path": stream.path,
@@ -57,6 +69,13 @@ def _context(config: RestSourceConfig) -> Dict[str, Any]:
         "func_name": _identifier(stream.name),
         "field_path": list(stream.record_selector.field_path) or None,
         "record_filter_expr": _filter_expression(stream.record_selector.record_filter),
+        "max_retries": eh.max_retries,
+        "retry_condition": _retry_condition(eh.retry_statuses),
+        "initial_delay": eh.backoff.initial_delay_seconds,
+        "max_delay": eh.backoff.max_delay_seconds,
+        "multiplier": eh.backoff.multiplier,
+        "retry_on_timeout": eh.retry_on_timeout,
+        "retry_on_connection_errors": eh.retry_on_connection_errors,
     }
 
 

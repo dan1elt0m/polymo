@@ -4,6 +4,8 @@ Standalone Lakeflow Declarative Pipelines source. polymo is NOT needed
 at runtime; edit this file freely.
 """
 
+import time
+
 import requests
 
 BASE_URL = "{{ base_url }}"
@@ -16,6 +18,33 @@ TIMEOUT = 30.0
 # and uncomment the next two lines:
 # import truststore
 # truststore.inject_into_ssl()
+
+MAX_RETRIES = {{ max_retries }}
+
+
+def _should_retry(status):
+    return {{ retry_condition }}
+
+
+def _request(session, url, params):
+    """GET with retries: statuses ({{ retry_condition }}), backoff x{{ multiplier }}."""
+    delay = {{ initial_delay }}
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            response = session.get(url, params=params, timeout=TIMEOUT)
+        except requests.exceptions.Timeout:
+            if not {{ retry_on_timeout }} or attempt == MAX_RETRIES:
+                raise
+        except requests.exceptions.ConnectionError:
+            if not {{ retry_on_connection_errors }} or attempt == MAX_RETRIES:
+                raise
+        else:
+            if not _should_retry(response.status_code) or attempt == MAX_RETRIES:
+                response.raise_for_status()
+                return response
+        time.sleep(delay)
+        delay = min(delay * {{ multiplier }}, {{ max_delay }}) if {{ max_delay }} > 0 else delay * {{ multiplier }}
+    raise RuntimeError("unreachable")
 
 
 def _records(payload):
@@ -59,6 +88,5 @@ def fetch_records():
     """Yield records from the API, one page at a time."""
     session = requests.Session()
     session.headers.update(HEADERS)
-    response = session.get(f"{BASE_URL}{PATH}", params=PARAMS, timeout=TIMEOUT)
-    response.raise_for_status()
+    response = _request(session, f"{BASE_URL}{PATH}", PARAMS)
     yield from _records(response.json())
