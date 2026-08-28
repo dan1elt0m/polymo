@@ -300,9 +300,12 @@ def _collect_rest_preview(
 ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     resolved_token = _resolve_preview_token(config, token)
     try:
-        _, raw_pages = run_preview(config, token=resolved_token, limit=limit)
-        return raw_pages, None
+        _, raw_pages, error = run_preview(config, token=resolved_token, limit=limit)
+        return raw_pages, error
     except Exception as exc:
+        # Defensive: run_preview itself only surfaces fetch failures via its
+        # `error` return value; this guards against anything else going
+        # wrong before/around that (e.g. codegen failing).
         return [], str(exc)
 
 
@@ -312,7 +315,7 @@ def _collect_records(
     """Collect preview records (via the generated fetch code) and their dtypes."""
 
     resolved_token = _resolve_preview_token(config, token)
-    records, _ = run_preview(config, token=resolved_token, limit=limit)
+    records, _, _ = run_preview(config, token=resolved_token, limit=limit)
 
     if not records:
         return records, []
