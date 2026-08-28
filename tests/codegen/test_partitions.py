@@ -67,3 +67,10 @@ def test_endpoints_windows_incremental_schema_computes_cursor_on_driver():
     assert "_write_state(max(cursor_values) if cursor_values else None)" in dp_section
     assert 'LAST_CURSOR["value"]' not in dp_section
     assert "# records are not tagged with their source endpoint" in script
+
+    # LAST_CURSOR is dead module state for windowed configs: fetch_records
+    # runs on executors, so a module-level LAST_CURSOR mutated there is never
+    # read back by the driver (the dp table above computes the cursor from
+    # collected rows instead). It must not be declared or mutated anywhere in
+    # the generated script for a windowed+incremental config.
+    assert "LAST_CURSOR" not in script

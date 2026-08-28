@@ -24,7 +24,6 @@ WINDOWS = [{"path": "/a"}, {"path": "/b"}]
 # Where the incremental cursor is stored between runs. Point this at a
 # durable path (e.g. a Databricks Volume: /Volumes/cat/schema/vol/posts.json).
 STATE_PATH = "posts_state.json"
-LAST_CURSOR = {"value": None}
 
 
 def _read_state():
@@ -122,10 +121,6 @@ def fetch_records(extra_params=None, path=None):
     response = _request(session, f"{BASE_URL}{url_path}", params)
     records = _records(response.json())
     yield from records
-    for record in records:
-        value = record.get("updated")
-        if value is not None and (LAST_CURSOR["value"] is None or value > LAST_CURSOR["value"]):
-            LAST_CURSOR["value"] = value
 
 
 from pyspark import pipelines as dp  # noqa: E402
@@ -142,9 +137,10 @@ def posts():
     rows = sc.parallelize(WINDOWS, len(WINDOWS)).flatMap(
         lambda window: list(fetch_records(**window))
     ).collect()
-    # fetch_records runs on executors under parallelize/flatMap, so LAST_CURSOR
-    # mutations happen in worker processes and never reach the driver; compute
-    # the cursor here instead, from the rows collected back on the driver.
+    # fetch_records runs on executors under parallelize/flatMap, which don't
+    # share memory with the driver, so the cursor can't be tracked as
+    # in-process state; compute it here instead, from the rows collected
+    # back on the driver.
     cursor_values = [
         r.get("updated")
         for r in rows

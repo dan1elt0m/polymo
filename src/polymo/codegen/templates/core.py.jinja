@@ -31,7 +31,9 @@ WINDOWS = {{ windows_repr }}
 # Where the incremental cursor is stored between runs. Point this at a
 # durable path (e.g. a Databricks Volume: /Volumes/cat/schema/vol/{{ stream_name }}.json).
 STATE_PATH = "{{ stream_name }}_state.json"
+{% if not has_windows %}
 LAST_CURSOR = {"value": None}
+{% endif %}
 
 
 def _read_state():
@@ -204,7 +206,7 @@ def fetch_records(extra_params=None, path=None):
         if not records:
             return
         yield from records
-{% if incremental_mode %}
+{% if incremental_mode and not has_windows %}
         for record in records:
             value = record.get("{{ cursor_field }}")
             if value is not None and (LAST_CURSOR["value"] is None or value > LAST_CURSOR["value"]):
@@ -244,7 +246,7 @@ def fetch_records(extra_params=None, path=None):
         if not records:
             return
         yield from records
-{% if incremental_mode %}
+{% if incremental_mode and not has_windows %}
         for record in records:
             value = record.get("{{ cursor_field }}")
             if value is not None and (LAST_CURSOR["value"] is None or value > LAST_CURSOR["value"]):
@@ -288,7 +290,7 @@ def fetch_records(extra_params=None, path=None):
         records = _records(payload)
         if records:
             yield from records
-{% if incremental_mode %}
+{% if incremental_mode and not has_windows %}
         for record in records:
             value = record.get("{{ cursor_field }}")
             if value is not None and (LAST_CURSOR["value"] is None or value > LAST_CURSOR["value"]):
@@ -321,7 +323,7 @@ def fetch_records(extra_params=None, path=None):
         records = _records(payload)
         if records:
             yield from records
-{% if incremental_mode %}
+{% if incremental_mode and not has_windows %}
         for record in records:
             value = record.get("{{ cursor_field }}")
             if value is not None and (LAST_CURSOR["value"] is None or value > LAST_CURSOR["value"]):
@@ -363,7 +365,7 @@ def fetch_records(extra_params=None, path=None):
         records = _records(response.json())
         if records:
             yield from records
-{% if incremental_mode %}
+{% if incremental_mode and not has_windows %}
         for record in records:
             value = record.get("{{ cursor_field }}")
             if value is not None and (LAST_CURSOR["value"] is None or value > LAST_CURSOR["value"]):
@@ -392,7 +394,7 @@ def fetch_records(extra_params=None, path=None):
     response = _request(session, f"{BASE_URL}{url_path}", params)
     records = _records(response.json())
     yield from records
-{% if incremental_mode %}
+{% if incremental_mode and not has_windows %}
     for record in records:
         value = record.get("{{ cursor_field }}")
         if value is not None and (LAST_CURSOR["value"] is None or value > LAST_CURSOR["value"]):

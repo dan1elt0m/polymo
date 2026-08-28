@@ -335,6 +335,7 @@ def _context(config: RestSourceConfig) -> Dict[str, Any]:
         "cursor_param_inc": stream.incremental.cursor_param,
         "cursor_field": stream.incremental.cursor_field,
         "windows_repr": _py_literal(windows) if windows is not None else None,
+        "has_windows": bool(windows),
         "partition_strategy": partition_strategy,
         "streaming": stream.streaming,
     }
