@@ -61,6 +61,7 @@ def _context(config: RestSourceConfig) -> Dict[str, Any]:
     stream = config.stream
     eh = stream.error_handler
     return {
+        "auth_type": config.auth.type,
         "base_url": config.base_url.rstrip("/"),
         "path": stream.path,
         "params_repr": repr(dict(stream.params or {})),

@@ -13,6 +13,14 @@ PATH = "{{ path }}"
 PARAMS: dict = {{ params_repr }}
 HEADERS: dict = {{ headers_repr }}
 TIMEOUT = 30.0
+{% if auth_type == "bearer" %}
+
+# Fill in your token. For anything beyond local testing, fetch it from a
+# secret store instead of keeping it in this file, e.g.:
+#   API_TOKEN = dbutils.secrets.get("my-scope", "my-key")
+# or an Azure Key Vault / AWS Secrets Manager client.
+API_TOKEN = "REPLACE_ME"
+{% endif %}
 
 # Behind a corporate TLS-intercepting proxy? `pip install truststore`
 # and uncomment the next two lines:
@@ -102,6 +110,9 @@ def fetch_records():
     """Yield records, paginating with {{ offset_param }}/{{ limit_param }}."""
     session = requests.Session()
     session.headers.update(HEADERS)
+{% if auth_type in ("bearer", "oauth2") %}
+    session.headers["Authorization"] = f"Bearer {API_TOKEN}"
+{% endif %}
     offset = {{ start_offset }}
     while True:
         params = dict(PARAMS)
@@ -120,6 +131,9 @@ def fetch_records():
     """Yield records, paginating with {{ page_param }}."""
     session = requests.Session()
     session.headers.update(HEADERS)
+{% if auth_type in ("bearer", "oauth2") %}
+    session.headers["Authorization"] = f"Bearer {API_TOKEN}"
+{% endif %}
     page = {{ start_page }}
     while True:
         params = dict(PARAMS)
@@ -148,6 +162,9 @@ def fetch_records():
     """Yield records, following the response cursor."""
     session = requests.Session()
     session.headers.update(HEADERS)
+{% if auth_type in ("bearer", "oauth2") %}
+    session.headers["Authorization"] = f"Bearer {API_TOKEN}"
+{% endif %}
 {% if next_url_path %}
     url, params = f"{BASE_URL}{PATH}", dict(PARAMS)
     while True:
@@ -189,6 +206,9 @@ def fetch_records():
     """Yield records, following RFC 5988 Link headers (rel=next)."""
     session = requests.Session()
     session.headers.update(HEADERS)
+{% if auth_type in ("bearer", "oauth2") %}
+    session.headers["Authorization"] = f"Bearer {API_TOKEN}"
+{% endif %}
     url, params = f"{BASE_URL}{PATH}", dict(PARAMS)
     while url:
         response = _request(session, url, params)
@@ -201,6 +221,9 @@ def fetch_records():
     """Yield records from the API (single page)."""
     session = requests.Session()
     session.headers.update(HEADERS)
+{% if auth_type in ("bearer", "oauth2") %}
+    session.headers["Authorization"] = f"Bearer {API_TOKEN}"
+{% endif %}
     response = _request(session, f"{BASE_URL}{PATH}", PARAMS)
     yield from _records(response.json())
 {% endif %}

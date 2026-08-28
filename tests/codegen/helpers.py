@@ -47,9 +47,12 @@ def assert_hygiene(code: str) -> None:
     assert result.returncode == 0, result.stdout.decode() + result.stderr.decode()
 
 
-def run_generated(config: RestSourceConfig) -> SimpleNamespace:
+def run_generated(
+    config: RestSourceConfig, override_globals: dict[str, Any] | None = None
+) -> SimpleNamespace:
     code = generate_core(config)
     assert_hygiene(code)
     namespace: dict[str, Any] = {}
     exec(compile(code, "<generated>", "exec"), namespace)  # noqa: S102
+    namespace.update(override_globals or {})
     return SimpleNamespace(**namespace)
