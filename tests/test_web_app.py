@@ -95,3 +95,53 @@ def test_generate_rejects_invalid_config() -> None:
     response = client.post("/api/generate", json={"config_dict": {"version": "0.1"}})
 
     assert response.status_code == 400
+
+
+def test_sample_endpoint_executes_generated_code(http_server) -> None:
+    http_server.routes["/posts"] = lambda q, h, b: (200, [{"id": 1}, {"id": 2}], {})
+    app = create_app()
+    client = TestClient(app)
+
+    config_dict = {
+        "version": "0.1",
+        "source": {"type": "rest", "base_url": http_server.url},
+        "stream": {"name": "posts", "path": "/posts"},
+    }
+
+    response = client.post("/api/sample", json={"config_dict": config_dict, "limit": 5})
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload["stream"] == "posts"
+    assert payload["records"] == [{"id": 1}, {"id": 2}]
+    assert payload["rest_error"] is None
+    assert payload["raw_pages"][0]["status_code"] == 200
+    assert payload["raw_pages"][0]["url"].endswith("/posts")
+    assert payload["dtypes"]
+
+
+def test_sample_endpoint_reports_rest_error() -> None:
+    app = create_app()
+    client = TestClient(app)
+
+    config_dict = {
+        "version": "0.1",
+        "source": {"type": "rest", "base_url": "http://127.0.0.1:1"},
+        "stream": {
+            "name": "posts",
+            "path": "/posts",
+            "error_handler": {
+                "max_retries": 0,
+                "retry_on_connection_errors": False,
+                "retry_on_timeout": False,
+            },
+        },
+    }
+
+    response = client.post("/api/sample", json={"config_dict": config_dict, "limit": 5})
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload["records"] == []
+    assert payload["dtypes"] == []
+    assert payload["rest_error"]

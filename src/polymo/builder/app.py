@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from functools import partial
 from importlib import metadata, resources
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
@@ -23,8 +22,7 @@ from ..config import (
     dump_config,
     parse_config,
 )
-from ..datasource import _plan_partitions
-from ..rest_client import PaginationWindow, RestClient
+from .preview import run_preview
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from pyspark.sql import SparkSession
@@ -200,7 +198,7 @@ def create_app() -> FastAPI:
         stream_config = config.stream
 
         raw_pages, rest_error = await run_in_threadpool(
-            partial(_collect_rest_preview, config, payload.limit)
+            partial(_collect_rest_preview, config, payload.limit, payload.token)
         )
 
         if rest_error:
@@ -280,121 +278,77 @@ def _parse_yaml(
     return parse_config(parsed, token=token, options=options)
 
 
+def _resolve_preview_token(
+    config: RestSourceConfig, token: Optional[str]
+) -> Optional[str]:
+    """Fall back to a token embedded in the config's auth block, if any.
+
+    The builder passes the token supplied by the UI separately from the
+    YAML/config_dict payload, but a config can also carry a token directly
+    in its auth block (e.g. round-tripped from a previously-saved config).
+    """
+    if not token and config.auth:
+        if config.auth.type == "bearer" and config.auth.token:
+            return config.auth.token
+        if config.auth.type == "oauth2" and config.auth.client_secret:
+            return config.auth.client_secret
+    return token
+
+
 def _collect_rest_preview(
-    config: RestSourceConfig, limit: int
+    config: RestSourceConfig, limit: int, token: Optional[str] = None
 ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
-    pages: List[Dict[str, Any]] = []
-    total_records = 0
-
-    windows = _plan_partitions(config)
-    window_sequence: List[Optional[PaginationWindow]] = windows if windows else [None]
-
+    resolved_token = _resolve_preview_token(config, token)
     try:
-        with RestClient(
-            base_url=config.base_url, auth=config.auth, options=config.options
-        ) as client:
-            page_counter = 0
-            for window in window_sequence:
-                for page in client.fetch_pages(config.stream, window=window):
-                    remaining = max(0, limit - total_records)
-                    if remaining <= 0:
-                        break
-
-                    page_records = list(page.records)
-                    if remaining < len(page_records):
-                        page_records = page_records[:remaining]
-
-                    total_records += len(page_records)
-                    page_counter += 1
-
-                    entry = {
-                        "page": page_counter,
-                        "url": page.url,
-                        "status_code": page.status_code,
-                        "headers": dict(page.headers),
-                        "records": page_records,
-                        "payload": page.payload,
-                    }
-                    if window and window.endpoint_name:
-                        entry["endpoint"] = window.endpoint_name
-
-                    pages.append(entry)
-
-                    if total_records >= limit:
-                        break
-                if total_records >= limit:
-                    break
-        return pages, None
+        _, raw_pages = run_preview(config, token=resolved_token, limit=limit)
+        return raw_pages, None
     except Exception as exc:
-        return pages, str(exc)
+        return [], str(exc)
 
 
 def _collect_records(
     config: RestSourceConfig, token: str | None, limit: int
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
-    """Collect processed records and dtypes using PySpark DataSource."""
+    """Collect preview records (via the generated fetch code) and their dtypes."""
 
-    from ..config import config_to_dict
+    resolved_token = _resolve_preview_token(config, token)
+    records, _ = run_preview(config, token=resolved_token, limit=limit)
 
-    if config.auth and not token:
-        if config.auth.type == "bearer" and config.auth.token:
-            token = config.auth.token
-        if config.auth.type == "oauth2" and config.auth.client_secret:
-            token = config.auth.client_secret
-
-    config_dict = config_to_dict(config)
+    if not records:
+        return records, []
 
     spark = _get_or_create_spark()
     try:
         df = _get_preview_df(
-            config_dict=config_dict,
-            token=token,
-            spark=spark,
-            reader_options=config.options,
+            records=records, schema_ddl=config.stream.schema, spark=spark
         )
-        records = df.limit(limit).collect()
         dtypes = df.dtypes
-        record_dicts = [row.asDict(recursive=True) for row in records]
-        dtype_dicts: List[Dict[str, str]] = []
-        sample_row = record_dicts[0] if record_dicts else {}
-        for column, dtype in dtypes:
-            if sample_row and column in sample_row:
-                dtype_dicts.append({"column": column, "type": str(dtype)})
-        return record_dicts, dtype_dicts
+        sample_row = records[0]
+        dtype_dicts: List[Dict[str, str]] = [
+            {"column": column, "type": str(dtype)}
+            for column, dtype in dtypes
+            if column in sample_row
+        ]
+        return records, dtype_dicts
     finally:
         spark.stop()
 
 
 def _get_preview_df(
     *,
-    config_dict: ConfigDict,
-    token: Optional[str],
+    records: List[Dict[str, Any]],
+    schema_ddl: Optional[str],
     spark: "SparkSession",
-    reader_options: Dict[str, Any],
 ):
-    """Get a Spark DataFrame for previewing data from the specified stream."""
+    """Build a Spark DataFrame from already-fetched preview records.
 
-    from polymo import ApiReader
-
-    _get_or_create_spark()
-    spark.dataSource.register(ApiReader)
-    config_json = json.dumps(config_dict, sort_keys=True)
-    options: Dict[str, str] = {"config_json": config_json}
-
-    if token is not None:
-        options["token"] = token
-
-    if source := config_dict.get("source", {}):
-        if auth := source.get("auth"):
-            if auth.get("type") == "oauth2":
-                options["oauth_client_secret"] = token
-
-    for key, value in reader_options.items():
-        if key in {"config_path", "token"}:
-            continue
-        options[key] = value
-
-    return spark.read.format("polymo").options(**options).load()
+    Used only to infer/validate column dtypes for the builder UI; the
+    records themselves are already known (fetched by `run_preview`), so no
+    additional network access happens here.
+    """
+    if schema_ddl:
+        return spark.createDataFrame(records, schema=schema_ddl)
+    return spark.createDataFrame(records)
 
 
 def _get_or_create_spark() -> Any:
