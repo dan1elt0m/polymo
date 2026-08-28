@@ -77,6 +77,7 @@ export interface StreamConfig {
   record_selector: RecordSelectorConfig;
   error_handler?: ErrorHandlerConfig;
   partition?: PartitionConfig;
+  streaming?: boolean;
 }
 
 export interface SourceConfig {
@@ -143,6 +144,7 @@ export interface ConfigFormState {
   authAudience?: string;
   authExtraParams?: string;
   streamPath: string;
+  streaming: boolean;
   params: Record<string, string>;
   paginationType: 'none' | 'link_header' | 'offset' | 'cursor' | 'page';
   // Added pagination input fields used by the Builder UI (not yet serialized to backend config)

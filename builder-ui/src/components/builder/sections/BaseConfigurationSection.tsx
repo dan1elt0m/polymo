@@ -39,6 +39,20 @@ export const BaseConfigurationSection: React.FC<BaseConfigurationSectionProps> =
           data-testid="stream-path-input"
         />
       </label>
+
+      <label className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          className="h-4 w-4 rounded border-border text-blue-7 focus:ring-blue-5"
+          checked={state.streaming}
+          onChange={(e) => onUpdateState({ streaming: e.target.checked })}
+          data-testid="streaming-toggle"
+        />
+        <span className="text-sm font-medium text-slate-11 flex items-center gap-1">
+          Streaming table
+          <InfoTooltip text="Reads records as a Spark Structured Streaming source instead of a batch read. Requires an explicit schema and offset or page pagination; not compatible with incremental state or partition strategies." />
+        </span>
+      </label>
     </div>
   );
 };

@@ -373,6 +373,7 @@ export function formStateToConfig(formState: ConfigFormState): RestSourceConfig 
       },
       infer_schema: formState.inferSchema,
       schema: formState.schema || null,
+      streaming: formState.streaming,
       record_selector: {
         field_path: fieldPathSegments,
         record_filter: recordFilter ? recordFilter : null,
@@ -504,6 +505,7 @@ export function configToFormState(config: RestSourceConfig): ConfigFormState {
     authAudience,
     authExtraParams,
     streamPath,
+    streaming: Boolean(config.stream.streaming),
     params: stringParams,
     headers: stringHeaders,
     paginationType: config.stream.pagination?.type || 'none',
