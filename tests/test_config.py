@@ -8,6 +8,7 @@ from polymo.config import (
     config_to_dict,
     dump_config,
     load_config,
+    parse_config,
 )
 from polymo.pydantic_config import (
     PaginationModel,
@@ -366,3 +367,53 @@ stream:
     assert partition.range_end is None
     assert partition.range_step is None
     assert partition.range_kind is None
+
+
+def test_streaming_flag_defaults_false(tmp_path: Path) -> None:
+    config_path = write_config(
+        tmp_path,
+        """
+version: 0.1
+source:
+  type: rest
+  base_url: https://api.test
+stream:
+  path: /objects
+""".strip(),
+    )
+
+    config = load_config(config_path)
+
+    assert config.stream.streaming is False
+    assert config_to_dict(config)["stream"]["streaming"] is False
+
+
+def test_streaming_flag_round_trip(tmp_path: Path) -> None:
+    config_path = write_config(
+        tmp_path,
+        """
+version: 0.1
+source:
+  type: rest
+  base_url: https://api.test
+stream:
+  path: /objects
+  schema: "id BIGINT"
+  streaming: true
+  pagination:
+    type: page
+    page_param: page
+    page_size: 10
+""".strip(),
+    )
+
+    config = load_config(config_path)
+
+    assert config.stream.streaming is True
+
+    config_dict = config_to_dict(config)
+    assert config_dict["stream"]["streaming"] is True
+
+    # Round-trip through parse_config (as /api/generate does with config_dict payloads).
+    reparsed = parse_config(config_dict)
+    assert reparsed.stream.streaming is True
