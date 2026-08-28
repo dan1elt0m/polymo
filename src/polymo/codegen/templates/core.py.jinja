@@ -42,8 +42,8 @@ def get_token():
 {% if audience %}
         "audience": "{{ audience }}",
 {% endif %}
-{% for key, value in oauth_extra.items() %}
-        "{{ key }}": {{ value | tojson }},
+{% for key, value_repr in oauth_extra_items %}
+        "{{ key }}": {{ value_repr }},
 {% endfor %}
     }
     response = requests.post(TOKEN_URL, data=payload, timeout=TIMEOUT)

@@ -93,3 +93,22 @@ def test_oauth2_hygiene():
         ),
     )
     assert_hygiene(generate_core(config))
+
+
+def test_oauth2_extra_params_render_as_python_literals():
+    config = make_config(
+        base_url="https://x",
+        auth=AuthConfig(
+            type="oauth2",
+            token_url="https://x/token",
+            client_id="cid",
+            extra_params={
+                "include_refresh": True,
+                "audience_hint": None,
+                "version": 2,
+            },
+        ),
+    )
+    core = generate_core(config)
+    assert_hygiene(core)
+    assert '"include_refresh": True,' in core

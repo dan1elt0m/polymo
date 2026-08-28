@@ -69,7 +69,7 @@ def _context(config: RestSourceConfig) -> Dict[str, Any]:
         "client_id": auth.client_id,
         "scope": " ".join(auth.scope),
         "audience": auth.audience,
-        "oauth_extra": dict(auth.extra_params),
+        "oauth_extra_items": [(k, repr(v)) for k, v in auth.extra_params.items()],
         "base_url": config.base_url.rstrip("/"),
         "path": stream.path,
         "params_repr": repr(dict(stream.params or {})),
