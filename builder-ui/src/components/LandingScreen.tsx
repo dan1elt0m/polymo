@@ -1,5 +1,4 @@
 import React from "react";
-import yaml from "js-yaml";
 import type { RestSourceConfig } from "../types";
 
 const EXAMPLE_CONNECTORS = [
@@ -62,59 +61,24 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
     fileInputRef.current?.click();
   };
 
-  const importConfig = React.useCallback(
-    (config: RestSourceConfig, yamlText: string, suggestedName?: string) => {
-      onImportConfig(config, yamlText, suggestedName ? { suggestedName } : undefined);
-    },
-    [onImportConfig],
-  );
-
+  // NOTE: YAML import (file upload + starter examples) is stubbed out here.
+  // It previously parsed YAML client-side via js-yaml, which has been removed
+  // from the builder now that the app no longer sends or parses YAML on the
+  // client. The full YAML-import affordance is being redesigned/removed in a
+  // follow-up task; until then these actions surface a clear message instead
+  // of silently failing.
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    setError(null);
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    setIsUploading(true);
-    try {
-      const content = await file.text();
-      try {
-        const parsed = yaml.load(content) as RestSourceConfig;
-        if (!parsed || typeof parsed !== "object") {
-          throw new Error("Invalid YAML structure");
-        }
-        importConfig(parsed, content, file.name.replace(/\.[^.]+$/, ""));
-      } catch (err) {
-        setError(`Could not parse YAML file: ${err instanceof Error ? err.message : "Unknown error"}`);
-      }
-    } catch (err) {
-      setError(`Could not read file: ${err instanceof Error ? err.message : "Unknown error"}`);
-    } finally {
-      setIsUploading(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
+    setError("Importing a YAML file is temporarily unavailable. Start from scratch or from an example instead.");
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
     }
+    void event;
   };
 
-  const handleLoadExample = async (path: string, name: string) => {
-    setError(null);
-    setIsUploading(true);
-    try {
-      const response = await fetch(path);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch example: ${response.statusText}`);
-      }
-      const content = await response.text();
-      const parsed = yaml.load(content) as RestSourceConfig;
-      if (!parsed || typeof parsed !== "object") {
-        throw new Error("Invalid YAML structure");
-      }
-      importConfig(parsed, content, name);
-    } catch (err) {
-      setError(`Could not load example: ${err instanceof Error ? err.message : "Unknown error"}`);
-    } finally {
-      setIsUploading(false);
-    }
+  const handleLoadExample = async (_path: string, _name: string) => {
+    setError("Loading example connectors is temporarily unavailable. Start from scratch instead.");
+    void _path;
+    void _name;
   };
 
   return (

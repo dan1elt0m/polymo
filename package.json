@@ -22,7 +22,6 @@
 		"@tanstack/react-table": "^8.11.8",
 		"clsx": "^2.1.1",
 		"jotai": "^2.7.1",
-		"js-yaml": "^4.1.0",
 		"msw": "^2.5.0",
 		"prismjs": "^1.29.0",
 		"react": "^18.3.1",
@@ -31,7 +30,6 @@
 	"devDependencies": {
 		"@biomejs/biome": "^1.7.0",
 		"@playwright/test": "^1.45.0",
-		"@types/js-yaml": "^4.0.9",
 		"@types/node": "^20.11.30",
 		"@types/react": "^18.3.3",
 		"@types/react-dom": "^18.3.0",

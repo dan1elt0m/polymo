@@ -108,6 +108,12 @@ export interface ValidationResponse {
 
 // Payload aliases used by api.ts
 export type ValidationPayload = ValidationResponse;
+
+export interface GenerateResponse {
+  script: string;
+  stream: string;
+}
+
 export interface SamplePayload {
   stream: string;
   records: Record<string, any>[];
@@ -197,7 +203,7 @@ export interface SavedConnector {
   formState: ConfigFormState;
   yaml: string;
   lastEdited: 'ui' | 'yaml';
-  builderView: 'ui' | 'yaml';
+  builderView: 'ui' | 'code';
   readerOptions: Record<string, string>;
 }
 
