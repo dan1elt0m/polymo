@@ -3,7 +3,14 @@ from pyspark.sql import SparkSession  # noqa: E402
 
 spark = SparkSession.getActiveSession()
 
+{% if schema_ddl %}
+SCHEMA = {{ schema_ddl | tojson }}
+{% endif %}
 
 @dp.table(name="{{ stream_name }}")
 def {{ func_name }}():
+{% if schema_ddl %}
+    return spark.createDataFrame(list(fetch_records()), schema=SCHEMA)
+{% else %}
     return spark.createDataFrame(list(fetch_records()))
+{% endif %}
