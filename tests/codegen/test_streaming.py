@@ -29,3 +29,30 @@ def test_streaming_script_structure():
     assert "spark.dataSource.register(RestStreamSource)" in script
     assert "spark.readStream" in script
     assert_hygiene(script)
+
+
+def test_streaming_offset_pagination_requires_page_size():
+    config = make_config(
+        base_url="https://x",
+        streaming=True,
+        schema="id BIGINT",
+        pagination=PaginationConfig(type="offset", offset_param="offset"),
+    )
+    with pytest.raises(CodegenError):
+        generate(config)
+
+
+def test_streaming_offset_pagination_with_page_size_script_structure():
+    config = make_config(
+        base_url="https://x",
+        streaming=True,
+        schema="id BIGINT",
+        pagination=PaginationConfig(
+            type="offset", offset_param="offset", page_size=100
+        ),
+    )
+    script = generate(config)
+    ast.parse(script)
+    assert "class RestStreamSource" in script
+    assert "page_index * 100" in script
+    assert_hygiene(script)

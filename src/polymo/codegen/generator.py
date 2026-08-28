@@ -352,6 +352,12 @@ def generate(config: RestSourceConfig) -> str:
         raise CodegenError(
             "streaming requires a schema and pagination type 'offset' or 'page'"
         )
+    if (
+        stream.streaming
+        and stream.pagination.type == "offset"
+        and not stream.pagination.page_size
+    ):
+        raise CodegenError("streaming with offset pagination requires page_size")
     core = generate_core(config)
     dp_wiring = _ENV.get_template("dp.py.jinja").render(**_context(config))
     return core + "\n\n" + dp_wiring
