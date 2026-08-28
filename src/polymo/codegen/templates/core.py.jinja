@@ -17,6 +17,12 @@ PATH = "{{ path }}"
 PARAMS: dict = {{ params_repr }}
 HEADERS: dict = {{ headers_repr }}
 TIMEOUT = 30.0
+{% if windows_repr %}
+
+# One entry per partition; each is fetched independently (parallelized
+# across executors in the dp table below).
+WINDOWS = {{ windows_repr }}
+{% endif %}
 {% if incremental_mode %}
 
 # Where the incremental cursor is stored between runs. Point this at a
@@ -160,8 +166,9 @@ def _records(payload):
 
 
 {% if pagination_type == "offset" %}
-def fetch_records():
+def fetch_records(extra_params=None, path=None):
     """Yield records, paginating with {{ offset_param }}/{{ limit_param }}."""
+    url_path = path or PATH
     session = requests.Session()
     session.headers.update(HEADERS)
 {% if auth_type == "oauth2" %}
@@ -175,6 +182,8 @@ def fetch_records():
     offset = {{ start_offset }}
     while True:
         params = dict(PARAMS)
+        if extra_params:
+            params.update(extra_params)
 {% if limit_param and page_size %}
         params["{{ limit_param }}"] = {{ page_size }}
 {% endif %}
@@ -183,7 +192,7 @@ def fetch_records():
         if state_cursor is not None:
             params["{{ cursor_param_inc }}"] = state_cursor
 {% endif %}
-        response = _request(session, f"{BASE_URL}{PATH}", params)
+        response = _request(session, f"{BASE_URL}{url_path}", params)
         records = _records(response.json())
         if not records:
             return
@@ -196,8 +205,9 @@ def fetch_records():
 {% endif %}
         offset += {{ page_size if page_size else "len(records)" }}
 {% elif pagination_type == "page" %}
-def fetch_records():
+def fetch_records(extra_params=None, path=None):
     """Yield records, paginating with {{ page_param }}."""
+    url_path = path or PATH
     session = requests.Session()
     session.headers.update(HEADERS)
 {% if auth_type == "oauth2" %}
@@ -211,6 +221,8 @@ def fetch_records():
     page = {{ start_page }}
     while True:
         params = dict(PARAMS)
+        if extra_params:
+            params.update(extra_params)
 {% if limit_param and page_size %}
         params["{{ limit_param }}"] = {{ page_size }}
 {% endif %}
@@ -219,7 +231,7 @@ def fetch_records():
         if state_cursor is not None:
             params["{{ cursor_param_inc }}"] = state_cursor
 {% endif %}
-        response = _request(session, f"{BASE_URL}{PATH}", params)
+        response = _request(session, f"{BASE_URL}{url_path}", params)
         payload = response.json()
         records = _records(payload)
         if not records:
@@ -242,8 +254,9 @@ def fetch_records():
 {% endif %}
         page += 1
 {% elif pagination_type == "cursor" %}
-def fetch_records():
+def fetch_records(extra_params=None, path=None):
     """Yield records, following the response cursor."""
+    url_path = path or PATH
     session = requests.Session()
     session.headers.update(HEADERS)
 {% if auth_type == "oauth2" %}
@@ -255,7 +268,9 @@ def fetch_records():
 {% if incremental_mode %}
     state_cursor = _read_state().get("cursor")
 {% endif %}
-    url, params = f"{BASE_URL}{PATH}", dict(PARAMS)
+    url, params = f"{BASE_URL}{url_path}", dict(PARAMS)
+    if extra_params:
+        params.update(extra_params)
 {% if incremental_mode %}
     if state_cursor is not None:
         params["{{ cursor_param_inc }}"] = state_cursor
@@ -283,6 +298,8 @@ def fetch_records():
     cursor = {{ initial_cursor_repr }}
     while True:
         params = dict(PARAMS)
+        if extra_params:
+            params.update(extra_params)
 {% if limit_param and page_size %}
         params["{{ limit_param }}"] = {{ page_size }}
 {% endif %}
@@ -292,7 +309,7 @@ def fetch_records():
         if state_cursor is not None:
             params["{{ cursor_param_inc }}"] = state_cursor
 {% endif %}
-        response = _request(session, f"{BASE_URL}{PATH}", params)
+        response = _request(session, f"{BASE_URL}{url_path}", params)
         payload = response.json()
         records = _records(payload)
         if records:
@@ -314,8 +331,9 @@ def fetch_records():
             return
 {% endif %}
 {% elif pagination_type == "link_header" %}
-def fetch_records():
+def fetch_records(extra_params=None, path=None):
     """Yield records, following RFC 5988 Link headers (rel=next)."""
+    url_path = path or PATH
     session = requests.Session()
     session.headers.update(HEADERS)
 {% if auth_type == "oauth2" %}
@@ -326,7 +344,9 @@ def fetch_records():
 {% if incremental_mode %}
     state_cursor = _read_state().get("cursor")
 {% endif %}
-    url, params = f"{BASE_URL}{PATH}", dict(PARAMS)
+    url, params = f"{BASE_URL}{url_path}", dict(PARAMS)
+    if extra_params:
+        params.update(extra_params)
 {% if incremental_mode %}
     if state_cursor is not None:
         params["{{ cursor_param_inc }}"] = state_cursor
@@ -344,8 +364,9 @@ def fetch_records():
 {% endif %}
         url, params = response.links.get("next", {}).get("url"), None
 {% elif pagination_type == "none" %}
-def fetch_records():
+def fetch_records(extra_params=None, path=None):
     """Yield records from the API (single page)."""
+    url_path = path or PATH
     session = requests.Session()
     session.headers.update(HEADERS)
 {% if auth_type == "oauth2" %}
@@ -353,15 +374,15 @@ def fetch_records():
 {% elif auth_type == "bearer" %}
     session.headers["Authorization"] = f"Bearer {API_TOKEN}"
 {% endif %}
-{% if incremental_mode %}
     params = dict(PARAMS)
+    if extra_params:
+        params.update(extra_params)
+{% if incremental_mode %}
     state_cursor = _read_state().get("cursor")
     if state_cursor is not None:
         params["{{ cursor_param_inc }}"] = state_cursor
-    response = _request(session, f"{BASE_URL}{PATH}", params)
-{% else %}
-    response = _request(session, f"{BASE_URL}{PATH}", PARAMS)
 {% endif %}
+    response = _request(session, f"{BASE_URL}{url_path}", params)
     records = _records(response.json())
     yield from records
 {% if incremental_mode %}

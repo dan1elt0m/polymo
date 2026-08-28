@@ -5,11 +5,12 @@ from __future__ import annotations
 import ast as _ast
 import json
 import re
-from typing import Any, Dict
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Mapping, Optional
 
 from jinja2 import Environment, PackageLoader, StrictUndefined
 
-from ..config import RestSourceConfig
+from ..config import PartitionConfig, RestSourceConfig
 from ..rest_client import _PathFormatter, _render_template
 
 
@@ -78,6 +79,181 @@ def _py_literal(value: Any) -> str:
     return repr(value)
 
 
+def _parse_partition_values(raw: Any) -> List[str]:
+    """Mirrors `_parse_partition_values` in `datasource.py`."""
+    if raw is None:
+        return []
+    if isinstance(raw, (list, tuple)):
+        return [str(item) for item in raw]
+
+    text = str(raw).strip()
+    if not text:
+        return []
+
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return [chunk.strip() for chunk in text.split(",") if chunk.strip()]
+
+    if isinstance(parsed, list):
+        return [str(item) for item in parsed]
+    if isinstance(parsed, (str, int, float)):
+        return [str(parsed)]
+    return []
+
+
+def _generate_range_values(partition: PartitionConfig) -> List[str]:
+    """Mirrors `_generate_range_values_from_config` in `datasource.py`."""
+    start_raw = partition.range_start
+    end_raw = partition.range_end
+    if start_raw is None or end_raw is None:
+        return []
+
+    kind = partition.range_kind or "numeric"
+    step_raw = partition.range_step
+
+    if kind in {"numeric", "number", "int", "integer"} or kind is None:
+        try:
+            start = int(str(start_raw))
+            end = int(str(end_raw))
+            step = int(str(step_raw)) if step_raw is not None else 1
+        except (ValueError, TypeError) as exc:
+            raise CodegenError(
+                "Range values must be valid integers for numeric ranges"
+            ) from exc
+
+        if step <= 0:
+            raise CodegenError("range_step must be greater than 0 for numeric ranges")
+
+        values: List[str] = []
+        if start <= end:
+            current = start
+            while current <= end:
+                values.append(str(current))
+                current += step
+        else:
+            current = start
+            while current >= end:
+                values.append(str(current))
+                current -= step
+        return values
+
+    if kind == "date":
+        try:
+            start_date = datetime.fromisoformat(str(start_raw)).date()
+            end_date = datetime.fromisoformat(str(end_raw)).date()
+            step_days = int(str(step_raw)) if step_raw is not None else 1
+        except (ValueError, TypeError) as exc:
+            raise CodegenError(
+                "Range values must be valid ISO dates for date ranges"
+            ) from exc
+
+        if step_days <= 0:
+            raise CodegenError("range_step must be greater than 0 for date ranges")
+
+        delta = timedelta(days=step_days)
+        values = []
+        if start_date <= end_date:
+            current = start_date
+            while current <= end_date:
+                values.append(current.isoformat())
+                current += delta
+        else:
+            current = start_date
+            while current >= end_date:
+                values.append(current.isoformat())
+                current -= delta
+        return values
+
+    raise CodegenError(
+        "range_kind must be 'numeric' or 'date' when using partition_strategy='param_range'"
+    )
+
+
+def _apply_value_template(value: str, template: Optional[str]) -> str:
+    if not template:
+        return value
+    return template.replace("{{value}}", value)
+
+
+def _render_extra_params(template: str, value: str) -> Dict[str, Any]:
+    rendered = template.replace("{{value}}", value)
+    try:
+        payload = json.loads(rendered)
+    except json.JSONDecodeError as exc:
+        raise CodegenError("partition_extra_template must be valid JSON") from exc
+    if not isinstance(payload, Mapping):
+        raise CodegenError("partition_extra_template must resolve to a JSON object")
+    return {str(key): str(payload[key]) for key in payload}
+
+
+def _static_param_range_windows(partition: PartitionConfig) -> List[Dict[str, Any]]:
+    """Mirrors `_plan_param_range_partitions` in `datasource.py`."""
+    if not partition.param:
+        raise CodegenError(
+            "partition_strategy='param_range' requires 'param' to be set"
+        )
+    param = partition.param
+
+    values = _parse_partition_values(partition.values)
+    if not values:
+        values = _generate_range_values(partition)
+
+    if not values:
+        raise CodegenError(
+            "partition_strategy='param_range' requires either 'values' or range configuration"
+        )
+
+    template_str = partition.value_template
+    extra_template_str = partition.extra_template
+
+    windows: List[Dict[str, Any]] = []
+    for value in values:
+        formatted = _apply_value_template(value, template_str)
+        extra_params: Dict[str, Any] = {param: formatted}
+        if extra_template_str:
+            extra_params.update(_render_extra_params(extra_template_str, formatted))
+        windows.append({"extra_params": extra_params})
+
+    return windows
+
+
+def _static_endpoint_windows(partition: PartitionConfig) -> List[Dict[str, Any]]:
+    """Mirrors `_plan_endpoint_partitions` in `datasource.py`."""
+    if not partition.endpoints:
+        raise CodegenError(
+            "partition_strategy='endpoints' requires 'endpoints' to be defined"
+        )
+
+    windows: List[Dict[str, Any]] = []
+    for endpoint in partition.endpoints:
+        if ":" in endpoint:
+            _, path = endpoint.split(":", 1)
+            windows.append({"path": path.strip()})
+        else:
+            windows.append({"path": endpoint})
+
+    return windows
+
+
+def _static_windows(config: RestSourceConfig) -> Optional[List[Dict[str, Any]]]:
+    """Expand the partition config into a literal WINDOWS list at generation time.
+
+    Mirrors `_plan_partitions` (and the strategy-specific helpers it calls) in
+    `datasource.py`. Returns `None` when windows cannot be known statically:
+    strategy "none" (no partitioning) or "pagination" (windows depend on a
+    live probe of the API, so they can't be pre-computed at generation time).
+    """
+    partition = config.stream.partition
+    strategy = partition.strategy if partition else "none"
+
+    if strategy == "param_range":
+        return _static_param_range_windows(partition)
+    if strategy == "endpoints":
+        return _static_endpoint_windows(partition)
+    return None
+
+
 def _resolved(stream, options):
     """Resolve templates and curly-brace path placeholders at generation time.
 
@@ -115,6 +291,8 @@ def _context(config: RestSourceConfig) -> Dict[str, Any]:
     if auth.type == "oauth2" and (not auth.token_url or not auth.client_id):
         raise CodegenError("oauth2 requires token_url and client_id")
     params, headers, path = _resolved(stream, config.options)
+    windows = _static_windows(config)
+    partition_strategy = stream.partition.strategy if stream.partition else "none"
     return {
         "auth_type": auth.type,
         "token_url": auth.token_url,
@@ -156,6 +334,8 @@ def _context(config: RestSourceConfig) -> Dict[str, Any]:
         "incremental_mode": stream.incremental.mode,
         "cursor_param_inc": stream.incremental.cursor_param,
         "cursor_field": stream.incremental.cursor_field,
+        "windows_repr": _py_literal(windows) if windows is not None else None,
+        "partition_strategy": partition_strategy,
     }
 
 

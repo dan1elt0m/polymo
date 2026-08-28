@@ -244,6 +244,7 @@ class StreamConfig:
     record_selector: RecordSelectorConfig = field(default_factory=RecordSelectorConfig)
     error_handler: ErrorHandlerConfig = field(default_factory=ErrorHandlerConfig)
     partition: PartitionConfig = field(default_factory=PartitionConfig)
+    streaming: bool = False
 
 
 @dataclass(frozen=True)

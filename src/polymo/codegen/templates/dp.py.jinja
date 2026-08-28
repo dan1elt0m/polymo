@@ -7,6 +7,25 @@ spark = SparkSession.getActiveSession()
 SCHEMA = {{ schema_ddl | tojson }}
 {% endif %}
 
+{% if windows_repr %}
+@dp.table(name="{{ stream_name }}")
+def {{ func_name }}():
+    sc = spark.sparkContext
+    rows = sc.parallelize(WINDOWS, len(WINDOWS)).flatMap(
+        lambda window: list(fetch_records(**window))
+    ).collect()
+{% if incremental_mode %}
+    _write_state(LAST_CURSOR["value"])
+{% endif %}
+{% if schema_ddl %}
+    return spark.createDataFrame(rows, schema=SCHEMA)
+{% else %}
+    return spark.createDataFrame(rows)
+{% endif %}
+{% else %}
+{% if partition_strategy == "pagination" %}
+# partition strategy "pagination" runs sequentially in generated scripts
+{% endif %}
 @dp.table(name="{{ stream_name }}")
 def {{ func_name }}():
     rows = list(fetch_records())
@@ -17,4 +36,5 @@ def {{ func_name }}():
     return spark.createDataFrame(rows, schema=SCHEMA)
 {% else %}
     return spark.createDataFrame(rows)
+{% endif %}
 {% endif %}
