@@ -1,0 +1,9 @@
+from pyspark import pipelines as dp  # noqa: E402
+from pyspark.sql import SparkSession  # noqa: E402
+
+spark = SparkSession.getActiveSession()
+
+
+@dp.table(name="{{ stream_name }}")
+def {{ func_name }}():
+    return spark.createDataFrame(list(fetch_records()))

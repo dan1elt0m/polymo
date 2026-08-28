@@ -1,0 +1,55 @@
+from __future__ import annotations
+
+import ast
+import subprocess
+import sys
+from types import SimpleNamespace
+from typing import Any
+
+from polymo.codegen import generate_core
+from polymo.config import AuthConfig, RestSourceConfig, StreamConfig
+
+
+def make_config(
+    *,
+    base_url: str,
+    auth: AuthConfig | None = None,
+    options: dict[str, Any] | None = None,
+    **stream_kwargs: Any,
+) -> RestSourceConfig:
+    stream_kwargs.setdefault("name", "posts")
+    stream_kwargs.setdefault("path", "/posts")
+    return RestSourceConfig(
+        version="0.1",
+        base_url=base_url,
+        auth=auth or AuthConfig(),
+        stream=StreamConfig(**stream_kwargs),
+        options=options or {},
+    )
+
+
+def assert_hygiene(code: str) -> None:
+    ast.parse(code)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "ruff",
+            "check",
+            "--no-cache",
+            "--stdin-filename",
+            "gen.py",
+            "-",
+        ],
+        input=code.encode(),
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stdout.decode() + result.stderr.decode()
+
+
+def run_generated(config: RestSourceConfig) -> SimpleNamespace:
+    code = generate_core(config)
+    assert_hygiene(code)
+    namespace: dict[str, Any] = {}
+    exec(compile(code, "<generated>", "exec"), namespace)  # noqa: S102
+    return SimpleNamespace(**namespace)
