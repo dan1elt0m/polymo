@@ -2,14 +2,25 @@ import React from "react";
 import type { RestSourceConfig } from "../types";
 
 const EXAMPLE_CONNECTORS = [
-  { name: "GitHub Repositories", path: "/static/examples/githubrepos.yml", description: "Fetch repository data from GitHub API" },
-  { name: "JSON Placeholder", path: "/static/examples/jsonplaceholder.yml", description: "Sample posts and user data" },
-  { name: "REST Countries", path: "/static/examples/countries.yml", description: "Country information and statistics" },
-  { name: "Weather API", path: "/static/examples/weather.yml", description: "Current weather and forecast data" },
-  { name: "JSON Placeholder Multiple Endpoints", path: "/static/examples/jsonplaceholder_endpoints.yml", description: "Fetch posts, comments, and users" },
+  { name: "GitHub Repositories", path: "/static/examples/githubrepos.polymo.json", description: "Fetch repository data from GitHub API" },
+  { name: "JSON Placeholder", path: "/static/examples/jsonplaceholder.polymo.json", description: "Sample posts and user data" },
+  { name: "REST Countries", path: "/static/examples/countries.polymo.json", description: "Country information and statistics" },
+  { name: "Weather API", path: "/static/examples/weather.polymo.json", description: "Current weather and forecast data" },
+  { name: "JSON Placeholder Multiple Endpoints", path: "/static/examples/jsonplaceholder_endpoints.polymo.json", description: "Fetch posts, comments, and users" },
 ];
 
 const exampleTestId = (name: string): string => name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+
+// Minimal shape check for an uploaded/fetched config file: it must be a JSON
+// object with `source` and `stream` keys to be worth handing to the reverse
+// transform. Anything else is rejected with a friendly inline error instead
+// of failing deep inside configToFormState.
+const isPlausibleConfig = (value: unknown): value is RestSourceConfig => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.source === "object" && candidate.source !== null
+    && typeof candidate.stream === "object" && candidate.stream !== null;
+};
 
 interface SavedConnectorSummary {
   id: string;
@@ -20,7 +31,7 @@ interface SavedConnectorSummary {
 
 interface LandingScreenProps {
   onStartNew: () => void;
-  onImportConfig: (config: RestSourceConfig, yamlText: string, options?: { suggestedName?: string }) => void;
+  onImportConfig: (config: RestSourceConfig, options?: { suggestedName?: string }) => void;
   savedConnectors: SavedConnectorSummary[];
   onSelectSaved: (id: string) => void;
   onDeleteSaved: (id: string) => void;
@@ -61,24 +72,52 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
     fileInputRef.current?.click();
   };
 
-  // NOTE: YAML import (file upload + starter examples) is stubbed out here.
-  // It previously parsed YAML client-side via js-yaml, which has been removed
-  // from the builder now that the app no longer sends or parses YAML on the
-  // client. The full YAML-import affordance is being redesigned/removed in a
-  // follow-up task; until then these actions surface a clear message instead
-  // of silently failing.
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    setError("Importing a YAML file is temporarily unavailable. Start from scratch or from an example instead.");
+    const file = event.target.files?.[0];
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
-    void event;
+    if (!file) return;
+
+    setError(null);
+    setIsUploading(true);
+    try {
+      const text = await file.text();
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        throw new Error("That file isn't valid JSON. Export a config with \"Save config\" and try again.");
+      }
+      if (!isPlausibleConfig(parsed)) {
+        throw new Error("That file doesn't look like a polymo config (expected \"source\" and \"stream\" sections).");
+      }
+      onImportConfig(parsed, { suggestedName: file.name });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not read that file.");
+    } finally {
+      setIsUploading(false);
+    }
   };
 
-  const handleLoadExample = async (_path: string, _name: string) => {
-    setError("Loading example connectors is temporarily unavailable. Start from scratch instead.");
-    void _path;
-    void _name;
+  const handleLoadExample = async (path: string, name: string) => {
+    setError(null);
+    setIsUploading(true);
+    try {
+      const response = await fetch(path);
+      if (!response.ok) {
+        throw new Error(`Could not load ${name} (${response.status}).`);
+      }
+      const parsed = (await response.json()) as unknown;
+      if (!isPlausibleConfig(parsed)) {
+        throw new Error(`${name} is not a valid polymo config.`);
+      }
+      onImportConfig(parsed, { suggestedName: name });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Could not load ${name}.`);
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   return (
@@ -133,13 +172,13 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
               <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                 <path fillRule="evenodd" d="M5.5 17a4.5 4.5 0 01-1.44-8.765 4.5 4.5 0 018.302-3.046 3.5 3.5 0 014.504 4.272A4 4 0 0115 17H5.5zm3.75-2.75a.75.75 0 001.5 0V9.66l1.95 2.1a.75.75 0 101.1-1.02l-3.25-3.5a.75.75 0 00-1.1 0l-3.25 3.5a.75.75 0 101.1 1.02l1.95-2.1v4.59z" clipRule="evenodd" />
               </svg>
-              {isUploading ? "Importing..." : "Upload YAML File"}
+              {isUploading ? "Importing..." : "Upload Config File"}
             </button>
           </div>
           <input
             ref={fileInputRef}
             type="file"
-            accept=".yml,.yaml"
+            accept=".json,application/json"
             className="hidden"
             onChange={handleFileChange}
             disabled={isUploading}
@@ -223,7 +262,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
 
         {savedConnectors.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border/70 bg-surface/60 dark:bg-[#282a36]/50 px-6 py-10 text-center text-sm text-muted dark:text-drac-muted">
-            Saved connectors will appear here automatically. Start a new connector or import a YAML file to begin.
+            Saved connectors will appear here automatically. Start a new connector or import a config file to begin.
           </div>
         ) : (
           <ul className="space-y-3">

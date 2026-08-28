@@ -11,10 +11,7 @@ import {
 
 export const configFormStateAtom = atom<ConfigFormState>(INITIAL_FORM_STATE);
 export const builderViewAtom = atom<"ui" | "code">("ui");
-// Retained only as a pass-through store for SavedConnector.yaml (persisted config
-// exports); no longer derived client-side and no longer editable in the UI.
-export const yamlTextAtom = atom<string>("");
-export const lastEditedAtom = atom<"ui" | "yaml">("ui");
+export const lastEditedAtom = atom<"ui">("ui");
 export const statusAtom = atom<StatusState>({ tone: "info", message: "Ready to configure" });
 export const isValidatingAtom = atom(false);
 export const isSavingAtom = atom(false);

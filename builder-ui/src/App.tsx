@@ -4,7 +4,6 @@ import { useAtom, useAtomValue } from "jotai";
 import {
 	configFormStateAtom,
 	builderViewAtom,
-	yamlTextAtom,
 	lastEditedAtom,
 	statusAtom,
 	isValidatingAtom,
@@ -31,6 +30,7 @@ import type { ConfigFormState, ValidationResponse, RestSourceConfig, SavedConnec
 import { MAX_SAMPLE_ROWS, SAMPLE_VIEWS } from "./lib/constants";
 import { INITIAL_FORM_STATE } from "./lib/initial-data";
 import { createId } from "./lib/id";
+import { configFileName, CONFIG_FILE_EXTENSION } from "./lib/filename";
 
 const cloneFormState = (state: ConfigFormState): ConfigFormState => JSON.parse(JSON.stringify(state));
 
@@ -44,13 +44,13 @@ const slugify = (value: string): string => {
 		.replace(/^-+|-+$/g, '') || 'connector';
 };
 
-const stripExtension = (name: string): string => name.replace(/\.[^.]+$/, '').trim();
+const stripExtension = (name: string): string =>
+	name.replace(/\.polymo\.json$/i, '').replace(/\.[^.]+$/, '').trim();
 
 const App: React.FC = () => {
 	const [showLandingScreen, setShowLandingScreen] = React.useState(true);
 	const [configFormState, setConfigFormState] = useAtom(configFormStateAtom);
 	const [builderView, setBuilderView] = useAtom(builderViewAtom);
-	const [yamlText, setYamlText] = useAtom(yamlTextAtom);
 	const [lastEdited, setLastEdited] = useAtom(lastEditedAtom);
 	const [status, setStatus] = useAtom(statusAtom);
 	const [isValidating, setIsValidating] = useAtom(isValidatingAtom);
@@ -65,7 +65,7 @@ const App: React.FC = () => {
 	const [savedConnectors, setSavedConnectors] = useAtom(savedConnectorsAtom);
 	const [activeConnectorId, setActiveConnectorId] = useAtom(activeConnectorIdAtom);
 	const [showSaveModal, setShowSaveModal] = React.useState(false);
-	const [saveFileName, setSaveFileName] = React.useState('config.yml');
+	const [saveFileName, setSaveFileName] = React.useState(`config${CONFIG_FILE_EXTENSION}`);
 	const [saveDirHandle, setSaveDirHandle] = React.useState<any | null>(null); // directory handle
 	const [saveDirName, setSaveDirName] = React.useState<string | null>(null);
 	const [isRenamingConnector, setIsRenamingConnector] = React.useState(false);
@@ -105,7 +105,7 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 	), [savedConnectors, activeConnectorId]);
 
 	const updateSaveFileName = React.useCallback((name: string) => {
-		setSaveFileName(`${slugify(name)}.yml`);
+		setSaveFileName(`${slugify(name)}${CONFIG_FILE_EXTENSION}`);
 	}, [setSaveFileName]);
 
 	const resetWorkingState = React.useCallback(() => {
@@ -132,7 +132,6 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 			const effectiveFormState = cloneFormState(connector.formState);
 			setActiveConnectorId(connector.id);
 			setConfigFormState(effectiveFormState);
-			setYamlText(connector.yaml);
 			setLastEdited(connector.lastEdited);
 			setBuilderView(connector.builderView === 'code' ? 'code' : 'ui');
 			setReaderOptions({ ...connector.readerOptions });
@@ -151,7 +150,6 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 			setReaderOptions,
 			setShowLandingScreen,
 			setStatus,
-			setYamlText,
 			updateSaveFileName,
 		],
 	);
@@ -160,8 +158,6 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 		(options?: {
 			name?: string;
 			formState?: ConfigFormState;
-			yamlText?: string;
-			lastEdited?: 'ui' | 'yaml';
 			builderView?: 'ui' | 'code';
 			readerOptions?: Record<string, string>;
 			statusMessage?: string;
@@ -174,8 +170,7 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 				createdAt: now,
 				updatedAt: now,
 				formState: cloneFormState(options?.formState ?? INITIAL_FORM_STATE),
-				yaml: options?.yamlText ?? '',
-				lastEdited: options?.lastEdited ?? 'ui',
+				lastEdited: 'ui',
 				builderView: options?.builderView ?? 'ui',
 				readerOptions: { ...(options?.readerOptions ?? {}) },
 			};
@@ -198,15 +193,13 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 	}, [createConnector]);
 
 	const handleImportConnector = React.useCallback(
-		(config: RestSourceConfig, yamlContent: string, meta?: { suggestedName?: string }) => {
+		(config: RestSourceConfig, meta?: { suggestedName?: string }) => {
 			const formState = configToFormState(config);
 			const derivedFromPath = (config.stream?.path || '').split('/').filter(Boolean).pop() || 'imported';
 			const baseName = meta?.suggestedName ? stripExtension(meta.suggestedName) : derivedFromPath || 'Imported connector';
 			createConnector({
 				name: baseName,
 				formState,
-				yamlText: yamlContent.trimEnd(),
-				lastEdited: 'yaml',
 				statusMessage: `Loaded ${baseName}`,
 			});
 		},
@@ -249,24 +242,23 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 	);
 
 	const handleExportSavedConnector = React.useCallback(
-		async (id: string) => {
+		(id: string) => {
 			const connector = savedConnectors.find((entry) => entry.id === id);
 			if (!connector) return;
 			try {
+				// Saved configs may be incomplete work-in-progress; export the raw
+				// config dict as-is rather than requiring it to validate first.
 				const configDict = formStateToConfig(connector.formState);
-				const payload = await validateConfigRequest({ config_dict: configDict });
-				if (!payload.valid || !payload.yaml) {
-					setStatus({ tone: 'error', message: payload.message || `Could not export ${connector.name}` });
-					return;
-				}
-				const blob = new Blob([payload.yaml], { type: 'text/yaml' });
+				const contents = JSON.stringify(configDict, null, 2);
+				const blob = new Blob([contents], { type: 'application/json' });
 				const link = document.createElement('a');
 				link.href = URL.createObjectURL(blob);
-				link.download = `${slugify(connector.name)}.yml`;
+				link.download = `${slugify(connector.name)}${CONFIG_FILE_EXTENSION}`;
 				document.body.appendChild(link);
 				link.click();
 				document.body.removeChild(link);
 				URL.revokeObjectURL(link.href);
+				setStatus({ tone: 'success', message: `Saved ${connector.name}` });
 			} catch (error) {
 				setStatus({ tone: 'error', message: formatError(error) });
 			}
@@ -595,15 +587,15 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 
 	const handleSave = React.useCallback(async (explicitName?: string) => {
 		if (isSaving) return;
-		const targetName = (explicitName || saveFileName || 'config.yml').trim() || 'config.yml';
+		const defaultName = `config${CONFIG_FILE_EXTENSION}`;
+		const targetName = (explicitName || saveFileName || defaultName).trim() || defaultName;
 		setIsSaving(true);
-		setStatus({ tone: "info", message: "Validating & saving…" });
+		setStatus({ tone: "info", message: "Saving…" });
 		try {
-			const result = await runValidation({ applyResponse: false });
-			if (!result.valid || !result.yaml) {
-				throw new Error(result.message || 'Configuration is invalid');
-			}
-			await downloadTextFile(result.yaml, targetName, saveDirHandle, 'text/yaml');
+			// Work-in-progress configs may not be complete/valid yet; save the
+			// current form state as-is so it can be reloaded and finished later.
+			const contents = JSON.stringify(configPayload.config_dict, null, 2);
+			await downloadTextFile(contents, targetName, saveDirHandle, 'application/json');
 			setStatus({ tone: "success", message: `Saved ${saveDirName ? saveDirName + '/' : ''}${targetName}` });
 			window.setTimeout(() => {
 				setStatus({ tone: "info", message: "Ready to configure" });
@@ -613,18 +605,23 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 		} finally {
 			setIsSaving(false);
 		}
-	}, [isSaving, runValidation, saveFileName, saveDirHandle, saveDirName, setIsSaving, setStatus]);
+	}, [isSaving, configPayload, saveFileName, saveDirHandle, saveDirName, setIsSaving, setStatus]);
+
+	const openSaveModal = React.useCallback(() => {
+		setSaveFileName(configFileName(generatedCode.stream || configFormState.streamPath));
+		setShowSaveModal(true);
+	}, [configFormState.streamPath, generatedCode.stream]);
 
 	React.useEffect(() => {
 		const handler = (event: KeyboardEvent) => {
 			if ((event.metaKey || event.ctrlKey) && event.key === "s") {
 				event.preventDefault();
-				setShowSaveModal(true);
+				openSaveModal();
 			}
 		};
 		window.addEventListener("keydown", handler);
 		return () => window.removeEventListener("keydown", handler);
-	}, []);
+	}, [openSaveModal]);
 
 	// Theme management (light/dark/system)
 	const getSystemDark = () => (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches);
@@ -774,7 +771,7 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 						onClick={() => currentConnector && handleExportSavedConnector(currentConnector.id)}
 						disabled={!currentConnector}
 					>
-						Export
+						Save config
 					</button>
 					<ThemeMenu mode={themeMode} effective={effectiveTheme} onChange={setThemeMode} />
 				</div>
@@ -821,11 +818,11 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 						<button
 							type="button"
 							className="inline-flex items-center gap-1 rounded-full bg-blue-9 px-5 py-2 text-sm font-semibold text-white shadow-soft transition hover:bg-blue-10 disabled:opacity-50 disabled:cursor-not-allowed"
-							onClick={() => setShowSaveModal(true)}
+							onClick={openSaveModal}
 							disabled={busy}
 							data-testid="open-export-modal"
 						>
-											Export
+											Save config
 										</button>
 									</div>
 								</div>
@@ -878,7 +875,7 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 					<div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => !isSaving && setShowSaveModal(false)} />
 					<div role="dialog" aria-modal="true" className="relative z-10 w-full max-w-md rounded-2xl border border-border bg-surface dark:bg-drac-surface shadow-soft p-6 flex flex-col gap-5">
 						<header className="flex items-start justify-between gap-4">
-							<h2 className="text-lg font-semibold text-slate-12 dark:text-drac-foreground">Save Configuration</h2>
+							<h2 className="text-lg font-semibold text-slate-12 dark:text-drac-foreground">Save config</h2>
 						</header>
 						<div className="space-y-4">
 							<label className="flex flex-col gap-2">
@@ -888,7 +885,7 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 								className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-slate-12 shadow-sm focus-visible:border-blue-7 dark:border-drac-border dark:bg-drac-surface dark:text-drac-foreground"
 								value={saveFileName}
 								onChange={(e) => setSaveFileName(e.target.value)}
-								placeholder="config.yml"
+								placeholder={`config${CONFIG_FILE_EXTENSION}`}
 								data-testid="export-file-name-input"
 							/>
 							</label>
@@ -933,7 +930,7 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 								disabled={isSaving || !saveFileName.trim()}
 								data-testid="confirm-export"
 							>
-								{isSaving ? 'Saving…' : 'Save File'}
+								{isSaving ? 'Saving…' : 'Save'}
 							</button>
 						</div>
 					</div>
@@ -986,8 +983,8 @@ function downloadTextFile(contents: string, fileName = 'config.txt', directoryHa
 					suggestedName: fileName,
 					types: [
 						{
-							description: mimeType === 'text/yaml' ? 'YAML Files' : 'Text Files',
-							accept: { [mimeType]: mimeType === 'text/yaml' ? ['.yml', '.yaml'] : ['.txt', '.py', '.text'] },
+							description: mimeType === 'application/json' ? 'JSON Files' : 'Text Files',
+							accept: { [mimeType]: mimeType === 'application/json' ? ['.json'] : ['.txt', '.py', '.text'] },
 						},
 					],
 				});

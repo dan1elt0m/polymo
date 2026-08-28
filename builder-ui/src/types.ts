@@ -103,7 +103,6 @@ export interface ValidationResponse {
   stream?: string | null;
   message?: string;
   config?: RestSourceConfig;
-  yaml?: string;
 }
 
 // Payload aliases used by api.ts
@@ -201,8 +200,7 @@ export interface SavedConnector {
   createdAt: string;
   updatedAt: string;
   formState: ConfigFormState;
-  yaml: string;
-  lastEdited: 'ui' | 'yaml';
+  lastEdited: 'ui';
   builderView: 'ui' | 'code';
   readerOptions: Record<string, string>;
 }

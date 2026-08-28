@@ -114,7 +114,7 @@ export const AuthenticationSection: React.FC<AuthenticationSectionProps> = ({
             <label className="flex flex-col gap-2">
               <div className="flex items-center gap-1">
                 <span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Auth Type</span>
-                <InfoTooltip text="Authentication method applied to each request. Not stored in YAML." />
+                <InfoTooltip text="Authentication method applied to each request. Not persisted in the saved config." />
               </div>
               <div className="relative">
                 <select

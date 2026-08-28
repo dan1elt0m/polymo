@@ -1,4 +1,5 @@
 import React from "react";
+import { slugifyStreamName } from "../lib/filename";
 
 interface CodePaneProps {
 	script: string;
@@ -6,15 +7,6 @@ interface CodePaneProps {
 	error: string | null;
 	loading: boolean;
 }
-
-const slugifyStreamName = (value: string): string => {
-	const slug = value
-		.toLowerCase()
-		.trim()
-		.replace(/[^a-z0-9]+/g, "_")
-		.replace(/^_+|_+$/g, "");
-	return slug || "connector";
-};
 
 export const CodePane: React.FC<CodePaneProps> = ({ script, stream, error, loading }) => {
 	const [copyLabel, setCopyLabel] = React.useState<string>("Copy");
