@@ -79,6 +79,28 @@ def _py_literal(value: Any) -> str:
     return repr(value)
 
 
+def _comment_escape(value: str) -> str:
+    """Make a value safe to interpolate into a `#`-style comment.
+
+    A `#` comment runs to the end of its physical line, so an embedded
+    newline in the value would let text after it land on its own line as
+    live Python instead of comment text. Collapsing newlines to spaces
+    keeps the whole value on one comment line no matter what it contains.
+    """
+    return " ".join(value.splitlines())
+
+
+def _doc_escape(value: str) -> str:
+    """Escape a value for safe interpolation inside a triple-double-quoted docstring.
+
+    Escaping backslashes and every double quote guarantees the content can
+    never contain an unescaped run of three double quotes (or a trailing
+    backslash that would swallow the closing delimiter), so it can't break
+    out of the docstring no matter what the source config value contains.
+    """
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
 def _parse_partition_values(raw: Any) -> List[str]:
     """Mirrors `_parse_partition_values` in `datasource.py`."""
     if raw is None:
@@ -293,19 +315,34 @@ def _context(config: RestSourceConfig) -> Dict[str, Any]:
     params, headers, path = _resolved(stream, config.options)
     windows = _static_windows(config)
     partition_strategy = stream.partition.strategy if stream.partition else "none"
+    offset_param = stream.pagination.offset_param or "offset"
+    page_param = stream.pagination.page_param or "page"
+    scope = " ".join(auth.scope)
     return {
         "auth_type": auth.type,
         "token_url": auth.token_url,
+        "token_url_repr": _py_literal(auth.token_url),
         "client_id": auth.client_id,
-        "scope": " ".join(auth.scope),
+        "client_id_repr": _py_literal(auth.client_id),
+        "scope": scope,
+        "scope_repr": _py_literal(scope),
         "audience": auth.audience,
-        "oauth_extra_items": [(k, repr(v)) for k, v in auth.extra_params.items()],
+        "audience_repr": _py_literal(auth.audience),
+        "oauth_extra_items": [
+            (_py_literal(k), repr(v)) for k, v in auth.extra_params.items()
+        ],
         "base_url": config.base_url.rstrip("/"),
+        "base_url_repr": _py_literal(config.base_url.rstrip("/")),
         "path": path,
+        "path_repr": _py_literal(path),
         "params_repr": _py_literal(params),
         "headers_repr": _py_literal(headers),
         "schema_ddl": stream.schema,
         "stream_name": stream.name,
+        "stream_name_repr": _py_literal(stream.name),
+        "stream_name_doc": _doc_escape(stream.name),
+        "stream_name_comment": _comment_escape(stream.name),
+        "state_path_repr": _py_literal(f"{stream.name}_state.json"),
         "func_name": _identifier(stream.name),
         "field_path": list(stream.record_selector.field_path) or None,
         "record_filter_expr": _filter_expression(stream.record_selector.record_filter),
@@ -319,21 +356,31 @@ def _context(config: RestSourceConfig) -> Dict[str, Any]:
         "pagination_type": stream.pagination.type,
         "page_size": stream.pagination.page_size,
         "limit_param": stream.pagination.limit_param,
-        "offset_param": stream.pagination.offset_param or "offset",
+        "limit_param_repr": _py_literal(stream.pagination.limit_param),
+        "limit_param_doc": _doc_escape(stream.pagination.limit_param or ""),
+        "offset_param": offset_param,
+        "offset_param_repr": _py_literal(offset_param),
+        "offset_param_doc": _doc_escape(offset_param),
         "start_offset": stream.pagination.start_offset,
-        "stop_on_empty": stream.pagination.stop_on_empty_response,
-        "page_param": stream.pagination.page_param or "page",
+        "page_param": page_param,
+        "page_param_repr": _py_literal(page_param),
+        "page_param_doc": _doc_escape(page_param),
         "start_page": stream.pagination.start_page,
         "total_pages_path": list(stream.pagination.total_pages_path) or None,
         "total_pages_header": stream.pagination.total_pages_header,
+        "total_pages_header_repr": _py_literal(stream.pagination.total_pages_header),
         "cursor_param": stream.pagination.cursor_param or "cursor",
+        "cursor_param_repr": _py_literal(stream.pagination.cursor_param or "cursor"),
         "cursor_path": list(stream.pagination.cursor_path) or None,
         "cursor_header": stream.pagination.cursor_header,
+        "cursor_header_repr": _py_literal(stream.pagination.cursor_header),
         "next_url_path": list(stream.pagination.next_url_path) or None,
         "initial_cursor_repr": repr(stream.pagination.initial_cursor),
         "incremental_mode": stream.incremental.mode,
         "cursor_param_inc": stream.incremental.cursor_param,
+        "cursor_param_inc_repr": _py_literal(stream.incremental.cursor_param),
         "cursor_field": stream.incremental.cursor_field,
+        "cursor_field_repr": _py_literal(stream.incremental.cursor_field),
         "windows_repr": _py_literal(windows) if windows is not None else None,
         "has_windows": bool(windows),
         "partition_strategy": partition_strategy,

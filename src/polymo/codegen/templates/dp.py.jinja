@@ -43,12 +43,12 @@ class RestStreamSource(DataSource):
 spark.dataSource.register(RestStreamSource)
 
 
-@dp.table(name="{{ stream_name }}")
+@dp.table(name={{ stream_name_repr }})
 def {{ func_name }}():
     return spark.readStream.format("{{ func_name }}_stream").load()
 {% else %}
 {% if windows_repr %}
-@dp.table(name="{{ stream_name }}")
+@dp.table(name={{ stream_name_repr }})
 def {{ func_name }}():
     sc = spark.sparkContext
     rows = sc.parallelize(WINDOWS, len(WINDOWS)).flatMap(
@@ -60,9 +60,9 @@ def {{ func_name }}():
     # in-process state; compute it here instead, from the rows collected
     # back on the driver.
     cursor_values = [
-        r.get("{{ cursor_field }}")
+        r.get({{ cursor_field_repr }})
         for r in rows
-        if isinstance(r, dict) and r.get("{{ cursor_field }}") is not None
+        if isinstance(r, dict) and r.get({{ cursor_field_repr }}) is not None
     ]
     _write_state(max(cursor_values) if cursor_values else None)
 {% endif %}
@@ -75,7 +75,7 @@ def {{ func_name }}():
 {% if partition_strategy == "pagination" %}
 # partition strategy "pagination" runs sequentially in generated scripts
 {% endif %}
-@dp.table(name="{{ stream_name }}")
+@dp.table(name={{ stream_name_repr }})
 def {{ func_name }}():
     rows = list(fetch_records())
 {% if incremental_mode %}
