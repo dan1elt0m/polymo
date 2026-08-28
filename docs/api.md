@@ -1,6 +1,6 @@
 # Python & Spark Helpers
 
-Most teams are happy using the Builder UI and the YAML files it produces. If you want to automate things in Python or inside a Spark notebook, Polymo exposes a small helper module. The code is short and friendly—you can copy/paste it as-is.
+Most teams are happy using the [Builder UI](builder-ui.md), which exports a standalone Python script with no polymo runtime dependency. The helpers below are for the legacy 0.x YAML runtime (`spark.read.format("polymo")`) if you're still using it — see the [Configuration guide](config.md) for details. If you want to automate things in Python or inside a Spark notebook, Polymo exposes a small helper module. The code is short and friendly—you can copy/paste it as-is.
 
 ## Loading a connector in Spark
 
