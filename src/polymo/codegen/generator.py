@@ -76,6 +76,12 @@ def _context(config: RestSourceConfig) -> Dict[str, Any]:
         "multiplier": eh.backoff.multiplier,
         "retry_on_timeout": eh.retry_on_timeout,
         "retry_on_connection_errors": eh.retry_on_connection_errors,
+        "pagination_type": stream.pagination.type,
+        "page_size": stream.pagination.page_size,
+        "limit_param": stream.pagination.limit_param,
+        "offset_param": stream.pagination.offset_param or "offset",
+        "start_offset": stream.pagination.start_offset,
+        "stop_on_empty": stream.pagination.stop_on_empty_response,
     }
 
 

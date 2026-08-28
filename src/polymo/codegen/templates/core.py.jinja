@@ -84,9 +84,29 @@ def _records(payload):
     return records
 
 
+{% if pagination_type == "offset" %}
 def fetch_records():
-    """Yield records from the API, one page at a time."""
+    """Yield records, paginating with {{ offset_param }}/{{ limit_param }}."""
+    session = requests.Session()
+    session.headers.update(HEADERS)
+    offset = {{ start_offset }}
+    while True:
+        params = dict(PARAMS)
+{% if limit_param and page_size %}
+        params["{{ limit_param }}"] = {{ page_size }}
+{% endif %}
+        params["{{ offset_param }}"] = offset
+        response = _request(session, f"{BASE_URL}{PATH}", params)
+        records = _records(response.json())
+        if not records:
+            return
+        yield from records
+        offset += {{ page_size if page_size else "len(records)" }}
+{% elif pagination_type == "none" %}
+def fetch_records():
+    """Yield records from the API (single page)."""
     session = requests.Session()
     session.headers.update(HEADERS)
     response = _request(session, f"{BASE_URL}{PATH}", PARAMS)
     yield from _records(response.json())
+{% endif %}
