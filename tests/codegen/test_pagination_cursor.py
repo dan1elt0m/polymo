@@ -23,6 +23,23 @@ def test_cursor_from_payload_path(http_server):
     assert list(module.fetch_records()) == [{"id": 1}, {"id": 2}]
 
 
+def test_cursor_without_path_or_header_stops_after_first_page(http_server):
+    def route(query, headers, body):
+        assert query.get("cursor") == "start"
+        return 200, {"data": [{"id": 1}]}, {}
+
+    http_server.routes["/posts"] = route
+    config = make_config(
+        base_url=http_server.url,
+        pagination=PaginationConfig(
+            type="cursor", cursor_param="cursor", initial_cursor="start"
+        ),
+    )
+    module = run_generated(config)
+    assert list(module.fetch_records()) == [{"id": 1}]
+    assert len(http_server.log) == 1
+
+
 def test_cursor_next_url_path_follows_full_url(http_server):
     def route(query, headers, body):
         if query.get("p") == "2":

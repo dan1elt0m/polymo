@@ -176,8 +176,10 @@ def fetch_records():
             yield from records
 {% if cursor_header %}
         cursor = response.headers.get("{{ cursor_header }}")
-{% else %}
+{% elif cursor_path %}
         cursor = _dig(payload, {{ cursor_path }})
+{% else %}
+        cursor = None
 {% endif %}
         if not cursor:
             return
