@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from polymo.config import PartitionConfig
-from tests.codegen.helpers import make_config, run_generated
+from polymo.codegen import generate
+from polymo.config import IncrementalConfig, PartitionConfig
+from tests.codegen.helpers import assert_hygiene, make_config, run_generated
 
 
 def test_param_range_numeric_windows_inlined(http_server):
@@ -43,3 +44,26 @@ def test_endpoints_windows(http_server):
     module = run_generated(config)
     records = [r for w in module.WINDOWS for r in module.fetch_records(**w)]
     assert records == [{"src": "a"}, {"src": "b"}]
+
+
+def test_endpoints_windows_incremental_schema_computes_cursor_on_driver():
+    # fetch_records executes on Spark executors under parallelize/flatMap for
+    # windowed streams, so the module-level LAST_CURSOR mutation never reaches
+    # the driver. The windowed dp table must instead derive the cursor from
+    # the rows collected back on the driver.
+    config = make_config(
+        base_url="https://api.example.com",
+        partition=PartitionConfig(strategy="endpoints", endpoints=("/a", "/b")),
+        incremental=IncrementalConfig(
+            mode="cursor", cursor_param="since", cursor_field="updated"
+        ),
+        schema="id INT",
+    )
+    script = generate(config)
+    assert_hygiene(script)
+
+    dp_section = script.split('@dp.table(name="posts")', 1)[1]
+    assert "cursor_values" in dp_section
+    assert "_write_state(max(cursor_values) if cursor_values else None)" in dp_section
+    assert 'LAST_CURSOR["value"]' not in dp_section
+    assert "# records are not tagged with their source endpoint" in script

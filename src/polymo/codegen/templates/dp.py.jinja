@@ -15,7 +15,15 @@ def {{ func_name }}():
         lambda window: list(fetch_records(**window))
     ).collect()
 {% if incremental_mode %}
-    _write_state(LAST_CURSOR["value"])
+    # fetch_records runs on executors under parallelize/flatMap, so LAST_CURSOR
+    # mutations happen in worker processes and never reach the driver; compute
+    # the cursor here instead, from the rows collected back on the driver.
+    cursor_values = [
+        r.get("{{ cursor_field }}")
+        for r in rows
+        if isinstance(r, dict) and r.get("{{ cursor_field }}") is not None
+    ]
+    _write_state(max(cursor_values) if cursor_values else None)
 {% endif %}
 {% if schema_ddl %}
     return spark.createDataFrame(rows, schema=SCHEMA)

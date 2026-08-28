@@ -21,6 +21,9 @@ TIMEOUT = 30.0
 
 # One entry per partition; each is fetched independently (parallelized
 # across executors in the dp table below).
+{% if partition_strategy == "endpoints" %}
+# records are not tagged with their source endpoint
+{% endif %}
 WINDOWS = {{ windows_repr }}
 {% endif %}
 {% if incremental_mode %}
