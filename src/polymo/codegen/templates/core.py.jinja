@@ -47,7 +47,7 @@ def _request(session, url, params):
     raise RuntimeError("unreachable")
 
 
-{% if total_pages_path %}
+{% if total_pages_path or cursor_path or next_url_path %}
 def _dig(payload, path):
     """Follow a key path into a JSON payload; None if any hop is missing."""
     current = payload
@@ -143,6 +143,45 @@ def fetch_records():
             return
 {% endif %}
         page += 1
+{% elif pagination_type == "cursor" %}
+def fetch_records():
+    """Yield records, following the response cursor."""
+    session = requests.Session()
+    session.headers.update(HEADERS)
+{% if next_url_path %}
+    url, params = f"{BASE_URL}{PATH}", dict(PARAMS)
+    while True:
+        response = _request(session, url, params)
+        payload = response.json()
+        records = _records(payload)
+        if records:
+            yield from records
+        next_url = _dig(payload, {{ next_url_path }})
+        if not next_url:
+            return
+        url, params = next_url, None
+{% else %}
+    cursor = {{ initial_cursor_repr }}
+    while True:
+        params = dict(PARAMS)
+{% if limit_param and page_size %}
+        params["{{ limit_param }}"] = {{ page_size }}
+{% endif %}
+        if cursor is not None:
+            params["{{ cursor_param }}"] = cursor
+        response = _request(session, f"{BASE_URL}{PATH}", params)
+        payload = response.json()
+        records = _records(payload)
+        if records:
+            yield from records
+{% if cursor_header %}
+        cursor = response.headers.get("{{ cursor_header }}")
+{% else %}
+        cursor = _dig(payload, {{ cursor_path }})
+{% endif %}
+        if not cursor:
+            return
+{% endif %}
 {% elif pagination_type == "none" %}
 def fetch_records():
     """Yield records from the API (single page)."""

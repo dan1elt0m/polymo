@@ -86,6 +86,11 @@ def _context(config: RestSourceConfig) -> Dict[str, Any]:
         "start_page": stream.pagination.start_page,
         "total_pages_path": list(stream.pagination.total_pages_path) or None,
         "total_pages_header": stream.pagination.total_pages_header,
+        "cursor_param": stream.pagination.cursor_param or "cursor",
+        "cursor_path": list(stream.pagination.cursor_path) or None,
+        "cursor_header": stream.pagination.cursor_header,
+        "next_url_path": list(stream.pagination.next_url_path) or None,
+        "initial_cursor_repr": repr(stream.pagination.initial_cursor),
     }
 
 
