@@ -1,0 +1,97 @@
+from pyspark import pipelines as dp  # noqa: E402
+from pyspark.sql import SparkSession  # noqa: E402
+
+spark = SparkSession.getActiveSession()
+
+{% if schema_ddl %}
+SCHEMA = {{ schema_ddl | tojson }}
+
+{% endif %}
+
+{% if streaming %}
+from pyspark.sql.datasource import DataSource, SimpleDataSourceStreamReader  # noqa: E402
+
+# Assumes SCHEMA is a comma-separated "name TYPE" DDL string (as emitted
+# above); column names are taken as the first whitespace-separated token.
+COLUMNS = [f.split()[0] for f in SCHEMA.split(",")]
+
+
+class _Reader(SimpleDataSourceStreamReader):
+    def initialOffset(self):
+        return {"page": 0}
+
+    def read(self, start):
+        page = start["page"]
+        records = fetch_page(page)
+        rows = [tuple(r.get(c) for c in COLUMNS) for r in records]
+        next_page = page + 1 if records else page
+        return iter(rows), {"page": next_page}
+
+    def readBetweenOffsets(self, start, end):
+        rows = []
+        for page in range(start["page"], end["page"]):
+            for r in fetch_page(page):
+                rows.append(tuple(r.get(c) for c in COLUMNS))
+        return iter(rows)
+
+
+class RestStreamSource(DataSource):
+    @classmethod
+    def name(cls):
+        return "{{ func_name }}_stream"
+
+    def schema(self):
+        return SCHEMA
+
+    def simpleStreamReader(self, schema):
+        return _Reader()
+
+
+spark.dataSource.register(RestStreamSource)
+
+
+@dp.table(name={{ stream_name_repr }})
+def {{ func_name }}():
+    return spark.readStream.format("{{ func_name }}_stream").load()
+{% else %}
+{% if windows_repr %}
+@dp.table(name={{ stream_name_repr }})
+def {{ func_name }}():
+    sc = spark.sparkContext
+    rows = sc.parallelize(WINDOWS, len(WINDOWS)).flatMap(
+        lambda window: list(fetch_records(**window))
+    ).collect()
+{% if incremental_mode %}
+    # fetch_records runs on executors under parallelize/flatMap, which don't
+    # share memory with the driver, so the cursor can't be tracked as
+    # in-process state; compute it here instead, from the rows collected
+    # back on the driver.
+    cursor_values = [
+        r.get({{ cursor_field_repr }})
+        for r in rows
+        if isinstance(r, dict) and r.get({{ cursor_field_repr }}) is not None
+    ]
+    _write_state(max(cursor_values) if cursor_values else None)
+{% endif %}
+{% if schema_ddl %}
+    return spark.createDataFrame(rows, schema=SCHEMA)
+{% else %}
+    return spark.createDataFrame(rows)
+{% endif %}
+{% else %}
+{% if partition_strategy == "pagination" %}
+# partition strategy "pagination" runs sequentially in generated scripts
+{% endif %}
+@dp.table(name={{ stream_name_repr }})
+def {{ func_name }}():
+    rows = list(fetch_records())
+{% if incremental_mode %}
+    _write_state(LAST_CURSOR["value"])
+{% endif %}
+{% if schema_ddl %}
+    return spark.createDataFrame(rows, schema=SCHEMA)
+{% else %}
+    return spark.createDataFrame(rows)
+{% endif %}
+{% endif %}
+{% endif %}

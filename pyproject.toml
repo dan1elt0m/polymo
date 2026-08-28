@@ -60,6 +60,7 @@ dev = [
     "pre-commit>=4.3.0",
     "pytest>=8.4.2",
     "pytest-cov>=7.0.0",
+    "requests>=2.31",
     "ruff>=0.13.3",
 ]
 docs = [
@@ -89,3 +90,9 @@ Issues = "https://github.com/dan1elt0m/polymo/issues"
 markers = [
     "smoke: quick streaming smoke test",
 ]
+
+[tool.ruff]
+# Golden fixtures capture `generate()`'s literal output byte-for-byte; ruff
+# must not reformat them or the golden tests would drift from what the
+# generator actually produces.
+extend-exclude = ["tests/codegen/golden"]
