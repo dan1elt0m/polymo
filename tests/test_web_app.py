@@ -3,9 +3,9 @@ from __future__ import annotations
 import pytest
 
 fastapi = pytest.importorskip("fastapi", reason="FastAPI is required for builder tests")
-from fastapi.testclient import TestClient
+from fastapi.testclient import TestClient  # noqa: E402
 
-from polymo.builder import create_app
+from polymo.builder import create_app  # noqa: E402
 
 SAMPLE_CONFIG = """\
 version: 0.1
@@ -67,3 +67,31 @@ def test_format_endpoint() -> None:
     yaml_text = payload["yaml"]
     assert ("version: 0.1" in yaml_text) or ("version: '0.1'" in yaml_text)
     assert "base_url: https://example.com" in yaml_text
+
+
+def test_generate_returns_script() -> None:
+    app = create_app()
+    client = TestClient(app)
+
+    config_dict = {
+        "version": "0.1",
+        "source": {"type": "rest", "base_url": "https://example.com"},
+        "stream": {"name": "posts", "path": "/posts"},
+    }
+
+    response = client.post("/api/generate", json={"config_dict": config_dict})
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload["stream"] == "posts"
+    assert "from pyspark import pipelines as dp" in payload["script"]
+    assert "import polymo" not in payload["script"]
+
+
+def test_generate_rejects_invalid_config() -> None:
+    app = create_app()
+    client = TestClient(app)
+
+    response = client.post("/api/generate", json={"config_dict": {"version": "0.1"}})
+
+    assert response.status_code == 400

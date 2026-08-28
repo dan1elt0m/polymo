@@ -15,6 +15,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.concurrency import run_in_threadpool
 
+from ..codegen import CodegenError, generate
 from ..config import (
     ConfigError,
     RestSourceConfig,
@@ -124,6 +125,17 @@ class FormatResponse(BaseModel):
     yaml: str
 
 
+class GenerateRequest(BaseModel):
+    config_dict: Dict[str, Any]
+
+    model_config = ConfigDict(extra="ignore")
+
+
+class GenerateResponse(BaseModel):
+    script: str
+    stream: str
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="polymo builder", version="0.1.0")
 
@@ -222,6 +234,15 @@ def create_app() -> FastAPI:
         except ConfigError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return FormatResponse(yaml=dump_config(config))
+
+    @app.post("/api/generate", response_model=GenerateResponse)
+    async def generate_script(payload: GenerateRequest) -> GenerateResponse:
+        try:
+            config = parse_config(payload.config_dict)
+            script = generate(config)
+        except (ConfigError, CodegenError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return GenerateResponse(script=script, stream=config.stream.name)
 
     @app.get("/api/meta")
     async def get_meta() -> Dict[str, str]:
