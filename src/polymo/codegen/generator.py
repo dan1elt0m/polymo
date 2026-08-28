@@ -82,6 +82,10 @@ def _context(config: RestSourceConfig) -> Dict[str, Any]:
         "offset_param": stream.pagination.offset_param or "offset",
         "start_offset": stream.pagination.start_offset,
         "stop_on_empty": stream.pagination.stop_on_empty_response,
+        "page_param": stream.pagination.page_param or "page",
+        "start_page": stream.pagination.start_page,
+        "total_pages_path": list(stream.pagination.total_pages_path) or None,
+        "total_pages_header": stream.pagination.total_pages_header,
     }
 
 

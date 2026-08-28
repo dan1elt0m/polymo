@@ -47,6 +47,19 @@ def _request(session, url, params):
     raise RuntimeError("unreachable")
 
 
+{% if total_pages_path %}
+def _dig(payload, path):
+    """Follow a key path into a JSON payload; None if any hop is missing."""
+    current = payload
+    for key in path:
+        if isinstance(current, dict) and key in current:
+            current = current[key]
+        else:
+            return None
+    return current
+
+
+{% endif %}
 def _records(payload):
     """Normalise a response payload to a list of dicts."""
 {% if field_path %}
@@ -102,6 +115,34 @@ def fetch_records():
             return
         yield from records
         offset += {{ page_size if page_size else "len(records)" }}
+{% elif pagination_type == "page" %}
+def fetch_records():
+    """Yield records, paginating with {{ page_param }}."""
+    session = requests.Session()
+    session.headers.update(HEADERS)
+    page = {{ start_page }}
+    while True:
+        params = dict(PARAMS)
+{% if limit_param and page_size %}
+        params["{{ limit_param }}"] = {{ page_size }}
+{% endif %}
+        params["{{ page_param }}"] = page
+        response = _request(session, f"{BASE_URL}{PATH}", params)
+        payload = response.json()
+        records = _records(payload)
+        if not records:
+            return
+        yield from records
+{% if total_pages_path %}
+        total = _dig(payload, {{ total_pages_path }})
+        if total is not None and page >= int(total):
+            return
+{% elif total_pages_header %}
+        total = response.headers.get("{{ total_pages_header }}")
+        if total is not None and page >= int(total):
+            return
+{% endif %}
+        page += 1
 {% elif pagination_type == "none" %}
 def fetch_records():
     """Yield records from the API (single page)."""
