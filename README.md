@@ -77,30 +77,28 @@ The YAML runtime (`spark.read.format("polymo")`, `PolymoConfig`,
 ready to move yet.
 
 ## How to start?
-Locally you probably want to install polymo along with the Builder UI: 
 
-```bash
-pip install "polymo[builder]"
-```
-
-This comes with all UI deps such as pyspark.
-
-Scripting connector generation directly in Python (calling `generate()` /
-`parse_config()` without the UI — see the [API reference](docs/api.md))
-doesn't need pyspark at all. In that case, just install the bare minimum
-deps with:
 ```bash
 pip install polymo
 ```
 
-Note that `pip install polymo` alone does not install the Builder UI, and
-`polymo` is never a dependency of the scripts it generates — nothing you
-export needs polymo installed to run.
+This installs everything you need, Builder UI included — FastAPI, Uvicorn,
+PySpark, PyArrow, and requests all come along, so there's nothing extra to
+opt into.
 
-## Launch the builder UI 
+Note that `polymo` is never a dependency of the scripts it generates —
+nothing you export needs polymo installed to run.
 
-```bash 
-polymo builder
+## Launch the builder UI
+
+```bash
+polymo
+```
+
+Or without installing it first:
+
+```bash
+uvx polymo
 ```
 
 #### (Optional) Run the Builder in Docker

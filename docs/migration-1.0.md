@@ -14,6 +14,12 @@ pip install "polymo<1.0"   # or pip install polymo==0.11.0
 and `polymo smoke` working exactly as documented in its own docs snapshot.
 Nothing in 0.11.0 is deprecated-but-functional in 1.0 — it is gone.
 
+> **Since 1.2:** the `builder` extra is gone. `pip install polymo` now
+> includes everything (FastAPI, Uvicorn, PySpark, PyArrow, requests) — there
+> is nothing extra to opt into. The `polymo builder` subcommand is also
+> gone; the bare `polymo` command launches the Builder directly. See the
+> [CLI reference](cli.md) for the current flags.
+
 ## What was removed
 
 | 0.x symbol / interface | Status in 1.0 |
@@ -22,7 +28,7 @@ Nothing in 0.11.0 is deprecated-but-functional in 1.0 — it is gone.
 | `polymo.ApiReader` | Removed. |
 | `polymo.PolymoConfig` (and `load_config` / `dump_config` / `.reader_config()` / `.dump_yaml()`) | Removed. Nothing in polymo reads or writes YAML any more. |
 | YAML connector files (`config.yml`, `.option("config_path", ...)`, `.option("config_json", ...)`) | Removed as a runtime input. The Builder's saved `*.polymo.json` files are a different, unrelated format (see below). |
-| `polymo smoke` CLI subcommand | Removed. `polymo builder` is the only subcommand. |
+| `polymo smoke` CLI subcommand | Removed. (As of 1.2, `polymo builder` is gone too — see the note below.) |
 | `/api/format` builder endpoint | Removed along with the YAML export it powered. |
 | `.option("token", ...)`, `.option("incremental_state_path", ...)`, `.option("stream_batch_size", ...)`, and the rest of the Spark reader options | Removed — there is no reader to pass options to. The generated script has its own top-level constants (`BASE_URL`, `PARAMS`, `HEADERS`, ...) that you edit directly instead. |
 
@@ -41,7 +47,7 @@ fastest path is to re-enter your settings by hand:
 
 1. Open your old `config.yml` (or however you saved the connector) next to
    the Builder.
-2. Launch the Builder: `polymo builder`.
+2. Launch the Builder: `polymo`.
 3. Walk each section of the form and copy the equivalent value across —
    `source.base_url` → **Base URL**, `stream.path` → **Stream Path**,
    `stream.pagination` → the **Pagination** section, `stream.auth` → the

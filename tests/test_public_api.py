@@ -14,12 +14,15 @@ import pytest
 
 
 def test_import_polymo_does_not_eagerly_load_pyspark():
-    """A bare `pip install polymo` has no pyspark (builder-extra only).
+    """`pip install polymo` depends on pyspark, but `import polymo` must not
+    eagerly load it — pyspark's import is slow and codegen-only use (calling
+    `generate()` / `parse_config()` without the Builder) shouldn't pay for it
+    at startup.
 
     `import polymo` pulls in codegen, which pulls in config — config.py must
-    not import pyspark at module load time, or a bare install can't even
-    `import polymo`. Runs in a subprocess so sys.modules starts clean
-    regardless of what earlier tests in this process already imported.
+    not import pyspark at module load time. Runs in a subprocess so
+    sys.modules starts clean regardless of what earlier tests in this
+    process already imported.
     """
     code = (
         "import polymo\n"
@@ -38,8 +41,8 @@ def test_generate_with_schema_ddl_does_not_load_pyspark():
 
     Schema DDL is validated at config-parse time (see `_validate_ddl` in
     polymo/config.py) and stays a plain string through codegen — it must
-    never require pyspark, since pyspark is an optional builder-extra
-    dependency and codegen is the bare-install use case.
+    never require pyspark, since codegen-only use (no Builder) shouldn't pay
+    for importing pyspark even though it's an unconditional dependency.
     """
     code = textwrap.dedent(
         """

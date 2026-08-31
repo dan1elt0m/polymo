@@ -703,11 +703,6 @@ name = "polymo"
 version = "1.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "jinja2" },
-]
-
-[package.optional-dependencies]
-builder = [
     { name = "fastapi" },
     { name = "jinja2" },
     { name = "pyarrow" },
@@ -737,13 +732,12 @@ docs = [
 
 [package.metadata]
 requires-dist = [
-    { name = "fastapi", marker = "extra == 'builder'", specifier = ">=0.110" },
+    { name = "fastapi", specifier = ">=0.110" },
     { name = "jinja2", specifier = ">=3.1.6" },
-    { name = "jinja2", marker = "extra == 'builder'", specifier = ">=3.1.6" },
-    { name = "pyarrow", marker = "extra == 'builder'", specifier = ">=13" },
-    { name = "pyspark", marker = "extra == 'builder'", specifier = ">=4" },
-    { name = "requests", marker = "extra == 'builder'", specifier = ">=2.31" },
-    { name = "uvicorn", marker = "extra == 'builder'", specifier = ">=0.24" },
+    { name = "pyarrow", specifier = ">=13" },
+    { name = "pyspark", specifier = ">=4" },
+    { name = "requests", specifier = ">=2.31" },
+    { name = "uvicorn", specifier = ">=0.24" },
 ]
 
 [package.metadata.requires-dev]

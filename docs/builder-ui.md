@@ -5,14 +5,14 @@ If you are happiest filling out forms instead of writing code, the Builder UI is
 The Builder generates a standalone Python script — it does not produce a config your pipeline loads at read time. The script imports only `requests`, the standard library, and `pyspark`; polymo itself is not a runtime dependency of anything it generates.
 
 ## Getting set up
-1. Install the Builder extras: `pip install "polymo[builder]"`.
+1. Install Polymo: `pip install polymo` (this includes everything the Builder needs, such as PySpark).
 2. Start the local web app:
    ```bash
-   polymo builder --host 127.0.0.1 --port 9000
+   polymo --host 127.0.0.1 --port 9000
    ```
 3. Open the link shown in your terminal. Chrome, Edge, or any Chromium-based browser works best because they support the built-in file saving features.
 
-> **Tip:** The command checks that PySpark 4 is present. If it is missing, the tool tells you how to install it before continuing.
+> **Tip:** The command checks that PySpark 4 is present. If it is missing, that means your install is broken — the tool tells you how to reinstall before continuing.
 
 ## Landing screen options
 When the page loads you will see three tiles:

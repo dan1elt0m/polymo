@@ -21,15 +21,16 @@ at runtime.
   connectors locally so you can step away and pick up where you left off.
 
 ## Before you start
-- Install Polymo with the Builder extras: `pip install "polymo[builder]"`.
+- Install Polymo: `pip install polymo`. This includes everything the Builder
+  needs — PySpark included.
 - Make sure you have access to the API you care about (base URL, token if
   needed, and any sample request parameters).
-- Check that PySpark 4 or newer is available — `polymo builder` checks this
-  for you and tells you how to install it if it's missing.
+- Check that PySpark 4 or newer is available — `polymo` checks this for you
+  and tells you how to reinstall if something's missing.
 
 ## Quick tour
 
-1. **Launch the Builder.** Run `polymo builder --port 9000` and open the
+1. **Launch the Builder.** Run `polymo --port 9000` and open the
    link it prints.
 2. **Describe your API.** Fill in a base URL like
    `https://jsonplaceholder.typicode.com`, pick the endpoint `/posts`, and
@@ -54,9 +55,9 @@ every option and what it generates: [Connector options reference](config.md).
   generation logic — the whole public surface is `generate`, `parse_config`,
   `config_to_dict`, `RestSourceConfig`, and `CodegenError`. See the
   [Python API reference](api.md).
-- `polymo builder` is a small web app (FastAPI + React) that guides you
-  through every step and calls that same generation logic to power its
-  Preview and Generated Code tabs.
+- `polymo` launches a small web app (FastAPI + React) — the Builder — that
+  guides you through every step and calls that same generation logic to
+  power its Preview and Generated Code tabs.
 
 ## Run the Builder in Docker
 - Build the dev-friendly image and launch the Builder with hot reload:
