@@ -60,14 +60,86 @@ def _retry_condition(retry_statuses) -> str:
     return " or ".join(checks) or "False"
 
 
+_OPTION_REF_RE = re.compile(
+    r'\{\{\s*options(?:\.([A-Za-z_]\w*)|\[["\']([^"\']+)["\']\])\s*\}\}'
+)
+
+# Markers are wrapped in NUL bytes so they can never collide with anything a
+# real config value could legitimately contain, yet are trivial to find
+# again in a rendered string via `_MARKER_RE`.
+_MARKER_RE = re.compile(r"\x00(OPT_[A-Za-z0-9_]*)\x00")
+
+
+def _option_placeholder_var(name: str) -> str:
+    """Turn an unresolved option name into a `OPT_<NAME>` Python identifier."""
+    cleaned = re.sub(r"\W", "_", name).upper()
+    if not cleaned or cleaned[0].isdigit():
+        cleaned = f"_{cleaned}"
+    return f"OPT_{cleaned}"
+
+
+def _scan_option_refs(*texts: Optional[str]) -> Dict[str, str]:
+    """Find every `{{ options.name }}` / `{{ options["name"] }}` reference.
+
+    Returns an ordered (first-seen) mapping of option name -> the
+    placeholder variable name it would get if left unresolved. Scanning the
+    raw template strings directly (before Jinja ever sees them) means this
+    works even for options that ARE present in `config.options` — the
+    caller decides which of the returned names are actually missing.
+    """
+    found: Dict[str, str] = {}
+    for text in texts:
+        if not isinstance(text, str) or "options" not in text:
+            continue
+        for match in _OPTION_REF_RE.finditer(text):
+            name = match.group(1) or match.group(2)
+            if name not in found:
+                found[name] = _option_placeholder_var(name)
+    return found
+
+
+def _fstring_escape(text: str) -> str:
+    """Escape literal text for safe inclusion inside an `f"..."` literal.
+
+    `json.dumps` handles backslashes/quotes/control characters the same way
+    a double-quoted Python string literal needs them escaped; stripping its
+    surrounding quotes leaves just the escaped body. On top of that, any
+    literal `{`/`}` must be doubled so an f-string doesn't mistake it for an
+    interpolation delimiter.
+    """
+    body = json.dumps(text)[1:-1]
+    return body.replace("{", "{{").replace("}", "}}")
+
+
+def _fstring_literal(value: str) -> str:
+    """Render a string containing `\\x00OPT_*\\x00` markers as an f-string.
+
+    Marker segments become `{VAR}` interpolations referencing the
+    placeholder variable; everything else is escaped via `_fstring_escape`.
+    """
+    parts: List[str] = []
+    last = 0
+    for match in _MARKER_RE.finditer(value):
+        parts.append(_fstring_escape(value[last : match.start()]))
+        parts.append("{" + match.group(1) + "}")
+        last = match.end()
+    parts.append(_fstring_escape(value[last:]))
+    return 'f"' + "".join(parts) + '"'
+
+
 def _py_literal(value: Any) -> str:
     """Render a value as a Python literal, using double-quoted strings.
 
     Behaves like `repr()` except string values (including dict keys) are
     quoted with `json.dumps` so generated output uses double quotes, matching
-    the rest of the generated source's quoting style.
+    the rest of the generated source's quoting style. A string carrying
+    `\\x00OPT_*\\x00` markers (an unresolved `{{ options.* }}` reference,
+    see `_resolved`) is instead rendered as an f-string that interpolates
+    the corresponding `OPT_*` placeholder variable at request time.
     """
     if isinstance(value, str):
+        if _MARKER_RE.search(value):
+            return _fstring_literal(value)
         return json.dumps(value)
     if isinstance(value, dict):
         items = ", ".join(
@@ -282,9 +354,34 @@ def _resolved(stream, options):
     like `/users/{user_id}/posts` with `params={"user_id": "42"}` substitutes
     `user_id` into the path and drops it from the emitted params, instead of
     leaving a literal `{user_id}` in PATH and a duplicate in PARAMS.
+
+    A `{{ options.<name> }}` reference whose `<name>` is NOT present in
+    `options` would normally blow up Jinja's `StrictUndefined` at render
+    time (`/api/generate` passes no options at all, so this is the common
+    case for any config that references options — e.g. the builder's
+    api_key auth, or a hand-written `Authorization: Basic
+    {{ options.api_key_b64 }}` header). Instead of failing, each missing
+    name gets a unique marker substituted in as its "value" before
+    rendering, so the template renders successfully; `_py_literal` (used to
+    build PARAMS/HEADERS/PATH literals) then turns any string carrying a
+    marker into an f-string that reads a `OPT_<NAME>` placeholder variable
+    at request time (declared by the core template, defaulting to
+    `"REPLACE_ME"`). Options that ARE present keep resolving inline exactly
+    as before.
     """
+    raw_options = dict(options or {})
+    raw_texts = [stream.path]
+    raw_texts.extend((stream.params or {}).values())
+    raw_texts.extend((stream.headers or {}).values())
+    referenced = _scan_option_refs(*raw_texts)
+    missing = {name: var for name, var in referenced.items() if name not in raw_options}
+
+    render_options = dict(raw_options)
+    for name, var in missing.items():
+        render_options[name] = f"\x00{var}\x00"
+
     ctx = {
-        "options": dict(options or {}),
+        "options": render_options,
         "params": dict(stream.params or {}),
         "headers": dict(stream.headers or {}),
         "raw_params": dict(stream.params or {}),
@@ -302,7 +399,8 @@ def _resolved(stream, options):
         k: _render_template(v, ctx) for k, v in formatter.remaining_params().items()
     }
     headers = {k: _render_template(v, ctx) for k, v in (stream.headers or {}).items()}
-    return params, headers, path
+    option_placeholders = list(dict.fromkeys(missing.values()))
+    return params, headers, path, option_placeholders
 
 
 def _require_no_xml_json_paths(stream) -> None:
@@ -338,7 +436,7 @@ def _context(config: RestSourceConfig) -> Dict[str, Any]:
     if auth.type == "oauth2" and (not auth.token_url or not auth.client_id):
         raise CodegenError("oauth2 requires token_url and client_id")
     _require_no_xml_json_paths(stream)
-    params, headers, path = _resolved(stream, config.options)
+    params, headers, path, option_placeholders = _resolved(stream, config.options)
     windows = _static_windows(config)
     partition_strategy = stream.partition.strategy if stream.partition else "none"
     offset_param = stream.pagination.offset_param or "offset"
@@ -363,6 +461,7 @@ def _context(config: RestSourceConfig) -> Dict[str, Any]:
         "path_repr": _py_literal(path),
         "params_repr": _py_literal(params),
         "headers_repr": _py_literal(headers),
+        "option_placeholders": option_placeholders,
         "schema_ddl": stream.schema,
         "stream_name": stream.name,
         "stream_name_repr": _py_literal(stream.name),

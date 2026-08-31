@@ -51,6 +51,25 @@ CASES = {
         schema="id BIGINT",
         pagination=PaginationConfig(type="page", page_param="page", page_size=100),
     ),
+    "maileon_basic_header": make_config(
+        base_url="https://api.maileon.com/1.0",
+        name="contacts",
+        path="/contacts",
+        headers={
+            "Authorization": "Basic {{ options.api_key_b64 }}",
+            "Accept": "application/vnd.maileon.api+xml",
+        },
+        pagination=PaginationConfig(
+            type="page",
+            page_param="page_index",
+            start_page=0,
+            limit_param="page_size",
+            page_size=100,
+            total_pages_header="X-Pages",
+        ),
+        response_format="xml",
+        xml_record_path=".//contact",
+    ),
     "maileon_xml": make_config(
         base_url="https://api.maileon.com/1.0",
         name="contacts",

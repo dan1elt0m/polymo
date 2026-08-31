@@ -69,11 +69,12 @@ connector.
   auth type: it does not set `source.auth` at all, it just injects
   `{"<param>": "{{ options.<param> }}"}` into `stream.params`. That
   template resolves during **Preview** (which supplies the secret
-  separately), but the exported script has no runtime options to resolve it
-  against — generation fails with a template error until you either type
-  the literal key value straight into a Query Parameter (Params section)
-  instead of using the secret field, or edit the generated `PARAMS` constant
-  by hand after export.
+  separately) into the real value. The exported script has no runtime
+  options to resolve it against, so generation instead emits an
+  `OPT_<PARAM>` placeholder constant (defaulting to `"REPLACE_ME"`) and
+  interpolates it into `PARAMS` at request time — edit that constant in
+  place after export (or swap it for a secret-store lookup, same as the
+  Bearer/OAuth2 placeholders) rather than typing the key into the form.
 - **OAuth 2.0 (Client Credentials)** — maps to
   `source.auth = {"type": "oauth2", "token_url": ..., "client_id": ..., "scope": [...], "audience": ..., "extra_params": {...}}`.
   The generated script gets a `CLIENT_SECRET = "REPLACE_ME"` constant and a
@@ -87,9 +88,15 @@ connector.
   script, sent on every request.
 - **Headers** (`stream.headers`) → the `HEADERS` constant.
 - Values may reference `{{ options.<name> }}` (see
-  [Reader options](#reader-options)) — these are resolved once, at
-  generation time, into literal values baked into the script. There is no
-  templating left at runtime.
+  [Reader options](#reader-options)). If `<name>` was supplied as a Spark
+  reader option at generation time, it is resolved once into a literal value
+  baked into the script — no templating left at runtime. If it was not
+  supplied (the common case for an exported script, since `/api/generate`
+  passes no options), the reference instead becomes an `OPT_<NAME>`
+  placeholder constant near the top of the script (defaulting to
+  `"REPLACE_ME"`), interpolated into `PARAMS`/`HEADERS`/`PATH` wherever it
+  was referenced — edit that constant after export, or wire it up to a
+  secret store the same way as the Bearer/OAuth2 placeholders.
 
 ## Reader options
 

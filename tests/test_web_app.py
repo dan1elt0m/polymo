@@ -119,6 +119,42 @@ def test_generate_rejects_codegen_invalid_config() -> None:
     assert "streaming" in payload["detail"]
 
 
+def test_generate_endpoint_no_longer_crashes_on_unresolved_option() -> None:
+    """Regression pin: /api/generate passes no `options`, so a config whose
+    headers reference `{{ options.<name> }}` (e.g. the builder's api_key
+    auth, or a hand-written `Authorization: Basic {{ options.api_key_b64 }}`
+    header) used to fail template rendering. It must now generate a script
+    with an `OPT_*` placeholder variable instead."""
+    app = create_app()
+    client = TestClient(app)
+
+    config_dict = {
+        "version": "0.1",
+        "source": {
+            "type": "rest",
+            "base_url": "https://api.maileon.com/1.0",
+            "auth": {"type": "none"},
+        },
+        "stream": {
+            "name": "contacts",
+            "path": "/contacts",
+            "headers": {
+                "Authorization": "Basic {{ options.api_key_b64 }}",
+                "Accept": "application/vnd.maileon.api+xml",
+            },
+            "response_format": "xml",
+            "xml_record_path": ".//contact",
+        },
+    }
+
+    response = client.post("/api/generate", json={"config_dict": config_dict})
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert 'OPT_API_KEY_B64 = "REPLACE_ME"' in payload["script"]
+    assert 'f"Basic {OPT_API_KEY_B64}"' in payload["script"]
+
+
 def test_sample_endpoint_executes_generated_code(http_server) -> None:
     http_server.routes["/posts"] = lambda q, h, b: (200, [{"id": 1}, {"id": 2}], {})
     app = create_app()
@@ -167,3 +203,43 @@ def test_sample_endpoint_reports_rest_error() -> None:
     assert payload["records"] == []
     assert payload["dtypes"] == []
     assert payload["rest_error"]
+
+
+def test_sample_endpoint_inlines_supplied_options_for_preview(http_server) -> None:
+    """/api/sample (unlike /api/generate) forwards `payload.options` into
+    `parse_config(..., options=...)`, so an `{{ options.* }}` reference
+    resolves to the real supplied value for the preview instead of falling
+    back to an `OPT_*` placeholder that defaults to "REPLACE_ME"."""
+
+    def route(query, headers, body):
+        assert headers.get("Authorization") == "Basic realsecret"
+        return 200, [{"id": 1}], {}
+
+    http_server.routes["/contacts"] = route
+    app = create_app()
+    client = TestClient(app)
+
+    config_dict = {
+        "version": "0.1",
+        "source": {"type": "rest", "base_url": http_server.url},
+        "stream": {
+            "name": "contacts",
+            "path": "/contacts",
+            "headers": {"Authorization": "Basic {{ options.api_key_b64 }}"},
+        },
+    }
+
+    response = client.post(
+        "/api/sample",
+        json={
+            "config_dict": config_dict,
+            "options": {"api_key_b64": "realsecret"},
+            "limit": 5,
+        },
+    )
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload["rest_error"] is None
+    assert payload["records"] == [{"id": 1}]
+    assert payload["raw_pages"][0]["status_code"] == 200

@@ -15,6 +15,16 @@ import os
 import xml.etree.ElementTree as ET
 {% endif %}
 
+{% if option_placeholders %}
+# Runtime values referenced as {{ '{{ options.* }}' }} in the builder config.
+# Fill these in — for anything beyond local testing, fetch them from a
+# secret store instead of keeping them in this file, e.g.:
+#   OPT_API_KEY_B64 = dbutils.secrets.get("my-scope", "my-key")
+{% for var in option_placeholders %}
+{{ var }} = "REPLACE_ME"
+{% endfor %}
+
+{% endif %}
 BASE_URL = {{ base_url_repr }}
 PATH = {{ path_repr }}
 PARAMS: dict = {{ params_repr }}
