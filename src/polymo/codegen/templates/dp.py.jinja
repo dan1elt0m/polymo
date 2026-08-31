@@ -61,35 +61,6 @@ from pyspark.sql.datasource import DataSource, DataSourceReader  # noqa: E402
 {% endif %}
 
 
-{% if not schema_ddl %}
-def _infer_schema():
-    """Sample the first records to derive a DDL schema (explicit SCHEMA recommended)."""
-    from itertools import islice
-
-    sample = list(islice(fetch_records({% if has_windows %}**WINDOWS[0]{% endif %}), 50))
-    if not sample:
-        raise RuntimeError(
-            "cannot infer a schema from an empty response; set an explicit schema"
-        )
-    fields = {}
-    for record in sample:
-        for key, value in record.items():
-            if key in fields and fields[key] != "STRING":
-                continue
-            if isinstance(value, bool):
-                fields[key] = "BOOLEAN"
-            elif isinstance(value, int):
-                fields[key] = "BIGINT"
-            elif isinstance(value, float):
-                fields[key] = "DOUBLE"
-            elif value is None:
-                fields.setdefault(key, "STRING")
-            else:
-                fields[key] = "STRING"
-    return ", ".join(f"`{name}` {type_}" for name, type_ in fields.items())
-
-
-{% endif %}
 class RestSource(DataSource):
     @classmethod
     def name(cls):
@@ -129,11 +100,12 @@ class _Reader(DataSourceReader):
             yield tuple(_cell(record.get(column)) for column in self._columns)
 {% if incremental_mode %}
         # read() runs per partition on the executor that owns it, so each
-        # partition writes its own max cursor independently; with more than
-        # one partition, whichever write lands last wins (roughly the same
-        # outcome as taking the max across partitions). STATE_PATH must
-        # point somewhere every executor can reach (e.g. a Databricks
-        # Volume, per the comment on it above) for this to work at all.
+        # partition writes its own max cursor independently; whichever
+        # partition finishes last wins. Batch tables re-fetch fully each
+        # run, so a stale cursor only costs redundant fetching, not missed
+        # data. STATE_PATH must point somewhere every executor can reach
+        # (e.g. a Databricks Volume, per the comment on it above) for this
+        # to work at all.
         _write_state(cursor)
 {% endif %}
 

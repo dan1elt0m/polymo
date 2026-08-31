@@ -92,17 +92,8 @@ def fetch_records(extra_params=None, path=None):
         page += 1
 
 
-from pyspark import pipelines as dp  # noqa: E402
-from pyspark.sql import SparkSession  # noqa: E402
-
-spark = SparkSession.getActiveSession()
-
-
-from pyspark.sql.datasource import DataSource, DataSourceReader  # noqa: E402
-
-
 def _infer_schema():
-    """Sample the first records to derive a DDL schema (explicit SCHEMA recommended)."""
+    """Sample records to derive a DDL schema (explicit SCHEMA recommended)."""
     from itertools import islice
 
     sample = list(islice(fetch_records(), 50))
@@ -113,19 +104,40 @@ def _infer_schema():
     fields = {}
     for record in sample:
         for key, value in record.items():
-            if key in fields and fields[key] != "STRING":
+            if value is None:
                 continue
             if isinstance(value, bool):
-                fields[key] = "BOOLEAN"
+                candidate = "BOOLEAN"
             elif isinstance(value, int):
-                fields[key] = "BIGINT"
+                candidate = "BIGINT"
             elif isinstance(value, float):
+                candidate = "DOUBLE"
+            else:
+                candidate = "STRING"
+            current = fields.get(key)
+            if current is None:
+                fields[key] = candidate
+            elif current == candidate:
+                pass
+            elif {current, candidate} == {"BIGINT", "DOUBLE"}:
                 fields[key] = "DOUBLE"
-            elif value is None:
-                fields.setdefault(key, "STRING")
             else:
                 fields[key] = "STRING"
+    if not fields:
+        raise RuntimeError(
+            "cannot infer a schema: sampled records have no fields; set an explicit"
+            " schema"
+        )
     return ", ".join(f"`{name}` {type_}" for name, type_ in fields.items())
+
+
+from pyspark import pipelines as dp  # noqa: E402
+from pyspark.sql import SparkSession  # noqa: E402
+
+spark = SparkSession.getActiveSession()
+
+
+from pyspark.sql.datasource import DataSource, DataSourceReader  # noqa: E402
 
 
 class RestSource(DataSource):

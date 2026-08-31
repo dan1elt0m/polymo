@@ -211,10 +211,12 @@ generated script track a cursor between runs:
   as it yields records and writes it once done.
 - For `param_range` / `endpoints` connectors, `read()` runs once per
   partition/window, so each partition tracks and writes its own max
-  independently; with more than one partition, whichever write lands last
-  wins. `STATE_PATH` must point somewhere every partition's executor can
-  reach (e.g. a Databricks Volume — see the note below) for state to be
-  read back correctly on the next run.
+  independently; with more than one partition, whichever partition finishes
+  last wins. Batch tables re-fetch everything on every run regardless of
+  the cursor, so a stale write only costs some redundant fetching next
+  time, not missed data. `STATE_PATH` must point somewhere every
+  partition's executor can reach (e.g. a Databricks Volume — see the note
+  below) for state to be read back correctly on the next run.
 
 The Incremental panel also has **State path**, **Start value**, **State
 key**, and **Keep in memory** fields. These only affect what the **Preview**
@@ -258,12 +260,16 @@ This section is JSON-only; it has no effect on XML responses (see below).
 Toggle **Infer schema** (`stream.infer_schema`) to skip pinning a DDL. The
 inline Data Source's `schema()` (see [How the batch table
 reads](#how-the-batch-table-reads) above) then calls a generated
-`_infer_schema()` helper, which samples up to the first 50 records from
-`fetch_records()` and derives a DDL string from their Python types — good
-for getting started, but it costs an extra request every time the table
-runs, and the shape can shift if the API's response shape changes.
-**An explicit schema is recommended** for anything beyond initial
-exploration.
+`_infer_schema()` helper, which samples up to 50 records from
+`fetch_records()` (split evenly across windows for a `param_range` /
+`endpoints` connector, so a column that only appears in one window's
+records is still picked up) and derives a DDL string from their Python
+types — widening a column that mixes ints and floats to `DOUBLE`, and
+falling back to `STRING` for any other type conflict or for `null`/dict/list
+values. This is good for getting started, but it costs an extra request
+every time the table runs, and the shape can shift if the API's response
+shape changes. **An explicit schema is recommended** for anything beyond
+initial exploration.
 
 Turn it off and fill in **Schema** (`stream.schema`) to pin an explicit
 Spark SQL DDL string, comma-separated `name TYPE` pairs:

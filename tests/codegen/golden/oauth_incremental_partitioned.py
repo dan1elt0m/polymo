@@ -162,11 +162,12 @@ class _Reader(DataSourceReader):
                 cursor = value
             yield tuple(_cell(record.get(column)) for column in self._columns)
         # read() runs per partition on the executor that owns it, so each
-        # partition writes its own max cursor independently; with more than
-        # one partition, whichever write lands last wins (roughly the same
-        # outcome as taking the max across partitions). STATE_PATH must
-        # point somewhere every executor can reach (e.g. a Databricks
-        # Volume, per the comment on it above) for this to work at all.
+        # partition writes its own max cursor independently; whichever
+        # partition finishes last wins. Batch tables re-fetch fully each
+        # run, so a stale cursor only costs redundant fetching, not missed
+        # data. STATE_PATH must point somewhere every executor can reach
+        # (e.g. a Databricks Volume, per the comment on it above) for this
+        # to work at all.
         _write_state(cursor)
 
 
