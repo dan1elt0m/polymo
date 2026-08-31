@@ -442,12 +442,10 @@ def _parse_auth_config(
 
     client_id = raw_auth.get("client_id")
     client_secret_raw = raw_auth.get("client_secret")
-    client_secret, client_secret_redacted = _resolve_secret_value(client_secret_raw)
+    client_secret, _ = _resolve_secret_value(client_secret_raw)
 
     secret_from_options_raw = runtime_options.pop("oauth_client_secret", None)
-    secret_from_options, options_secret_redacted = _resolve_secret_value(
-        secret_from_options_raw
-    )
+    secret_from_options, _ = _resolve_secret_value(secret_from_options_raw)
 
     client_secret = client_secret or token_value or secret_from_options
 

@@ -24,27 +24,6 @@ PACKAGE_ROOT = resources.files(__package__)
 TEMPLATES = Jinja2Templates(directory=str(PACKAGE_ROOT.joinpath("templates")))
 STATIC_PATH = PACKAGE_ROOT.joinpath("static")
 
-SAMPLE_CONFIG_DICT = {
-    "version": "0.1",
-    "source": {
-        "type": "rest",
-        "base_url": "https://jsonplaceholder.typicode.com",
-    },
-    "stream": {
-        "name": "posts",
-        "path": "/posts",
-        "params": {"_limit": 25},
-        "pagination": {"type": "none"},
-        "incremental": {
-            "mode": None,
-            "cursor_param": None,
-            "cursor_field": None,
-        },
-        "infer_schema": True,
-        "schema": None,
-    },
-}
-
 
 class ValidationRequest(BaseModel):
     config_dict: Dict[str, Any] = Field(
@@ -122,13 +101,7 @@ def create_app() -> FastAPI:
 
     @app.get("/")
     async def index(request: Request) -> Any:
-        return TEMPLATES.TemplateResponse(
-            request,
-            "index.html",
-            {
-                "sample_config_dict": SAMPLE_CONFIG_DICT,
-            },
-        )
+        return TEMPLATES.TemplateResponse(request, "index.html")
 
     @app.post("/api/validate", response_model=ValidationResponse)
     async def validate_config(payload: ValidationRequest) -> ValidationResponse:

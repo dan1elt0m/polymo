@@ -98,6 +98,27 @@ def test_generate_rejects_invalid_config() -> None:
     assert response.status_code == 400
 
 
+def test_generate_rejects_codegen_invalid_config() -> None:
+    """A config can be parse-valid (passes `parse_config`) yet still be
+    rejected at the codegen stage: streaming without a schema parses fine
+    but `generate()` refuses it. `/api/generate` should surface that as a
+    400 with the codegen error message in `detail`, not a 500."""
+    app = create_app()
+    client = TestClient(app)
+
+    config_dict = {
+        "version": "0.1",
+        "source": {"type": "rest", "base_url": "https://example.com"},
+        "stream": {"name": "posts", "path": "/posts", "streaming": True},
+    }
+
+    response = client.post("/api/generate", json={"config_dict": config_dict})
+    payload = response.json()
+
+    assert response.status_code == 400
+    assert "streaming" in payload["detail"]
+
+
 def test_sample_endpoint_executes_generated_code(http_server) -> None:
     http_server.routes["/posts"] = lambda q, h, b: (200, [{"id": 1}, {"id": 2}], {})
     app = create_app()

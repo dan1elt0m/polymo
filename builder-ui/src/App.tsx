@@ -30,19 +30,11 @@ import type { ConfigFormState, ValidationResponse, RestSourceConfig, SavedConnec
 import { MAX_SAMPLE_ROWS, SAMPLE_VIEWS } from "./lib/constants";
 import { INITIAL_FORM_STATE } from "./lib/initial-data";
 import { createId } from "./lib/id";
-import { configFileName, CONFIG_FILE_EXTENSION } from "./lib/filename";
+import { configFileName, CONFIG_FILE_EXTENSION, slugifyName } from "./lib/filename";
 
 const cloneFormState = (state: ConfigFormState): ConfigFormState => JSON.parse(JSON.stringify(state));
 
 const createSampleState = () => JSON.parse(JSON.stringify(DEFAULT_SAMPLE_STATE));
-
-const slugify = (value: string): string => {
-	return value
-		.toLowerCase()
-		.trim()
-		.replace(/[^a-z0-9]+/g, '-')
-		.replace(/^-+|-+$/g, '') || 'connector';
-};
 
 const stripExtension = (name: string): string =>
 	name.replace(/\.polymo\.json$/i, '').replace(/\.[^.]+$/, '').trim();
@@ -105,7 +97,7 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 	), [savedConnectors, activeConnectorId]);
 
 	const updateSaveFileName = React.useCallback((name: string) => {
-		setSaveFileName(`${slugify(name)}${CONFIG_FILE_EXTENSION}`);
+		setSaveFileName(`${slugifyName(name)}${CONFIG_FILE_EXTENSION}`);
 	}, [setSaveFileName]);
 
 	const resetWorkingState = React.useCallback(() => {
@@ -253,7 +245,7 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 				const blob = new Blob([contents], { type: 'application/json' });
 				const link = document.createElement('a');
 				link.href = URL.createObjectURL(blob);
-				link.download = `${slugify(connector.name)}${CONFIG_FILE_EXTENSION}`;
+				link.download = `${slugifyName(connector.name)}${CONFIG_FILE_EXTENSION}`;
 				document.body.appendChild(link);
 				link.click();
 				document.body.removeChild(link);
@@ -345,6 +337,10 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 	// YAML derivation now that codegen happens on the backend.
 	React.useEffect(() => {
 		if (showLandingScreen) return;
+		if (!configFormState.baseUrl.trim()) {
+			setGeneratedCode({ script: "", stream: "", error: null, loading: false });
+			return;
+		}
 		setGeneratedCode((prev) => ({ ...prev, loading: true }));
 		let cancelled = false;
 		const handle = window.setTimeout(() => {
@@ -841,6 +837,11 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 										stream={generatedCode.stream}
 										error={generatedCode.error}
 										loading={generatedCode.loading}
+										emptyMessage={
+											configFormState.baseUrl.trim()
+												? undefined
+												: "Fill in a base URL to see the generated script."
+										}
 									/>
 								</Tabs.Content>
 							</Tabs.Root>

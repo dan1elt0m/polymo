@@ -8,9 +8,6 @@ export interface SchemaTabProps {
 }
 
 export const SchemaTab: React.FC<SchemaTabProps> = ({ state, onUpdateState }) => {
-  // Add console log to help debug the state
-  console.log("SchemaTab state:", state);
-  
   return (
     <div className="space-y-8">
       <div className="space-y-4">

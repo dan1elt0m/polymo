@@ -123,11 +123,8 @@ export interface SamplePayload {
 }
 
 export interface RawPagePayload {
-  page: number;
   url: string;
   status_code: number;
-  headers?: Record<string, string>;
-  records: Record<string, any>[];
   payload: unknown;
 }
 
