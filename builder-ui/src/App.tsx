@@ -23,6 +23,7 @@ import { configToFormState, formStateToConfig } from "./lib/transform";
 import { validateConfigRequest, sampleRequest, generateScript } from "./lib/api";
 import { BuilderPanel } from "./components/BuilderPanel";
 import { CodePane } from "./components/CodePane";
+import { DeployPanel } from "./components/DeployPanel";
 import { SamplePreview } from "./components/SamplePreview";
 import { ThemeMenu } from "./components/ThemeMenu";
 import { LandingScreen } from "./components/LandingScreen";
@@ -125,7 +126,9 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 			setActiveConnectorId(connector.id);
 			setConfigFormState(effectiveFormState);
 			setLastEdited(connector.lastEdited);
-			setBuilderView(connector.builderView === 'code' ? 'code' : 'ui');
+			setBuilderView(
+				connector.builderView === 'code' || connector.builderView === 'deploy' ? connector.builderView : 'ui',
+			);
 			setReaderOptions({ ...connector.readerOptions });
 			setStatus({ tone: 'info', message: options?.message ?? `Loaded ${connector.name}` });
 			updateSaveFileName(connector.name);
@@ -532,7 +535,7 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 
 	const handleViewChange = React.useCallback(
 		(value: string) => {
-			setBuilderView(value === "code" ? "code" : "ui");
+			setBuilderView(value === "code" ? "code" : value === "deploy" ? "deploy" : "ui");
 		},
 		[setBuilderView],
 	);
@@ -802,6 +805,12 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 										>
 											Generated Code
 										</Tabs.Trigger>
+										<Tabs.Trigger
+											value="deploy"
+											className="rounded-full px-4 py-1.5 transition text-slate-11 dark:text-drac-foreground/80 hover:text-slate-12 dark:hover:text-drac-foreground data-[state=active]:bg-blue-9 data-[state=active]:text-white data-[state=active]:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-7"
+										>
+											Deploy
+										</Tabs.Trigger>
 									</Tabs.List>
 									<div className="flex items-center gap-3">
 										<button
@@ -844,6 +853,9 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 												: "Fill in a base URL to see the generated script."
 										}
 									/>
+								</Tabs.Content>
+								<Tabs.Content value="deploy" className="outline-none">
+									<DeployPanel />
 								</Tabs.Content>
 							</Tabs.Root>
 						</section>

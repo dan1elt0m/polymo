@@ -10,7 +10,7 @@ import {
 } from "../lib/constants";
 
 export const configFormStateAtom = atom<ConfigFormState>(INITIAL_FORM_STATE);
-export const builderViewAtom = atom<"ui" | "code">("ui");
+export const builderViewAtom = atom<"ui" | "code" | "deploy">("ui");
 export const lastEditedAtom = atom<"ui">("ui");
 export const statusAtom = atom<StatusState>({ tone: "info", message: "Ready to configure" });
 export const isValidatingAtom = atom(false);
@@ -136,6 +136,11 @@ export const generatedCodeAtom = atom<GeneratedCodeState>(DEFAULT_GENERATED_CODE
 
 export const bearerTokenAtom = atom<string>('');
 export const readerOptionsAtom = atom<Record<string, string>>({});
+
+// Databricks CLI profile shared between the Deploy tab and the
+// secret-scope pickers in AuthenticationSection, so picking a profile once
+// in the Deploy tab is enough to browse secret scopes/keys there too.
+export const databricksProfileAtom = atom<string>('');
 
 const INCREMENTAL_OPTION_KEYS = new Set([
   'incremental_state_path',

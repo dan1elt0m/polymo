@@ -1,6 +1,9 @@
 import React from "react";
+import { useAtomValue } from "jotai";
 import type { ConfigFormState } from "../../../types";
 import { InfoTooltip } from "../../InfoTooltip";
+import { databricksProfileAtom } from "../../../atoms";
+import { ApiError, listDatabricksSecretKeys, listDatabricksSecretScopes } from "../../../lib/api";
 
 export interface AuthenticationSectionProps {
   state: ConfigFormState;
@@ -9,6 +12,16 @@ export interface AuthenticationSectionProps {
 }
 
 const AUTH_TOGGLE_ID = "auth-section";
+
+function describeSecretPickerError(error: unknown): string {
+  if (error instanceof ApiError && error.status === 501) {
+    return error.message;
+  }
+  return error instanceof Error ? error.message : String(error ?? "Failed to load");
+}
+
+const SELECT_CLASS =
+  "w-full rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm appearance-none pr-9 transition-all focus:border-blue-7 dark:focus:border-drac-accent focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed";
 
 export const AuthenticationSection: React.FC<AuthenticationSectionProps> = ({
   state,
@@ -23,9 +36,164 @@ export const AuthenticationSection: React.FC<AuthenticationSectionProps> = ({
     }
   }, [state.authType]);
 
+  const profile = useAtomValue(databricksProfileAtom);
+  const [scopes, setScopes] = React.useState<string[]>([]);
+  const [scopesLoading, setScopesLoading] = React.useState(false);
+  const [scopesError, setScopesError] = React.useState<string | null>(null);
+  const [keys, setKeys] = React.useState<string[]>([]);
+  const [keysLoading, setKeysLoading] = React.useState(false);
+  const [keysError, setKeysError] = React.useState<string | null>(null);
+
+  const secretScopeActive = state.authSecretMode === "secret_scope";
+
+  React.useEffect(() => {
+    if (!secretScopeActive || !profile) {
+      setScopes([]);
+      setScopesError(null);
+      return;
+    }
+    let cancelled = false;
+    setScopesLoading(true);
+    setScopesError(null);
+    listDatabricksSecretScopes(profile)
+      .then((res) => {
+        if (!cancelled) setScopes(res.secret_scopes);
+      })
+      .catch((err) => {
+        if (!cancelled) setScopesError(describeSecretPickerError(err));
+      })
+      .finally(() => {
+        if (!cancelled) setScopesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [secretScopeActive, profile]);
+
+  React.useEffect(() => {
+    if (!secretScopeActive || !profile || !state.authSecretScope) {
+      setKeys([]);
+      setKeysError(null);
+      return;
+    }
+    let cancelled = false;
+    setKeysLoading(true);
+    setKeysError(null);
+    listDatabricksSecretKeys(state.authSecretScope, profile)
+      .then((res) => {
+        if (!cancelled) setKeys(res.secret_keys);
+      })
+      .catch((err) => {
+        if (!cancelled) setKeysError(describeSecretPickerError(err));
+      })
+      .finally(() => {
+        if (!cancelled) setKeysLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [secretScopeActive, profile, state.authSecretScope]);
+
+  const renderSecretSourcePicker = React.useCallback(
+    () => (
+      <div className="flex flex-col gap-3 md:col-span-2">
+        <div className="flex items-center gap-1">
+          <span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Secret source</span>
+          <InfoTooltip text="Preview value: enter a value used only for previewing in this browser session; the exported script gets a REPLACE_ME placeholder. Databricks secret scope: reference a scope + key so the exported bundle resolves it at runtime instead." />
+        </div>
+        <div className="inline-flex w-fit rounded-full border border-border bg-background p-1 text-xs font-medium dark:border-drac-border/60 dark:bg-[#1f232b]">
+          <button
+            type="button"
+            className={`rounded-full px-3 py-1.5 transition ${
+              !secretScopeActive
+                ? "bg-blue-9 text-white shadow-sm"
+                : "text-slate-11 hover:text-slate-12 dark:text-drac-foreground/80 dark:hover:text-drac-foreground"
+            }`}
+            onClick={() => onUpdateState({ authSecretMode: "inline" })}
+          >
+            Enter for preview / placeholder in export
+          </button>
+          <button
+            type="button"
+            className={`rounded-full px-3 py-1.5 transition ${
+              secretScopeActive
+                ? "bg-blue-9 text-white shadow-sm"
+                : "text-slate-11 hover:text-slate-12 dark:text-drac-foreground/80 dark:hover:text-drac-foreground"
+            }`}
+            onClick={() => onUpdateState({ authSecretMode: "secret_scope" })}
+          >
+            Databricks secret scope
+          </button>
+        </div>
+
+        {secretScopeActive && (
+          <div className="grid gap-3 md:grid-cols-2">
+            {!profile && (
+              <p className="text-xs text-warning md:col-span-2">
+                Pick a Databricks profile in the Deploy tab first to browse secret scopes and keys.
+              </p>
+            )}
+            <label className="flex flex-col gap-2">
+              <span className="text-xs font-medium text-slate-11 dark:text-drac-foreground/80">Secret scope</span>
+              <select
+                className={SELECT_CLASS}
+                value={state.authSecretScope || ""}
+                disabled={!profile || scopesLoading}
+                onChange={(event) => onUpdateState({ authSecretScope: event.target.value, authSecretKey: "" })}
+              >
+                <option value="">{scopesLoading ? "Loading…" : "Select scope"}</option>
+                {scopes.map((scope) => (
+                  <option key={scope} value={scope}>
+                    {scope}
+                  </option>
+                ))}
+              </select>
+              {scopesError && <span className="text-xs text-error">{scopesError}</span>}
+            </label>
+            <label className="flex flex-col gap-2">
+              <span className="text-xs font-medium text-slate-11 dark:text-drac-foreground/80">Secret key</span>
+              <select
+                className={SELECT_CLASS}
+                value={state.authSecretKey || ""}
+                disabled={!state.authSecretScope || keysLoading}
+                onChange={(event) => onUpdateState({ authSecretKey: event.target.value })}
+              >
+                <option value="">{keysLoading ? "Loading…" : "Select key"}</option>
+                {keys.map((key) => (
+                  <option key={key} value={key}>
+                    {key}
+                  </option>
+                ))}
+              </select>
+              {keysError && <span className="text-xs text-error">{keysError}</span>}
+            </label>
+          </div>
+        )}
+      </div>
+    ),
+    [
+      secretScopeActive,
+      profile,
+      scopes,
+      scopesLoading,
+      scopesError,
+      keys,
+      keysLoading,
+      keysError,
+      state.authSecretScope,
+      state.authSecretKey,
+      onUpdateState,
+    ],
+  );
+
   const handleAuthTypeChange = React.useCallback(
     (nextType: ConfigFormState["authType"]) => {
-      const patch: Partial<ConfigFormState> = { authType: nextType };
+      const patch: Partial<ConfigFormState> = {
+        authType: nextType,
+        authSecretMode: "inline",
+        authSecretScope: "",
+        authSecretKey: "",
+      };
 
       if (nextType === "none") {
         patch.authToken = "";
@@ -141,19 +309,24 @@ export const AuthenticationSection: React.FC<AuthenticationSectionProps> = ({
             </label>
 
             {state.authType === "bearer" && (
-              <label className="flex flex-col gap-2">
-                <div className="flex items-center gap-1">
-                  <span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Bearer Token</span>
-                  <InfoTooltip text="Secret token sent as Authorization header." />
-                </div>
-                <input
-                  type="password"
-                  className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
-                  placeholder="your-token-here"
-                  value={state.authToken}
-                  onChange={(event) => handleBearerTokenChange(event.target.value)}
-                />
-              </label>
+              <>
+                <label className="flex flex-col gap-2">
+                  <div className="flex items-center gap-1">
+                    <span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">
+                      {secretScopeActive ? "Bearer Token — preview value (optional)" : "Bearer Token"}
+                    </span>
+                    <InfoTooltip text="Secret token sent as Authorization header." />
+                  </div>
+                  <input
+                    type="password"
+                    className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
+                    placeholder="your-token-here"
+                    value={state.authToken}
+                    onChange={(event) => handleBearerTokenChange(event.target.value)}
+                  />
+                </label>
+                {renderSecretSourcePicker()}
+              </>
             )}
 
             {state.authType === "api_key" && (
@@ -198,7 +371,9 @@ export const AuthenticationSection: React.FC<AuthenticationSectionProps> = ({
                 </label>
                 <label className="flex flex-col gap-2 md:col-span-2">
                   <div className="flex items-center gap-1">
-                    <span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">API Key (secret)</span>
+                    <span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">
+                      {secretScopeActive ? "API Key — preview value (optional)" : "API Key (secret)"}
+                    </span>
                     <InfoTooltip text="Secret API key stored only in the browser session for previewing; the exported script gets a REPLACE_ME placeholder instead." />
                   </div>
                   <input
@@ -209,6 +384,7 @@ export const AuthenticationSection: React.FC<AuthenticationSectionProps> = ({
                     onChange={(event) => handleBearerTokenChange(event.target.value)}
                   />
                 </label>
+                {renderSecretSourcePicker()}
               </div>
             )}
 
@@ -244,7 +420,9 @@ export const AuthenticationSection: React.FC<AuthenticationSectionProps> = ({
 
                 <label className="flex flex-col gap-2 md:col-span-2">
                   <div className="flex items-center gap-1">
-                    <span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Client Secret</span>
+                    <span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">
+                      {secretScopeActive ? "Client Secret — preview value (optional)" : "Client Secret"}
+                    </span>
                     <InfoTooltip text="Secret stored only in this session and passed as a runtime option ('oauth_client_secret')." />
                   </div>
                   <input
@@ -255,6 +433,7 @@ export const AuthenticationSection: React.FC<AuthenticationSectionProps> = ({
                     onChange={(event) => handleBearerTokenChange(event.target.value)}
                   />
                 </label>
+                {renderSecretSourcePicker()}
 
                 <label className="flex flex-col gap-2">
                   <div className="flex items-center gap-1">

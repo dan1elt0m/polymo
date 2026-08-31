@@ -279,6 +279,18 @@ export function formStateToConfig(formState: ConfigFormState): RestSourceConfig 
     return undefined;
   })();
 
+  // Attach the Databricks secret-scope reference (if the user picked one)
+  // for whichever auth secret slot is active. Never carries the secret
+  // value itself — only the scope+key reference the exported bundle
+  // resolves at runtime.
+  if (authBlock && formState.authType !== 'none' && formState.authSecretMode === 'secret_scope') {
+    const scope = formState.authSecretScope?.trim();
+    const key = formState.authSecretKey?.trim();
+    if (scope && key) {
+      (authBlock as Record<string, any>).secret = { scope, key };
+    }
+  }
+
   return {
     version: formState.version,
     source: {
@@ -500,6 +512,10 @@ export function configToFormState(config: RestSourceConfig): ConfigFormState {
     : '';
   const authApiKeyIn = authType === 'api_key' ? (authConfig?.api_key_in ?? 'header') : 'header';
   const authApiKeyName = authType === 'api_key' ? (authConfig?.api_key_name ?? '') : '';
+  const authSecret = authType !== 'none' ? authConfig?.secret ?? null : null;
+  const authSecretMode: ConfigFormState['authSecretMode'] = authSecret ? 'secret_scope' : 'inline';
+  const authSecretScope = authSecret?.scope ?? '';
+  const authSecretKey = authSecret?.key ?? '';
 
   return {
     version: config.version,
@@ -513,6 +529,9 @@ export function configToFormState(config: RestSourceConfig): ConfigFormState {
     authScopes,
     authAudience,
     authExtraParams,
+    authSecretMode,
+    authSecretScope,
+    authSecretKey,
     streamName,
     streamPath,
     streaming: Boolean(config.stream.streaming),
@@ -616,7 +635,15 @@ export function validateFormState(formState: ConfigFormState): string[] {
     errors.push('Stream path must start with /');
   }
 
-  if (formState.authType === 'bearer' && !formState.authToken.trim()) {
+  const usesSecretScope =
+    formState.authSecretMode === 'secret_scope' &&
+    (formState.authType === 'bearer' || formState.authType === 'api_key' || formState.authType === 'oauth2');
+
+  if (usesSecretScope && (!formState.authSecretScope?.trim() || !formState.authSecretKey?.trim())) {
+    errors.push('Select a Databricks secret scope and key, or switch the secret source back to preview value');
+  }
+
+  if (formState.authType === 'bearer' && !usesSecretScope && !formState.authToken.trim()) {
     errors.push('Bearer token is required when using bearer authentication');
   }
 
@@ -631,7 +658,7 @@ export function validateFormState(formState: ConfigFormState): string[] {
     if (!formState.authClientId?.trim()) {
       errors.push('OAuth2 client ID is required');
     }
-    if (!formState.authToken.trim()) {
+    if (!usesSecretScope && !formState.authToken.trim()) {
       errors.push('OAuth2 client secret is required (stored only for this session)');
     }
     const extraRaw = formState.authExtraParams?.trim();

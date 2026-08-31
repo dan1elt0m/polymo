@@ -1,5 +1,13 @@
 // Configuration types matching the Python backend schema
 
+// A reference to a secret stored in a Databricks secret scope. Configs
+// carry ONLY this reference (`scope` + `key`) — never the secret value
+// itself; the exported bundle resolves it at runtime via `dbutils`.
+export interface SecretRef {
+  scope: string;
+  key: string;
+}
+
 export interface AuthConfig {
   type: 'none' | 'bearer' | 'oauth2' | 'api_key';
   token?: string | null;
@@ -13,6 +21,11 @@ export interface AuthConfig {
   // VALUE is never persisted here, same as `token` for bearer.
   api_key_in?: 'header' | 'query' | null;
   api_key_name?: string | null;
+  // Optional Databricks secret-scope reference for the auth secret slot
+  // (bearer token / api_key value / oauth2 client_secret). When set, the
+  // exported bundle resolves the secret from Databricks instead of a
+  // REPLACE_ME placeholder.
+  secret?: SecretRef | null;
 }
 
 export interface PaginationConfig {
@@ -136,6 +149,38 @@ export interface RawPagePayload {
   payload: unknown;
 }
 
+// Databricks builder-integration response shapes (see
+// src/polymo/builder/app.py for the source of truth).
+export interface DatabricksProfilesResponse {
+  profiles: string[];
+}
+
+export interface DatabricksCatalogsResponse {
+  catalogs: string[];
+}
+
+export interface DatabricksSchemasResponse {
+  schemas: string[];
+}
+
+export interface DatabricksSecretScopesResponse {
+  secret_scopes: string[];
+}
+
+export interface DatabricksSecretKeysResponse {
+  secret_keys: string[];
+}
+
+export interface DatabricksBootstrapResponse {
+  project_path: string;
+  files: string[];
+}
+
+export interface DatabricksCommandResponse {
+  ok: boolean;
+  output: string;
+}
+
 // Form state types for the builder UI
 export interface ConfigFormState {
   version: string;
@@ -149,6 +194,13 @@ export interface ConfigFormState {
   authScopes?: string;
   authAudience?: string;
   authExtraParams?: string;
+  // Where the auth secret value comes from. 'inline' keeps today's
+  // behavior (a session-only preview value / REPLACE_ME placeholder on
+  // export); 'secret_scope' references a Databricks secret scope + key
+  // instead, resolved by the exported bundle at runtime.
+  authSecretMode: 'inline' | 'secret_scope';
+  authSecretScope?: string;
+  authSecretKey?: string;
   streamName: string;
   streamPath: string;
   streaming: boolean;
@@ -211,7 +263,7 @@ export interface SavedConnector {
   updatedAt: string;
   formState: ConfigFormState;
   lastEdited: 'ui';
-  builderView: 'ui' | 'code';
+  builderView: 'ui' | 'code' | 'deploy';
   readerOptions: Record<string, string>;
 }
 
