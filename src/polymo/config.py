@@ -1358,10 +1358,10 @@ def _validate_type_expr(type_spec: str) -> None:
         return
 
     # keyword == "struct"
+    # An empty STRUCT<> is unusual but real Spark (StructType.fromDDL)
+    # accepts it as a zero-field struct, so the validator must too.
     content = _extract_angle_content(normalized, "struct")
     inner_fields = _split_top_level(content)
-    if not inner_fields:
-        raise ValueError(f"STRUCT type must have at least one field: '{type_spec}'")
     for inner_field in inner_fields:
         _validate_struct_field(inner_field)
 

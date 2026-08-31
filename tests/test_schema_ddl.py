@@ -55,6 +55,7 @@ def test_flat_schema_still_accepted(schema: str) -> None:
         "id INT, meta MAP<STRING, STRUCT<a: INT, b: STRING>>",
         "id INT, s STRUCT<a: ARRAY<STRUCT<x: INT, y: DECIMAL(5,2)>>>",
         "id INT, s STRUCT<a: INT, b: STRUCT<c: STRING>>",  # nested struct in struct
+        "id INT, s STRUCT<>",  # empty struct — real Spark's fromDDL accepts this
     ],
 )
 def test_nested_schema_accepted(schema: str) -> None:
@@ -87,7 +88,6 @@ def test_backtick_quoted_names_accepted(schema: str) -> None:
     "schema",
     [
         "id INT, s STRUCT<a: INT",  # unbalanced '<'
-        "id INT, s STRUCT<>",  # empty struct
         "id INT, s STRUCT<a: FOOBAR>",  # unknown scalar inside struct
         "id INT, a ARRAY<>",  # empty array element type
         "id INT, a ARRAY<FOOBAR>",  # unknown scalar inside array
@@ -108,3 +108,16 @@ def test_garbage_rejected(schema: str) -> None:
 def test_garbage_wrapped_in_config_error() -> None:
     with pytest.raises(ConfigError, match="Invalid schema DDL"):
         parse_config(_config("id INT, s STRUCT<a: FOOBAR>"))
+
+
+@pytest.mark.spark
+def test_empty_struct_matches_real_spark_fromddl(spark_session) -> None:
+    # The validator accepting STRUCT<> is only correct if Spark's own DDL
+    # parser really does too — confirm against a real StructType.fromDDL
+    # call rather than trusting the claim.
+    from pyspark.sql.types import StructType
+
+    schema = "id INT, s STRUCT<>"
+    validate_ddl(schema)  # must not raise
+    struct_type = StructType.fromDDL(schema)
+    assert struct_type["s"].dataType == StructType([])

@@ -106,19 +106,23 @@ SCHEMA: str = "id BIGINT"
 
 from pyspark.sql.datasource import DataSource, SimpleDataSourceStreamReader  # noqa: E402
 
-# Assumes SCHEMA is a comma-separated "name TYPE" DDL string (as emitted
-# above); column names are taken as the first whitespace-separated token.
-COLUMNS: list[str] = [f.split()[0] for f in SCHEMA.split(",")]
-
 
 class _Reader(SimpleDataSourceStreamReader):
+    def __init__(self, schema: Any) -> None:
+        # Spark hands simpleStreamReader() a real StructType (same as the
+        # batch DataSourceReader gets) — deriving column names from it
+        # avoids naively splitting the SCHEMA string on commas, which would
+        # corrupt on any comma inside a type (DECIMAL(p,s), and any nested
+        # ARRAY/MAP/STRUCT).
+        self._columns: list[str] = [field.name for field in schema.fields]
+
     def initialOffset(self) -> dict[str, Any]:
         return {"page": 0}
 
     def read(self, start: dict[str, Any]) -> tuple[Iterator[tuple], dict[str, Any]]:
         page = start["page"]
         records = fetch_page(page)
-        rows = [tuple(r.get(c) for c in COLUMNS) for r in records]
+        rows = [tuple(r.get(c) for c in self._columns) for r in records]
         next_page = page + 1 if records else page
         return iter(rows), {"page": next_page}
 
@@ -126,7 +130,7 @@ class _Reader(SimpleDataSourceStreamReader):
         rows = []
         for page in range(start["page"], end["page"]):
             for r in fetch_page(page):
-                rows.append(tuple(r.get(c) for c in COLUMNS))
+                rows.append(tuple(r.get(c) for c in self._columns))
         return iter(rows)
 
 
@@ -139,7 +143,7 @@ class RestStreamSource(DataSource):
         return SCHEMA
 
     def simpleStreamReader(self, schema: Any) -> "_Reader":
-        return _Reader()
+        return _Reader(schema)
 
 
 spark.dataSource.register(RestStreamSource)

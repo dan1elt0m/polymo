@@ -56,7 +56,7 @@ def _records(root: ET.Element) -> list[dict[str, Any]]:
     """Flatten each matched XML element into a record dict."""
     records = []
     for element in root.findall(XML_RECORD_PATH):
-        record = {f"@{key}": value for key, value in element.attrib.items()}
+        record: dict[str, Any] = {f"@{key}": value for key, value in element.attrib.items()}
         for child in element:
             record[child.tag] = child.text
         records.append(record)
