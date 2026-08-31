@@ -177,6 +177,70 @@ def test_unknown_command_rejected():
 
 ---
 
+### Task 9: XML response support (generator + builder) — user-requested, execute between Tasks 6 and 7
+
+Motivation: Maileon (the first real data-team test case) serves `application/vnd.maileon.api+xml`; many enterprise APIs are XML-first. Generated scripts and the builder preview must be able to parse XML responses. Old 0.x runtime deliberately excluded (it is deleted by this plan).
+
+**Files:**
+- Modify: `src/polymo/config.py` (StreamConfig + parse/serialize), `src/polymo/codegen/generator.py`, `src/polymo/codegen/templates/core.py.jinja`, `builder-ui/src/types.ts`, `builder-ui/src/lib/transform.ts`, `builder-ui/src/components/builder/sections/BaseConfigurationSection.tsx` (or RecordSelectorSection — implementer's judgment), `tests/codegen/conftest.py` (mock server raw-body support)
+- Test: `tests/codegen/test_xml.py`, golden case `maileon_xml` in `tests/codegen/test_golden.py`
+
+**Interfaces:**
+- Config: `StreamConfig.response_format: Literal["json", "xml"] = "json"` and `StreamConfig.xml_record_path: Optional[str] = None` (an `xml.etree.ElementTree` XPath selecting record elements, e.g. `.//contact`). `parse_config` reads `response_format`/`xml_record_path` from dicts; `config_to_dict` writes them. `xml_record_path` without `response_format: xml` is a ConfigError; `response_format: xml` without `xml_record_path` is a ConfigError.
+- Codegen guards (CodegenError, in `generate_core`-reachable code so preview is guarded too — put them in `_context`): XML is incompatible with payload-path features — `cursor_path`, `next_url_path`, `total_pages_path`, `total_records_path`, and `record_selector.field_path` all raise (`"<feature> reads JSON paths and cannot be combined with response_format: xml"`). Header-based pagination (`total_pages_header`, `cursor_header`, `link_header`), offset/page/none pagination, record_filter (operates on built dicts), incremental, partitions, streaming (offset/page already enforced) all remain valid.
+- Generated code, when xml: `import xml.etree.ElementTree as ET` (stdlib — the zero-extra-deps constraint holds); each fetch branch's `payload = response.json()` becomes `payload = ET.fromstring(response.content)`; `_records` is replaced by the XML variant:
+
+```jinja
+{% if response_format == "xml" %}
+XML_RECORD_PATH = {{ xml_record_path_repr }}
+
+
+def _records(root):
+    """Flatten each matched XML element into a record dict."""
+    records = []
+    for element in root.findall(XML_RECORD_PATH):
+        record = {f"@{key}": value for key, value in element.attrib.items()}
+        for child in element:
+            record[child.tag] = child.text
+        records.append(record)
+{% if record_filter_expr %}
+    records = [record for record in records if ({{ record_filter_expr }})]
+{% endif %}
+    return records
+{% else %}
+... existing json _records ...
+{% endif %}
+```
+
+- Mock server: extend `tests/codegen/conftest.py` so a route returning a `str`/`bytes` payload is sent raw with the route's headers (`Content-Type` from the headers dict, default `application/xml` for str/bytes) instead of json.dumps.
+- Builder UI: a "Response format" select (JSON default / XML) plus an "XML record path" text input shown only when XML is selected; both transform directions; the CodePane 400 surface handles the incompatibility errors (no client-side duplication).
+
+**Tests (execution, against the mock server):**
+```python
+def test_xml_records_parsed(http_server):
+    body = (
+        "<contacts>"
+        "<contact id=\"7\"><email>a@b.nl</email><permission>NONE</permission></contact>"
+        "<contact id=\"8\"><email>c@d.nl</email><permission>DOI</permission></contact>"
+        "</contacts>"
+    )
+    http_server.routes["/contacts"] = lambda q, h, b: (200, body, {"Content-Type": "application/vnd.maileon.api+xml"})
+    config = make_config(
+        base_url=http_server.url, name="contacts", path="/contacts",
+        response_format="xml", xml_record_path=".//contact",
+    )
+    module = run_generated(config)
+    assert list(module.fetch_records()) == [
+        {"@id": "7", "email": "a@b.nl", "permission": "NONE"},
+        {"@id": "8", "email": "c@d.nl", "permission": "DOI"},
+    ]
+```
+Plus: page pagination with `total_pages_header` + XML body (the Maileon shape, multi-page walk); guard tests for each incompatible combination (parametrized CodegenError/ConfigError); a `maileon_xml` golden (page_index/page_size/X-Pages, Authorization+Accept headers, xml_record_path `.//contact`); hygiene on all XML variants; JSON goldens byte-identical (only the `{% if %}` json arm is exercised by them — verify).
+
+- [ ] Steps: TDD as usual → full suite → `npx tsc -b --noEmit` + `npm run build` → reseed only the NEW golden → commit `feat(codegen): XML response support` (+ separate `feat(builder-ui): response format selector` if you prefer two commits).
+
+---
+
 ## Self-Review Notes
 
 - Spec "Deletions" coverage: datasource (T2), rest_client (T3), YAML public interface + cli shrink (T4, T5). Docs (T7), release (T8). Carry-overs (T6).
