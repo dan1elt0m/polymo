@@ -9,6 +9,10 @@ export interface AuthConfig {
   scope?: string[] | null;
   audience?: string | null;
   extra_params?: Record<string, any> | null;
+  // api_key auth: where the key goes and its header/query name. The key
+  // VALUE is never persisted here, same as `token` for bearer.
+  api_key_in?: 'header' | 'query' | null;
+  api_key_name?: string | null;
 }
 
 export interface PaginationConfig {
@@ -138,7 +142,8 @@ export interface ConfigFormState {
   baseUrl: string;
   authType: 'none' | 'bearer' | 'api_key' | 'oauth2';
   authToken: string;
-  authApiKeyParamName?: string; // name of the query parameter for api_key auth
+  authApiKeyIn?: 'header' | 'query'; // placement of the api_key auth value
+  authApiKeyName?: string; // header or query parameter name for api_key auth
   authTokenUrl?: string;
   authClientId?: string;
   authScopes?: string;

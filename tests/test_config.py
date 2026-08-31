@@ -247,6 +247,119 @@ def test_oauth2_auth_accepts_secret_wrappers() -> None:
     assert config.auth.client_secret == "secret-from-wrapper"
 
 
+def test_api_key_auth_header_round_trip() -> None:
+    raw = {
+        "version": 0.1,
+        "source": {
+            "type": "rest",
+            "base_url": "https://api.test",
+            "auth": {"type": "api_key", "in": "header", "name": "X-API-Key"},
+        },
+        "stream": {
+            "name": "sample",
+            "path": "/resources",
+        },
+    }
+
+    config = parse_config(raw)
+    assert config.auth.type == "api_key"
+    assert config.auth.api_key_in == "header"
+    assert config.auth.api_key_name == "X-API-Key"
+
+    config_dict = config_to_dict(config)
+    assert config_dict["source"]["auth"] == {
+        "type": "api_key",
+        "in": "header",
+        "name": "X-API-Key",
+    }
+
+    round_tripped = parse_config(config_dict)
+    assert round_tripped.auth.type == "api_key"
+    assert round_tripped.auth.api_key_in == "header"
+    assert round_tripped.auth.api_key_name == "X-API-Key"
+
+
+def test_api_key_auth_query_round_trip() -> None:
+    raw = {
+        "version": 0.1,
+        "source": {
+            "type": "rest",
+            "base_url": "https://api.test",
+            "auth": {"type": "api_key", "in": "query", "name": "api_key"},
+        },
+        "stream": {
+            "name": "sample",
+            "path": "/resources",
+        },
+    }
+
+    config = parse_config(raw)
+    assert config.auth.type == "api_key"
+    assert config.auth.api_key_in == "query"
+    assert config.auth.api_key_name == "api_key"
+
+    config_dict = config_to_dict(config)
+    assert config_dict["source"]["auth"] == {
+        "type": "api_key",
+        "in": "query",
+        "name": "api_key",
+    }
+
+
+def test_api_key_auth_missing_name_raises() -> None:
+    raw = {
+        "version": 0.1,
+        "source": {
+            "type": "rest",
+            "base_url": "https://api.test",
+            "auth": {"type": "api_key", "in": "header"},
+        },
+        "stream": {
+            "name": "sample",
+            "path": "/resources",
+        },
+    }
+
+    with pytest.raises(ConfigError):
+        parse_config(raw)
+
+
+def test_api_key_auth_bad_in_raises() -> None:
+    raw = {
+        "version": 0.1,
+        "source": {
+            "type": "rest",
+            "base_url": "https://api.test",
+            "auth": {"type": "api_key", "in": "cookie", "name": "X-API-Key"},
+        },
+        "stream": {
+            "name": "sample",
+            "path": "/resources",
+        },
+    }
+
+    with pytest.raises(ConfigError):
+        parse_config(raw)
+
+
+def test_api_key_auth_missing_in_raises() -> None:
+    raw = {
+        "version": 0.1,
+        "source": {
+            "type": "rest",
+            "base_url": "https://api.test",
+            "auth": {"type": "api_key", "name": "X-API-Key"},
+        },
+        "stream": {
+            "name": "sample",
+            "path": "/resources",
+        },
+    }
+
+    with pytest.raises(ConfigError):
+        parse_config(raw)
+
+
 def test_partition_param_range_range_block() -> None:
     raw = {
         "version": 0.1,

@@ -29,6 +29,7 @@ def run_preview(
     if token:
         namespace["API_TOKEN"] = token  # bearer
         namespace["CLIENT_SECRET"] = token  # oauth2 (harmless if unused)
+        namespace["API_KEY"] = token  # api_key (harmless if unused)
 
     raw_pages: List[Dict[str, Any]] = []
     original_request = namespace["_request"]

@@ -32,6 +32,36 @@ def test_preview_injects_bearer_token(http_server):
     assert error is None
 
 
+def test_preview_injects_api_key_header(http_server):
+    def route(query, headers, body):
+        assert headers.get("X-API-Key") == "key-1"
+        return 200, [{"id": 1}], {}
+
+    http_server.routes["/posts"] = route
+    config = make_config(
+        base_url=http_server.url,
+        auth=AuthConfig(type="api_key", api_key_in="header", api_key_name="X-API-Key"),
+    )
+    records, _, error = run_preview(config, token="key-1", limit=5)
+    assert records == [{"id": 1}]
+    assert error is None
+
+
+def test_preview_injects_api_key_query(http_server):
+    def route(query, headers, body):
+        assert query.get("api_key") == "key-1"
+        return 200, [{"id": 1}], {}
+
+    http_server.routes["/posts"] = route
+    config = make_config(
+        base_url=http_server.url,
+        auth=AuthConfig(type="api_key", api_key_in="query", api_key_name="api_key"),
+    )
+    records, _, error = run_preview(config, token="key-1", limit=5)
+    assert records == [{"id": 1}]
+    assert error is None
+
+
 def test_preview_windowed_config_blends_across_windows(http_server):
     calls = []
 

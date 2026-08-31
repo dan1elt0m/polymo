@@ -35,6 +35,8 @@ The left-hand panel has two tabs: **UI Builder** and **Generated Code**. Stay on
 ### 2. Authentication (optional)
 - Choose **None** if the API is public.
 - Choose **Bearer Token** if you have a secret token. The value is stored only in your browser session — never saved to disk or written into the generated script.
+- Choose **API Key** if the API expects the key in a request header or query parameter. Pick a **Placement** (Header or Query parameter) and a **Name** (e.g. `X-API-Key`); the key value itself is stored only in your browser session, same as Bearer.
+- Choose **OAuth 2.0 (Client Credentials)** if the API issues tokens via a client-credentials grant. See the [Connector options reference](config.md#authentication) for the full field list.
 
 ### 3. Query parameters & headers
 - Use the **Add Parameter** button to include filters like `status: active` or `_limit: 100`.

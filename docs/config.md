@@ -73,17 +73,16 @@ connector.
   constant near the top; edit it in place (or swap it for a secret-store
   lookup — the generated comment shows a Databricks example) before
   running the script. Maps to `source.auth.type = "bearer"`.
-- **API Key** — adds your chosen parameter name to the request's query
-  parameters. This one is a Builder convenience rather than a first-class
-  auth type: it does not set `source.auth` at all, it just injects
-  `{"<param>": "{{ options.<param> }}"}` into `stream.params`. That
-  template resolves during **Preview** (which supplies the secret
-  separately) into the real value. The exported script has no runtime
-  options to resolve it against, so generation instead emits an
-  `OPT_<PARAM>` placeholder constant (defaulting to `"REPLACE_ME"`) and
-  interpolates it into `PARAMS` at request time — edit that constant in
-  place after export (or swap it for a secret-store lookup, same as the
-  Bearer/OAuth2 placeholders) rather than typing the key into the form.
+- **API Key** — a first-class auth type. Choose a **Placement** (Header or
+  Query parameter) and a **Name** (e.g. `X-API-Key` for a header, or
+  `api_key` for a query parameter). Maps to
+  `source.auth = {"type": "api_key", "in": "header" | "query", "name": "<name>"}`.
+  The key *value* is never stored in the config, same as Bearer — the
+  generated script gets an `API_KEY = "REPLACE_ME"` constant near the top
+  (edit it in place, or swap it for a secret-store lookup, same as the
+  Bearer/OAuth2 placeholders); at request time it is applied as
+  `session.headers["<name>"] = API_KEY` (header placement) or
+  `params["<name>"] = API_KEY` (query placement).
 - **OAuth 2.0 (Client Credentials)** — maps to
   `source.auth = {"type": "oauth2", "token_url": ..., "client_id": ..., "scope": [...], "audience": ..., "extra_params": {...}}`.
   The generated script gets a `CLIENT_SECRET = "REPLACE_ME"` constant and a

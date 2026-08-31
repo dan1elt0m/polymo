@@ -14,14 +14,6 @@ export function formStateToConfig(formState: ConfigFormState): RestSourceConfig 
     }
   });
 
-  // Inject api_key param placeholder if using api_key auth and user hasn't defined it
-  if (formState.authType === 'api_key') {
-    const paramName = (formState.authApiKeyParamName || 'api_key').trim();
-    if (paramName && !(paramName in cleanParams)) {
-      cleanParams[paramName] = `{{ options.${paramName} }}`;
-    }
-  }
-
   // Clean up headers - remove empty values
   const cleanHeaders: Record<string, any> = {};
   Object.entries(formState.headers || {}).forEach(([key, value]) => {
@@ -233,6 +225,17 @@ export function formStateToConfig(formState: ConfigFormState): RestSourceConfig 
   const authBlock = (() => {
     if (formState.authType === 'bearer') {
       return { type: 'bearer' };
+    }
+    if (formState.authType === 'api_key') {
+      const name = formState.authApiKeyName?.trim();
+      if (!name) {
+        return undefined;
+      }
+      return {
+        type: 'api_key',
+        in: formState.authApiKeyIn || 'header',
+        name,
+      };
     }
     if (formState.authType === 'oauth2') {
       const tokenUrl = formState.authTokenUrl?.trim();
@@ -495,12 +498,16 @@ export function configToFormState(config: RestSourceConfig): ConfigFormState {
   const authExtraParams = authType === 'oauth2' && authConfig?.extra_params && Object.keys(authConfig.extra_params).length
     ? JSON.stringify(authConfig.extra_params, null, 2)
     : '';
+  const authApiKeyIn = authType === 'api_key' ? (authConfig?.api_key_in ?? 'header') : 'header';
+  const authApiKeyName = authType === 'api_key' ? (authConfig?.api_key_name ?? '') : '';
 
   return {
     version: config.version,
     baseUrl: config.source.base_url,
     authType,
     authToken: '', // secrets are never persisted
+    authApiKeyIn,
+    authApiKeyName,
     authTokenUrl,
     authClientId,
     authScopes,
@@ -611,6 +618,10 @@ export function validateFormState(formState: ConfigFormState): string[] {
 
   if (formState.authType === 'bearer' && !formState.authToken.trim()) {
     errors.push('Bearer token is required when using bearer authentication');
+  }
+
+  if (formState.authType === 'api_key' && !formState.authApiKeyName?.trim()) {
+    errors.push('API key header/query name is required when using API key authentication');
   }
 
   if (formState.authType === 'oauth2') {

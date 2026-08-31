@@ -71,6 +71,13 @@ def _write_state(cursor):
 # or an Azure Key Vault / AWS Secrets Manager client.
 API_TOKEN = "REPLACE_ME"
 {% endif %}
+{% if auth_type == "api_key" %}
+
+# Fill in your API key. For anything beyond local testing, fetch it from a
+# secret store instead of keeping it in this file, e.g.:
+#   API_KEY = dbutils.secrets.get("my-scope", "my-key")
+API_KEY = "REPLACE_ME"
+{% endif %}
 {% if auth_type == "oauth2" %}
 
 # Fill in your client secret. For anything beyond local testing, fetch it
@@ -220,6 +227,8 @@ def fetch_records(extra_params=None, path=None):
     session.headers["Authorization"] = f"Bearer {get_token()}"
 {% elif auth_type == "bearer" %}
     session.headers["Authorization"] = f"Bearer {API_TOKEN}"
+{% elif auth_type == "api_key" and api_key_in == "header" %}
+    session.headers[{{ api_key_name_repr }}] = API_KEY
 {% endif %}
 {% if incremental_mode %}
     state_cursor = _read_state().get("cursor")
@@ -227,6 +236,9 @@ def fetch_records(extra_params=None, path=None):
     offset = {{ start_offset }}
     while True:
         params = dict(PARAMS)
+{% if auth_type == "api_key" and api_key_in == "query" %}
+        params[{{ api_key_name_repr }}] = API_KEY
+{% endif %}
         if extra_params:
             params.update(extra_params)
 {% if limit_param and page_size %}
@@ -259,6 +271,8 @@ def fetch_records(extra_params=None, path=None):
     session.headers["Authorization"] = f"Bearer {get_token()}"
 {% elif auth_type == "bearer" %}
     session.headers["Authorization"] = f"Bearer {API_TOKEN}"
+{% elif auth_type == "api_key" and api_key_in == "header" %}
+    session.headers[{{ api_key_name_repr }}] = API_KEY
 {% endif %}
 {% if incremental_mode %}
     state_cursor = _read_state().get("cursor")
@@ -266,6 +280,9 @@ def fetch_records(extra_params=None, path=None):
     page = {{ start_page }}
     while True:
         params = dict(PARAMS)
+{% if auth_type == "api_key" and api_key_in == "query" %}
+        params[{{ api_key_name_repr }}] = API_KEY
+{% endif %}
         if extra_params:
             params.update(extra_params)
 {% if limit_param and page_size %}
@@ -312,12 +329,17 @@ def fetch_records(extra_params=None, path=None):
     session.headers["Authorization"] = f"Bearer {get_token()}"
 {% elif auth_type == "bearer" %}
     session.headers["Authorization"] = f"Bearer {API_TOKEN}"
+{% elif auth_type == "api_key" and api_key_in == "header" %}
+    session.headers[{{ api_key_name_repr }}] = API_KEY
 {% endif %}
 {% if next_url_path %}
 {% if incremental_mode %}
     state_cursor = _read_state().get("cursor")
 {% endif %}
     url, params = f"{BASE_URL}{url_path}", dict(PARAMS)
+{% if auth_type == "api_key" and api_key_in == "query" %}
+    params[{{ api_key_name_repr }}] = API_KEY
+{% endif %}
     if extra_params:
         params.update(extra_params)
 {% if incremental_mode %}
@@ -351,6 +373,9 @@ def fetch_records(extra_params=None, path=None):
     cursor = {{ initial_cursor_repr }}
     while True:
         params = dict(PARAMS)
+{% if auth_type == "api_key" and api_key_in == "query" %}
+        params[{{ api_key_name_repr }}] = API_KEY
+{% endif %}
         if extra_params:
             params.update(extra_params)
 {% if limit_param and page_size %}
@@ -397,11 +422,16 @@ def fetch_records(extra_params=None, path=None):
     session.headers["Authorization"] = f"Bearer {get_token()}"
 {% elif auth_type == "bearer" %}
     session.headers["Authorization"] = f"Bearer {API_TOKEN}"
+{% elif auth_type == "api_key" and api_key_in == "header" %}
+    session.headers[{{ api_key_name_repr }}] = API_KEY
 {% endif %}
 {% if incremental_mode %}
     state_cursor = _read_state().get("cursor")
 {% endif %}
     url, params = f"{BASE_URL}{url_path}", dict(PARAMS)
+{% if auth_type == "api_key" and api_key_in == "query" %}
+    params[{{ api_key_name_repr }}] = API_KEY
+{% endif %}
     if extra_params:
         params.update(extra_params)
 {% if incremental_mode %}
@@ -430,8 +460,13 @@ def fetch_records(extra_params=None, path=None):
     session.headers["Authorization"] = f"Bearer {get_token()}"
 {% elif auth_type == "bearer" %}
     session.headers["Authorization"] = f"Bearer {API_TOKEN}"
+{% elif auth_type == "api_key" and api_key_in == "header" %}
+    session.headers[{{ api_key_name_repr }}] = API_KEY
 {% endif %}
     params = dict(PARAMS)
+{% if auth_type == "api_key" and api_key_in == "query" %}
+    params[{{ api_key_name_repr }}] = API_KEY
+{% endif %}
     if extra_params:
         params.update(extra_params)
 {% if incremental_mode %}
@@ -507,8 +542,13 @@ def fetch_page(page_index):
     session.headers["Authorization"] = f"Bearer {get_token()}"
 {% elif auth_type == "bearer" %}
     session.headers["Authorization"] = f"Bearer {API_TOKEN}"
+{% elif auth_type == "api_key" and api_key_in == "header" %}
+    session.headers[{{ api_key_name_repr }}] = API_KEY
 {% endif %}
     params = dict(PARAMS)
+{% if auth_type == "api_key" and api_key_in == "query" %}
+    params[{{ api_key_name_repr }}] = API_KEY
+{% endif %}
 {% if limit_param and page_size %}
     params[{{ limit_param_repr }}] = {{ page_size }}
 {% endif %}

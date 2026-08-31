@@ -133,7 +133,7 @@ def _resolve_secret_value(raw: Any) -> Tuple[Optional[str], bool]:
 class AuthConfig:
     """Authentication configuration for REST requests."""
 
-    type: Literal["none", "bearer", "oauth2"] = "none"
+    type: Literal["none", "bearer", "oauth2", "api_key"] = "none"
     token: str | None = None
     token_url: str | None = None
     client_id: str | None = None
@@ -141,6 +141,11 @@ class AuthConfig:
     scope: Tuple[str, ...] = field(default_factory=tuple)
     audience: str | None = None
     extra_params: Mapping[str, Any] = field(default_factory=dict)
+    # api_key auth: the key VALUE is never stored (same policy as bearer's
+    # `token`) — only where it goes (`api_key_in`) and its header/query
+    # name (`api_key_name`) are kept.
+    api_key_in: Literal["header", "query"] | None = None
+    api_key_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -324,6 +329,14 @@ def config_to_dict(config: RestSourceConfig) -> Dict[str, Any]:
     if config.auth.type == "bearer":
         # Expose only the auth type, never the token.
         source["auth"] = {"type": "bearer"}
+    elif config.auth.type == "api_key":
+        # Expose placement and name, never the key value (which isn't
+        # stored on AuthConfig in the first place).
+        source["auth"] = {
+            "type": "api_key",
+            "in": config.auth.api_key_in,
+            "name": config.auth.api_key_name,
+        }
     elif config.auth.type == "oauth2":
         auth_block: Dict[str, Any] = {"type": "oauth2"}
         if config.auth.token_url:
@@ -432,7 +445,7 @@ def _parse_auth_config(
         raise ConfigError("'source.auth' must be a mapping when provided")
 
     auth_type = raw_auth.get("type") or ("bearer" if token_value else "none")
-    if auth_type not in {"none", "bearer", "oauth2"}:
+    if auth_type not in {"none", "bearer", "oauth2", "api_key"}:
         raise ConfigError(f"Unsupported auth type: {auth_type}")
 
     if auth_type == "none":
@@ -443,6 +456,22 @@ def _parse_auth_config(
         raw_token = raw_token.strip() if isinstance(raw_token, str) else None
         token = token_value or raw_token
         return AuthConfig(type="bearer", token=token)
+
+    if auth_type == "api_key":
+        api_key_in = raw_auth.get("in")
+        if api_key_in not in {"header", "query"}:
+            raise ConfigError(
+                "'source.auth.in' must be either 'header' or 'query' for api_key auth"
+            )
+
+        raw_name = raw_auth.get("name")
+        api_key_name = raw_name.strip() if isinstance(raw_name, str) else None
+        if not api_key_name:
+            raise ConfigError("'source.auth.name' is required for api_key auth")
+
+        return AuthConfig(
+            type="api_key", api_key_in=api_key_in, api_key_name=api_key_name
+        )
 
     # OAuth2 client credentials
     token_url = raw_auth.get("token_url")

@@ -452,6 +452,8 @@ def _context(config: RestSourceConfig) -> Dict[str, Any]:
         "scope_repr": _py_literal(scope),
         "audience": auth.audience,
         "audience_repr": _py_literal(auth.audience),
+        "api_key_in": auth.api_key_in,
+        "api_key_name_repr": _py_literal(auth.api_key_name),
         "oauth_extra_items": [
             (_py_literal(k), repr(v)) for k, v in auth.extra_params.items()
         ],

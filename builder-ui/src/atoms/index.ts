@@ -193,15 +193,6 @@ export const runtimeOptionsAtom = atom((get) => {
     manualOptions['incremental_memory_state'] = 'false';
   }
 
-  // Add API key option directly so users don't have to manually add it as a Spark reader option.
-  if (formState.authType === 'api_key') {
-    const paramName = (formState.authApiKeyParamName || 'api_key').trim();
-    const token = formState.authToken.trim();
-    if (paramName && token) {
-      manualOptions[paramName] = token;
-    }
-  }
-
   if (formState.authType === 'oauth2') {
     const secret = formState.authToken.trim();
     if (secret) {

@@ -29,7 +29,8 @@ export const AuthenticationSection: React.FC<AuthenticationSectionProps> = ({
 
       if (nextType === "none") {
         patch.authToken = "";
-        patch.authApiKeyParamName = state.authApiKeyParamName;
+        patch.authApiKeyIn = state.authApiKeyIn;
+        patch.authApiKeyName = state.authApiKeyName;
         patch.authTokenUrl = "";
         patch.authClientId = "";
         patch.authScopes = "";
@@ -39,7 +40,8 @@ export const AuthenticationSection: React.FC<AuthenticationSectionProps> = ({
       }
 
       if (nextType === "bearer") {
-        patch.authApiKeyParamName = state.authApiKeyParamName;
+        patch.authApiKeyIn = state.authApiKeyIn;
+        patch.authApiKeyName = state.authApiKeyName;
         patch.authTokenUrl = "";
         patch.authClientId = "";
         patch.authScopes = "";
@@ -49,8 +51,11 @@ export const AuthenticationSection: React.FC<AuthenticationSectionProps> = ({
 
       if (nextType === "api_key") {
         patch.authToken = "";
-        if (!state.authApiKeyParamName) {
-          patch.authApiKeyParamName = "api_key";
+        if (!state.authApiKeyIn) {
+          patch.authApiKeyIn = "header";
+        }
+        if (!state.authApiKeyName) {
+          patch.authApiKeyName = "X-API-Key";
         }
         patch.authTokenUrl = "";
         patch.authClientId = "";
@@ -72,7 +77,7 @@ export const AuthenticationSection: React.FC<AuthenticationSectionProps> = ({
 
       onUpdateState(patch);
     },
-    [onUpdateState, setBearerToken, state.authApiKeyParamName, state.authToken],
+    [onUpdateState, setBearerToken, state.authApiKeyIn, state.authApiKeyName, state.authToken],
   );
 
   const handleBearerTokenChange = React.useCallback(
@@ -155,21 +160,46 @@ export const AuthenticationSection: React.FC<AuthenticationSectionProps> = ({
               <div className="grid gap-5 md:grid-cols-2">
                 <label className="flex flex-col gap-2">
                   <div className="flex items-center gap-1">
-                    <span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">API Key Param</span>
-                    <InfoTooltip text="Query parameter name that will hold the API key at runtime." />
+                    <span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Placement</span>
+                    <InfoTooltip text="Whether the API key is sent as a request header or a query parameter." />
+                  </div>
+                  <div className="relative">
+                    <select
+                      className="w-full rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm appearance-none pr-9 transition-all focus:border-blue-7 dark:focus:border-drac-accent focus:outline-none"
+                      value={state.authApiKeyIn || "header"}
+                      onChange={(event) =>
+                        onUpdateState({ authApiKeyIn: event.target.value as ConfigFormState["authApiKeyIn"] })
+                      }
+                    >
+                      <option value="header">Header</option>
+                      <option value="query">Query parameter</option>
+                    </select>
+                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-10 dark:text-drac-muted">
+                      <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                        <path d="M5.8 7.5a.75.75 0 0 1 1.05-.2L10 9.2l3.15-1.9a.75.75 0 0 1 .75 1.3l-3.5 2.11a.75.75 0 0 1-.76 0L5.99 8.6a.75.75 0 0 1-.2-1.1Z" />
+                      </svg>
+                    </span>
+                  </div>
+                </label>
+                <label className="flex flex-col gap-2">
+                  <div className="flex items-center gap-1">
+                    <span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">
+                      {state.authApiKeyIn === "query" ? "Query Param Name" : "Header Name"}
+                    </span>
+                    <InfoTooltip text="Name of the header or query parameter that will carry the API key at runtime." />
                   </div>
                   <input
                     type="text"
                     className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
-                    placeholder="api_key"
-                    value={state.authApiKeyParamName || ""}
-                    onChange={(event) => onUpdateState({ authApiKeyParamName: event.target.value.trim() })}
+                    placeholder={state.authApiKeyIn === "query" ? "api_key" : "X-API-Key"}
+                    value={state.authApiKeyName || ""}
+                    onChange={(event) => onUpdateState({ authApiKeyName: event.target.value })}
                   />
                 </label>
-                <label className="flex flex-col gap-2">
+                <label className="flex flex-col gap-2 md:col-span-2">
                   <div className="flex items-center gap-1">
                     <span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">API Key (secret)</span>
-                    <InfoTooltip text="Secret API key stored only in the browser session and supplied at runtime via Spark options." />
+                    <InfoTooltip text="Secret API key stored only in the browser session for previewing; the exported script gets a REPLACE_ME placeholder instead." />
                   </div>
                   <input
                     type="password"

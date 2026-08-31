@@ -418,7 +418,8 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 			if (configFormState.authType !== 'none') {
 				nextState.authType = configFormState.authType;
 				nextState.authToken = configFormState.authToken;
-				nextState.authApiKeyParamName = configFormState.authApiKeyParamName;
+				nextState.authApiKeyIn = configFormState.authApiKeyIn;
+				nextState.authApiKeyName = configFormState.authApiKeyName;
 				nextState.authTokenUrl = configFormState.authTokenUrl;
 				nextState.authClientId = configFormState.authClientId;
 				nextState.authScopes = configFormState.authScopes;
@@ -434,7 +435,7 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 		async ({ applyResponse = true }: { applyResponse?: boolean } = {}) => {
 			setIsValidating(true);
 			try {
-				const shouldSendToken = configFormState.authType === 'bearer' || configFormState.authType === 'oauth2';
+				const shouldSendToken = configFormState.authType === 'bearer' || configFormState.authType === 'oauth2' || configFormState.authType === 'api_key';
 				const authSecret = shouldSendToken ? bearerToken : '';
 				const payload = await validateConfigRequest({
 					...configPayload,
@@ -492,7 +493,7 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 			// Don't apply the validation response to form state during preview
 			await runValidation({ applyResponse: false });
 			setStatus({ tone: "info", message: "Fetching sample..." });
-				const shouldSendToken = configFormState.authType === 'bearer' || configFormState.authType === 'oauth2';
+				const shouldSendToken = configFormState.authType === 'bearer' || configFormState.authType === 'oauth2' || configFormState.authType === 'api_key';
 				const authSecret = shouldSendToken ? bearerToken : '';
 				const payload = await sampleRequest({
 					...configPayload,

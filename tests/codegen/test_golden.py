@@ -70,6 +70,15 @@ CASES = {
         response_format="xml",
         xml_record_path=".//contact",
     ),
+    "api_key_header": make_config(
+        base_url="https://api.example.com",
+        name="widgets",
+        path="/v1/widgets",
+        auth=AuthConfig(type="api_key", api_key_in="header", api_key_name="X-API-Key"),
+        pagination=PaginationConfig(
+            type="page", page_param="page", page_size=50, limit_param="per_page"
+        ),
+    ),
     "maileon_xml": make_config(
         base_url="https://api.maileon.com/1.0",
         name="contacts",

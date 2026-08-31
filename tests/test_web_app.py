@@ -265,3 +265,47 @@ def test_sample_endpoint_inlines_supplied_options_for_preview(http_server) -> No
     assert payload["rest_error"] is None
     assert payload["records"] == [{"id": 1}]
     assert payload["raw_pages"][0]["status_code"] == 200
+
+
+def test_generate_returns_200_for_api_key_header_config() -> None:
+    app = create_app()
+    client = TestClient(app)
+
+    config_dict = {
+        "version": "0.1",
+        "source": {
+            "type": "rest",
+            "base_url": "https://example.com",
+            "auth": {"type": "api_key", "in": "header", "name": "X-API-Key"},
+        },
+        "stream": {"name": "posts", "path": "/posts"},
+    }
+
+    response = client.post("/api/generate", json={"config_dict": config_dict})
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert 'API_KEY = "REPLACE_ME"' in payload["script"]
+    assert 'session.headers["X-API-Key"] = API_KEY' in payload["script"]
+
+
+def test_generate_returns_200_for_api_key_query_config() -> None:
+    app = create_app()
+    client = TestClient(app)
+
+    config_dict = {
+        "version": "0.1",
+        "source": {
+            "type": "rest",
+            "base_url": "https://example.com",
+            "auth": {"type": "api_key", "in": "query", "name": "api_key"},
+        },
+        "stream": {"name": "posts", "path": "/posts"},
+    }
+
+    response = client.post("/api/generate", json={"config_dict": config_dict})
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert 'API_KEY = "REPLACE_ME"' in payload["script"]
+    assert 'params["api_key"] = API_KEY' in payload["script"]
