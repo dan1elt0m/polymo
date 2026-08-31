@@ -116,7 +116,12 @@ def run_cli(
     stdout = (result.stdout or "").strip()
     if not stdout:
         return []
-    return json.loads(stdout)
+    try:
+        return json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        raise DatabricksCliError(
+            f"databricks CLI returned invalid JSON: {stdout[:200]!r}"
+        ) from exc
 
 
 def list_profiles(path: Optional[Path] = None) -> List[str]:

@@ -122,6 +122,16 @@ def test_run_cli_missing_executable_raises_file_not_found():
         run_cli(["catalogs", "list"], profile=None, runner=runner)
 
 
+def test_run_cli_malformed_json_raises_databricks_cli_error():
+    runner = make_runner(returncode=0, stdout="{not valid json")
+
+    with pytest.raises(DatabricksCliError) as exc_info:
+        run_cli(["catalogs", "list"], profile=None, runner=runner)
+
+    assert "invalid json" in str(exc_info.value).lower()
+    assert "not valid json" in str(exc_info.value)
+
+
 # ---------------------------------------------------------------------------
 # list_profiles unit tests
 # ---------------------------------------------------------------------------
@@ -329,3 +339,15 @@ def test_cli_timeout_returns_502(monkeypatch):
 
     assert response.status_code == 502
     assert "timed out" in response.json()["detail"].lower()
+
+
+def test_cli_malformed_json_returns_502(monkeypatch):
+    install_fake_runner(monkeypatch, returncode=0, stdout="{not valid json")
+
+    app = create_app()
+    client = TestClient(app, raise_server_exceptions=False)
+    response = client.get("/api/databricks/catalogs")
+
+    assert response.status_code == 502
+    assert "invalid json" in response.json()["detail"].lower()
+    assert "not valid json" in response.json()["detail"]
