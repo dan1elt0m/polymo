@@ -20,3 +20,6 @@ def test_removed_runtime_symbols_are_gone():
 def test_runtime_modules_deleted():
     with pytest.raises(ModuleNotFoundError):
         import polymo.datasource  # noqa: F401
+
+    with pytest.raises(ModuleNotFoundError):
+        import polymo.rest_client  # noqa: F401

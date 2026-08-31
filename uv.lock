@@ -611,15 +611,6 @@ wheels = [
 ]
 
 [[package]]
-name = "fsspec"
-version = "2025.9.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/de/e0/bab50af11c2d75c9c4a2a26a5254573c0bd97cea152254401510950486fa/fsspec-2025.9.0.tar.gz", hash = "sha256:19fd429483d25d28b65ec68f9f4adc16c17ea2c7c7bf54ec61360d478fb19c19", size = 304847 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/47/71/70db47e4f6ce3e5c37a607355f80da8860a33226be640226ac52cb05ef2e/fsspec-2025.9.0-py3-none-any.whl", hash = "sha256:530dc2a2af60a414a832059574df4a6e10cce927f6f4a78209390fe38955cfb7", size = 199289 },
-]
-
-[[package]]
 name = "ghp-import"
 version = "2.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1497,8 +1488,6 @@ name = "polymo"
 version = "0.11.0"
 source = { editable = "." }
 dependencies = [
-    { name = "fsspec" },
-    { name = "httpx" },
     { name = "jinja2" },
     { name = "pyyaml" },
     { name = "truststore" },
@@ -1518,6 +1507,7 @@ builder = [
     { name = "jinja2" },
     { name = "pyarrow" },
     { name = "pyspark" },
+    { name = "requests" },
     { name = "uvicorn" },
 ]
 smoke = [
@@ -1527,6 +1517,7 @@ smoke = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "httpx" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -1547,8 +1538,6 @@ docs = [
 requires-dist = [
     { name = "fastapi", marker = "extra == 'benchmark'", specifier = ">=0.110" },
     { name = "fastapi", marker = "extra == 'builder'", specifier = ">=0.110" },
-    { name = "fsspec", specifier = ">=2025.9.0" },
-    { name = "httpx", specifier = ">=0.26" },
     { name = "httpx", marker = "extra == 'benchmark'", specifier = ">=0.26" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "jinja2", marker = "extra == 'builder'", specifier = ">=3.1.6" },
@@ -1560,6 +1549,7 @@ requires-dist = [
     { name = "pyspark", marker = "extra == 'builder'", specifier = ">=4" },
     { name = "pyspark", marker = "extra == 'smoke'", specifier = ">=4" },
     { name = "pyyaml", specifier = ">=6.0.1" },
+    { name = "requests", marker = "extra == 'builder'", specifier = ">=2.31" },
     { name = "truststore", specifier = ">=0.10" },
     { name = "uvicorn", marker = "extra == 'benchmark'", specifier = ">=0.24" },
     { name = "uvicorn", marker = "extra == 'builder'", specifier = ">=0.24" },
@@ -1567,6 +1557,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "httpx", specifier = ">=0.26" },
     { name = "pre-commit", specifier = ">=4.3.0" },
     { name = "pytest", specifier = ">=8.4.2" },
     { name = "pytest-cov", specifier = ">=7.0.0" },

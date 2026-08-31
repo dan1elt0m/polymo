@@ -1,8 +1,8 @@
 """Templating helpers shared by the codegen renderer.
 
-Copied from `polymo.rest_client` (byte-identical semantics) so that
-`polymo.codegen` no longer depends on `rest_client.py`, which is scheduled
-for deletion. Do not modify `rest_client.py` to match this file.
+Originally copied from `polymo.rest_client` (byte-identical semantics) so
+that `polymo.codegen` no longer depended on it; `rest_client.py` has since
+been deleted (Phase 3, Task 3).
 """
 
 from __future__ import annotations
