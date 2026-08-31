@@ -281,29 +281,48 @@ Spark SQL DDL string, comma-separated `name TYPE` pairs:
 id INT, title STRING, price DECIMAL(10,2), created_at TIMESTAMP
 ```
 
-Supported types: `string` / `varchar` / `char` / `text`, `boolean` / `bool`,
-`double` / `float64`, `float` / `real`, `tinyint`, `smallint`, `int` /
-`integer`, `bigint` / `long`, `timestamp`, `date`, `variant`, and
+Supported scalar types: `string` / `varchar` / `char` / `text`, `boolean` /
+`bool`, `double` / `float64`, `float` / `real`, `tinyint`, `smallint`, `int`
+/ `integer`, `bigint` / `long`, `timestamp`, `date`, `variant`, and
 `decimal(precision, scale)` (or bare `decimal` / `numeric` for
 `decimal(38, 18)`).
 
-**Nested types are not supported.** `STRUCT<...>`, `ARRAY<...>`, `MAP<...>`,
-and backtick-quoted field names are all rejected by validation — every
-field must be a flat, scalar column. If an API response has a nested
-object you want as a typed column today, either flatten it with a
-`record_filter`/custom post-processing after fetching, leave `infer_schema`
-on, or edit the generated script's `SCHEMA` constant by hand after export
-(the generator's DDL validator only runs at generation time, not on a
-script you've already exported and modified).
+**Nested types are supported**: `ARRAY<T>`, `MAP<K, V>`, and
+`STRUCT<name: T, ...>` (a struct field's `name: T` colon is optional —
+`name T` works too, matching Spark's own DDL grammar), any of which can
+nest inside each other to any depth, e.g.:
 
-Rather than reject a dict/list value it finds in a record at read time, the
-generated `_cell()` helper JSON-encodes it into a string, so it lands in a
-`STRING` column instead of crashing the read. Any other mismatch between a
-declared column's type and the actual value the API returns (e.g. a field
-you typed as `INT` that sometimes comes back as text) is not handled —
-Spark raises when it can't fit the value into the column, same as it always
-has. Fix it in your schema, not by relying on the generated code to coerce
-it for you.
+```
+id INT, tags ARRAY<STRING>, meta MAP<STRING, STRING>,
+address STRUCT<street: STRING, zip: STRING>,
+history ARRAY<STRUCT<at: TIMESTAMP, note: STRING>>
+```
+
+Field names — top-level or inside a `STRUCT<...>` — can be backtick-quoted
+(`` `first name` STRING ``) when they contain characters a bare identifier
+can't (spaces, commas, etc.).
+
+The validator (`_validate_ddl_syntax`/`_validate_type_expr` in `config.py`)
+checks this grammar without needing pyspark installed, so it runs during
+`generate()` even from a bare `pip install polymo`. It's a syntax check
+only — it doesn't guarantee Spark itself will accept the string, though in
+practice every DDL string this validator accepts is valid input to
+`StructType.fromDDL`, since it deliberately mirrors that grammar.
+
+With an **explicit** schema, dict/list values from the API pass straight
+through to Spark as-is for `STRUCT`/`ARRAY`/`MAP` columns — the column
+needs the real structure, not a stringified copy of it. With an
+**inferred** schema, nested values are still JSON-encoded into a `STRING`
+column by the generated `_cell()` helper, because schema inference never
+produces a nested type (it only ever infers `BOOLEAN`/`BIGINT`/`DOUBLE`/
+`STRING`), so a raw dict/list value would otherwise crash the read.
+
+Any other mismatch between a declared column's type and the actual value
+the API returns (e.g. a field you typed as `INT` that sometimes comes back
+as text, or a `STRUCT` whose declared fields don't match the dict's keys)
+is not handled — Spark raises when it can't fit the value into the column,
+same as it always has. Fix it in your schema, not by relying on the
+generated code to coerce it for you.
 
 ## XML responses
 

@@ -77,3 +77,8 @@ Issues = "https://github.com/dan1elt0m/polymo/issues"
 # must not reformat them or the golden tests would drift from what the
 # generator actually produces.
 extend-exclude = ["tests/codegen/golden"]
+
+[tool.pytest.ini_options]
+markers = [
+    "spark: exercises a real local[1] PySpark session (slower: ~seconds of JVM startup).",
+]

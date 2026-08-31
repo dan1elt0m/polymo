@@ -1232,9 +1232,11 @@ def parse_schema_struct(schema_text: str) -> "StructType":
 def _validate_ddl_syntax(schema_text: str) -> None:
     """Check a schema DDL string is well-formed, without pyspark.
 
-    Mirrors the field/type grammar `_parse_ddl_without_spark` understands,
-    but only validates — it never constructs Spark type objects, so it has
-    no pyspark dependency at all.
+    Supports the same grammar Spark's DDL parser does: flat `name TYPE`
+    pairs, `DECIMAL(p,s)`, nested `ARRAY<T>` / `MAP<K,V>` / `STRUCT<...>`
+    (recursively, to any depth), and backtick-quoted field names — at the
+    top level and inside a STRUCT. Never constructs Spark type objects, so
+    it has no pyspark dependency at all.
     """
     if not schema_text or not schema_text.strip():
         raise ValueError("Schema definition is empty")
@@ -1244,10 +1246,137 @@ def _validate_ddl_syntax(schema_text: str) -> None:
         raise ValueError("Schema definition has no fields")
 
     for field_def in field_defs:
-        parts = field_def.split(None, 1)
-        if len(parts) < 2:
+        _, type_spec = _split_field_name(field_def)
+        type_spec = type_spec.strip()
+        if not type_spec:
             raise ValueError(f"Invalid field definition: '{field_def}'")
-        _validate_simple_type(parts[1].strip())
+        _validate_type_expr(type_spec)
+
+
+def _split_field_name(field_def: str) -> Tuple[str, str]:
+    """Split `` `name` REST `` or `name REST` into (name, rest).
+
+    `rest` is returned unstripped/unmodified after the name (it may still
+    have a leading `:` for the STRUCT inner `name: TYPE` syntax, which the
+    caller is responsible for stripping).
+    """
+    text = field_def.strip()
+    if not text:
+        raise ValueError("Invalid field definition: ''")
+
+    if text.startswith("`"):
+        end = text.find("`", 1)
+        if end == -1:
+            raise ValueError(f"Unterminated backtick-quoted name in '{field_def}'")
+        name = text[1:end]
+        if not name:
+            raise ValueError(f"Empty backtick-quoted name in '{field_def}'")
+        return name, text[end + 1 :]
+
+    # Stop at the first whitespace OR ':' — the latter so a STRUCT inner
+    # field's `name: TYPE` syntax splits the name off cleanly too (a bare
+    # top-level field never legitimately has a ':' right after its name,
+    # so this doesn't change top-level parsing).
+    match = re.match(r"^([^\s:]+)(.*)$", text, re.DOTALL)
+    if not match:
+        raise ValueError(f"Invalid field definition: '{field_def}'")
+    return match.group(1), match.group(2)
+
+
+def _extract_angle_content(type_spec: str, keyword: str) -> str:
+    """Return the text between the outer `<` and `>` of `KEYWORD<...>`.
+
+    Requires the outer brackets to wrap the *entire* remainder of
+    `type_spec` (no trailing text after the matching `>`), and to be
+    balanced with respect to nested `<`/`>` and backtick-quoted spans.
+    """
+    stripped = type_spec.strip()
+    match = re.match(rf"^{keyword}\s*<", stripped, re.IGNORECASE)
+    if not match or not stripped.endswith(">"):
+        raise ValueError(f"Malformed {keyword.upper()} type: '{type_spec}'")
+
+    body = stripped[match.end() - 1 :]  # starts at the opening '<'
+    depth = 0
+    in_backtick = False
+    for index, ch in enumerate(body):
+        if ch == "`":
+            in_backtick = not in_backtick
+            continue
+        if in_backtick:
+            continue
+        if ch == "<":
+            depth += 1
+        elif ch == ">":
+            depth -= 1
+            if depth < 0:
+                raise ValueError(f"Unbalanced brackets in type: '{type_spec}'")
+            if depth == 0 and index != len(body) - 1:
+                raise ValueError(f"Malformed {keyword.upper()} type: '{type_spec}'")
+    if depth != 0 or in_backtick:
+        raise ValueError(f"Unbalanced brackets in type: '{type_spec}'")
+
+    return body[1:-1]
+
+
+_NESTED_TYPE_RE = re.compile(r"^(array|map|struct)\s*<", re.IGNORECASE)
+
+
+def _validate_type_expr(type_spec: str) -> None:
+    """Validate a single type expression, recursing into nested types.
+
+    pyspark-free: scalars go to `_validate_simple_type`; ARRAY/MAP/STRUCT
+    are unwrapped and their inner type expression(s)/fields are validated
+    recursively via this same function.
+    """
+    normalized = type_spec.strip()
+    if not normalized:
+        raise ValueError("Type expression is empty")
+
+    match = _NESTED_TYPE_RE.match(normalized)
+    if not match:
+        _validate_simple_type(normalized)
+        return
+
+    keyword = match.group(1).lower()
+
+    if keyword == "array":
+        content = _extract_angle_content(normalized, "array").strip()
+        if not content:
+            raise ValueError(f"ARRAY type must have an element type: '{type_spec}'")
+        _validate_type_expr(content)
+        return
+
+    if keyword == "map":
+        content = _extract_angle_content(normalized, "map")
+        parts = _split_top_level(content)
+        if len(parts) != 2:
+            raise ValueError(
+                f"MAP type requires exactly a key type and a value type: '{type_spec}'"
+            )
+        _validate_type_expr(parts[0])
+        _validate_type_expr(parts[1])
+        return
+
+    # keyword == "struct"
+    content = _extract_angle_content(normalized, "struct")
+    inner_fields = _split_top_level(content)
+    if not inner_fields:
+        raise ValueError(f"STRUCT type must have at least one field: '{type_spec}'")
+    for inner_field in inner_fields:
+        _validate_struct_field(inner_field)
+
+
+def _validate_struct_field(field_def: str) -> None:
+    """Validate one `name: TYPE` or `name TYPE` field inside STRUCT<...>."""
+    name, rest = _split_field_name(field_def)
+    if not name:
+        raise ValueError(f"Invalid STRUCT field: '{field_def}'")
+    rest = rest.strip()
+    if rest.startswith(":"):
+        rest = rest[1:].strip()
+    if not rest:
+        raise ValueError(f"STRUCT field '{name}' is missing a type")
+    _validate_type_expr(rest)
 
 
 def _coerce_env(value: Any) -> Any:
@@ -1295,20 +1424,31 @@ def _parse_ddl_without_spark(schema_text: str) -> "StructType":
 
 
 def _split_top_level(schema_text: str) -> List[str]:
+    """Split on commas outside `<...>`/`(...)` nesting and outside backticks.
+
+    A comma (or bracket) inside a backtick-quoted identifier — e.g.
+    `` `weird,name` INT `` — must not affect splitting or depth tracking.
+    """
     parts: List[str] = []
     current: List[str] = []
     depth = 0
+    in_backtick = False
     for ch in schema_text:
-        if ch == "<" or ch == "(":
-            depth += 1
-        elif ch == ">" or ch == ")":
-            depth = max(0, depth - 1)
-        if ch == "," and depth == 0:
-            part = "".join(current).strip()
-            if part:
-                parts.append(part)
-            current = []
+        if ch == "`":
+            in_backtick = not in_backtick
+            current.append(ch)
             continue
+        if not in_backtick:
+            if ch == "<" or ch == "(":
+                depth += 1
+            elif ch == ">" or ch == ")":
+                depth = max(0, depth - 1)
+            elif ch == "," and depth == 0:
+                part = "".join(current).strip()
+                if part:
+                    parts.append(part)
+                current = []
+                continue
         current.append(ch)
 
     tail = "".join(current).strip()

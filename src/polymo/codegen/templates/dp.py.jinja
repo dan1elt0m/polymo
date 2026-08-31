@@ -97,7 +97,11 @@ class _Reader(DataSourceReader):
             if value is not None and (cursor is None or value > cursor):
                 cursor = value
 {% endif %}
+{% if schema_ddl %}
+            yield tuple(record.get(column) for column in self._columns)
+{% else %}
             yield tuple(_cell(record.get(column)) for column in self._columns)
+{% endif %}
 {% if incremental_mode %}
         # read() runs per partition on the executor that owns it, so each
         # partition writes its own max cursor independently; whichever
@@ -110,8 +114,17 @@ class _Reader(DataSourceReader):
 {% endif %}
 
 
+{% if not schema_ddl %}
 def _cell(value):
-    """Nested structures become JSON strings; scalars pass through."""
+    """Nested structures become JSON strings; scalars pass through.
+
+    Only used with an inferred schema — inference never produces a
+    STRUCT/ARRAY/MAP column, so a dict/list value here would otherwise
+    crash the read; JSON-encoding it into a STRING is the safe fallback.
+    An explicit schema skips this: a STRUCT/ARRAY/MAP column needs the
+    real structure, not a JSON string, so those values pass through as-is
+    (see the schema-mode branch above).
+    """
     if isinstance(value, (dict, list)):
         import json
 
@@ -119,6 +132,7 @@ def _cell(value):
     return value
 
 
+{% endif %}
 spark.dataSource.register(RestSource)
 
 

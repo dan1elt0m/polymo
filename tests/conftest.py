@@ -59,3 +59,42 @@ def http_server():
     thread.start()
     yield api
     server.shutdown()
+
+
+@pytest.fixture(scope="session")
+def spark_session():
+    """A real, local[1] SparkSession for `@pytest.mark.spark` execution tests.
+
+    `pyspark.pipelines` (the `dp.table` decorator) only ships on Databricks
+    runtimes, not in the OSS `pyspark` wheel this repo depends on — so a
+    fake `pyspark.pipelines` module (a `table(**kw)` that's just a no-op
+    decorator) is installed into `sys.modules` before any generated script
+    is exec'd, letting the *unmodified* `generate()` output run here,
+    decorator included, exactly as shipped.
+    """
+    import sys
+    import types
+
+    if "pyspark.pipelines" not in sys.modules:
+        fake_pipelines = types.ModuleType("pyspark.pipelines")
+
+        def _table(**_kwargs):
+            def _decorator(func):
+                return func
+
+            return _decorator
+
+        fake_pipelines.table = _table
+        sys.modules["pyspark.pipelines"] = fake_pipelines
+
+    from pyspark.sql import SparkSession
+
+    session = (
+        SparkSession.builder.master("local[1]")
+        .appName("polymo-tests")
+        .config("spark.ui.enabled", "false")
+        .config("spark.sql.shuffle.partitions", "1")
+        .getOrCreate()
+    )
+    yield session
+    session.stop()
