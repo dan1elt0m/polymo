@@ -80,8 +80,15 @@ class GenerateResponse(BaseModel):
     stream: str
 
 
+def _polymo_version() -> str:
+    try:
+        return metadata.version("polymo")
+    except metadata.PackageNotFoundError:  # pragma: no cover - dev installs
+        return "dev"
+
+
 def create_app() -> FastAPI:
-    app = FastAPI(title="polymo builder", version="0.1.0")
+    app = FastAPI(title="polymo builder", version=_polymo_version())
 
     app.mount("/static", StaticFiles(directory=str(STATIC_PATH)), name="static")
 
@@ -174,11 +181,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/meta")
     async def get_meta() -> Dict[str, str]:
-        try:
-            version = metadata.version("polymo")
-        except metadata.PackageNotFoundError:  # pragma: no cover - dev installs
-            version = "dev"
-        return {"version": version}
+        return {"version": _polymo_version()}
 
     return app
 

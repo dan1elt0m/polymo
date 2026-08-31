@@ -23,6 +23,9 @@ test-results/
 builder-ui/node_modules/
 builder-ui/playwright-report/
 builder-ui/test-results/
+# Stray dir some npm tooling (e.g. `msw init`) creates at repo root when
+# invoked from the wrong cwd; the real assets live in builder-ui/public.
+/public/
 *.log
 .DS_store
 .coverage
