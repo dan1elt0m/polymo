@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Mapping, Sequence, Tuple
 import re
 
-import yaml
 from pyspark.sql.types import (
     BooleanType,
     ByteType,
@@ -258,24 +256,6 @@ class RestSourceConfig:
     options: Dict[str, Any] = field(default_factory=dict)
 
 
-def load_config(
-    path: str | Path,
-    token: str | None = None,
-    options: Optional[Mapping[str, Any]] = None,
-) -> RestSourceConfig:
-    """Load and validate a REST source configuration from YAML.
-
-    Authentication details (token) are supplied separately and are NOT part of the YAML.
-    """
-
-    config_path = Path(path)
-    if not config_path.exists():
-        raise ConfigError(f"Configuration file not found: {config_path}")
-
-    raw = yaml.safe_load(config_path.read_text())
-    return parse_config(raw, token=token, options=options)
-
-
 def parse_config(
     raw: Any,
     token: str | None = None,
@@ -418,16 +398,6 @@ def config_to_dict(config: RestSourceConfig) -> Dict[str, Any]:
         "source": source,
         "stream": stream_dict,
     }
-
-
-def dump_config(config: RestSourceConfig) -> str:
-    """Render a configuration as canonical YAML.
-
-    Auth is intentionally stripped to avoid persisting secrets or auth type in YAML.
-    """
-
-    data = config_to_dict(config)
-    return yaml.safe_dump(data, sort_keys=False)
 
 
 def _parse_auth_config(

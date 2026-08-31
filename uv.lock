@@ -1489,7 +1489,6 @@ version = "0.11.0"
 source = { editable = "." }
 dependencies = [
     { name = "jinja2" },
-    { name = "pyyaml" },
     { name = "truststore" },
 ]
 
@@ -1509,10 +1508,6 @@ builder = [
     { name = "pyspark" },
     { name = "requests" },
     { name = "uvicorn" },
-]
-smoke = [
-    { name = "pyarrow" },
-    { name = "pyspark" },
 ]
 
 [package.dev-dependencies]
@@ -1544,11 +1539,8 @@ requires-dist = [
     { name = "notebook", marker = "extra == 'benchmark'", specifier = ">=7.4.7" },
     { name = "pyarrow", marker = "extra == 'benchmark'", specifier = ">=13" },
     { name = "pyarrow", marker = "extra == 'builder'", specifier = ">=13" },
-    { name = "pyarrow", marker = "extra == 'smoke'", specifier = ">=13" },
     { name = "pyspark", marker = "extra == 'benchmark'", specifier = ">=4" },
     { name = "pyspark", marker = "extra == 'builder'", specifier = ">=4" },
-    { name = "pyspark", marker = "extra == 'smoke'", specifier = ">=4" },
-    { name = "pyyaml", specifier = ">=6.0.1" },
     { name = "requests", marker = "extra == 'builder'", specifier = ">=2.31" },
     { name = "truststore", specifier = ">=0.10" },
     { name = "uvicorn", marker = "extra == 'benchmark'", specifier = ">=0.24" },

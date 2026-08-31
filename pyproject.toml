@@ -27,7 +27,6 @@ classifiers = [
 ]
 dependencies = [
     "jinja2>=3.1.6",
-    "pyyaml>=6.0.1",
     "truststore>=0.10",
 ]
 
@@ -47,11 +46,6 @@ benchmark = [
     "notebook>=7.4.7",
     "fastapi>=0.110",
     "uvicorn>=0.24"
-]
-
-smoke = [
-    "pyspark>=4",
-    "pyarrow>=13",
 ]
 
 [dependency-groups]
@@ -85,11 +79,6 @@ Homepage = "https://github.com/dan1elt0m/polymo"
 Repository = "https://github.com/dan1elt0m/polymo.git"
 Documentation = "https://dan1elt0m.github.io/polymo/"
 Issues = "https://github.com/dan1elt0m/polymo/issues"
-
-[tool.pytest.ini_options]
-markers = [
-    "smoke: quick streaming smoke test",
-]
 
 [tool.ruff]
 # Golden fixtures capture `generate()`'s literal output byte-for-byte; ruff
