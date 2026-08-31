@@ -39,7 +39,7 @@ Four connected features turning the builder into a deploy-capable tool:
    the reference (`{"scope": ..., "key": ...}`), never values. Generated
    code resolves via a `_dbx_secret(scope, key)` helper (driver-side
    `dbutils`, with a clear RuntimeError outside Databricks). AKV-backed
-   scopes (e.g. Ingestie's) appear automatically since the CLI lists them.
+   scopes appear automatically since the CLI lists them.
 
 4. **Typed generated code** — shipped already in 1.3.0.
 
