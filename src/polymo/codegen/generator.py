@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast as _ast
 import json
+import keyword
 import re
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Mapping, Optional
@@ -35,6 +36,15 @@ def _identifier(name: str) -> str:
         return "stream"
     if not cleaned or cleaned[0].isdigit():
         cleaned = f"t_{cleaned}"
+    if keyword.iskeyword(cleaned):
+        # A stream/project name like "class" or "import" would otherwise
+        # sanitize to a hard Python keyword, breaking every site that
+        # splices it in raw: `def class():`, `from class.client import
+        # ...`, `@dp.table(name=...)` function defs, etc. — all SyntaxErrors.
+        # `keyword.iskeyword` only covers hard keywords; soft keywords
+        # ("match", "case", "type", "_") are valid identifiers as-is and
+        # don't need this.
+        cleaned = f"{cleaned}_"
     return cleaned
 
 
