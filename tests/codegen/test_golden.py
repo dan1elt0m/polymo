@@ -11,6 +11,7 @@ from polymo.config import (
     PaginationConfig,
     PartitionConfig,
     RecordSelectorConfig,
+    SecretRef,
 )
 from tests.codegen.helpers import assert_hygiene, make_config
 
@@ -77,6 +78,14 @@ CASES = {
         auth=AuthConfig(type="api_key", api_key_in="header", api_key_name="X-API-Key"),
         pagination=PaginationConfig(
             type="page", page_param="page", page_size=50, limit_param="per_page"
+        ),
+    ),
+    "secret_scope_bearer": make_config(
+        base_url="https://api.example.com",
+        name="widgets",
+        path="/v1/widgets",
+        auth=AuthConfig(
+            type="bearer", secret=SecretRef(scope="my-scope", key="api-token")
         ),
     ),
     "maileon_xml": make_config(

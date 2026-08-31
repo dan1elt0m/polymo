@@ -3,6 +3,7 @@ import pytest
 from polymo.config import (
     ConfigError,
     RestSourceConfig,
+    SecretRef,
     config_to_dict,
     parse_config,
 )
@@ -670,6 +671,200 @@ def test_xml_format_without_record_path_is_config_error() -> None:
         "version": 0.1,
         "source": {"type": "rest", "base_url": "https://api.test"},
         "stream": {"path": "/objects", "response_format": "xml"},
+    }
+
+    with pytest.raises(ConfigError):
+        parse_config(raw)
+
+
+# --- Databricks secret-scope references -----------------------------------
+
+
+def test_bearer_auth_secret_ref_round_trip() -> None:
+    raw = {
+        "version": 0.1,
+        "source": {
+            "type": "rest",
+            "base_url": "https://api.test",
+            "auth": {
+                "type": "bearer",
+                "secret": {"scope": "my-scope", "key": "my-key"},
+            },
+        },
+        "stream": {"path": "/objects"},
+    }
+
+    config = parse_config(raw)
+    assert config.auth.type == "bearer"
+    assert config.auth.secret == SecretRef(scope="my-scope", key="my-key")
+    # never a literal value alongside the reference
+    assert config.auth.token is None
+
+    config_dict = config_to_dict(config)
+    assert config_dict["source"]["auth"] == {
+        "type": "bearer",
+        "secret": {"scope": "my-scope", "key": "my-key"},
+    }
+
+    round_tripped = parse_config(config_dict)
+    assert round_tripped.auth.secret == SecretRef(scope="my-scope", key="my-key")
+
+
+def test_api_key_auth_secret_ref_round_trip() -> None:
+    raw = {
+        "version": 0.1,
+        "source": {
+            "type": "rest",
+            "base_url": "https://api.test",
+            "auth": {
+                "type": "api_key",
+                "in": "header",
+                "name": "X-API-Key",
+                "secret": {"scope": "kv-scope", "key": "api-key"},
+            },
+        },
+        "stream": {"path": "/objects"},
+    }
+
+    config = parse_config(raw)
+    assert config.auth.secret == SecretRef(scope="kv-scope", key="api-key")
+
+    config_dict = config_to_dict(config)
+    assert config_dict["source"]["auth"]["secret"] == {
+        "scope": "kv-scope",
+        "key": "api-key",
+    }
+
+    round_tripped = parse_config(config_dict)
+    assert round_tripped.auth.secret == SecretRef(scope="kv-scope", key="api-key")
+
+
+def test_oauth2_auth_secret_ref_round_trip() -> None:
+    raw = {
+        "version": 0.1,
+        "source": {
+            "type": "rest",
+            "base_url": "https://api.test",
+            "auth": {
+                "type": "oauth2",
+                "token_url": "https://auth.example.com/token",
+                "client_id": "my-client",
+                "secret": {"scope": "kv-scope", "key": "client-secret"},
+            },
+        },
+        "stream": {"path": "/objects"},
+    }
+
+    config = parse_config(raw)
+    assert config.auth.secret == SecretRef(scope="kv-scope", key="client-secret")
+    # the literal client_secret slot stays unset — only the reference is stored
+    assert config.auth.client_secret is None
+
+    config_dict = config_to_dict(config)
+    assert config_dict["source"]["auth"]["secret"] == {
+        "scope": "kv-scope",
+        "key": "client-secret",
+    }
+
+    round_tripped = parse_config(config_dict)
+    assert round_tripped.auth.secret == SecretRef(scope="kv-scope", key="client-secret")
+
+
+@pytest.mark.parametrize("auth_type", ["bearer", "api_key", "oauth2"])
+def test_auth_secret_ref_requires_both_fields(auth_type: str) -> None:
+    auth: dict = {"type": auth_type, "secret": {"scope": "only-scope"}}
+    if auth_type == "api_key":
+        auth.update({"in": "header", "name": "X-API-Key"})
+    if auth_type == "oauth2":
+        auth.update({"token_url": "https://auth.example.com/token", "client_id": "cid"})
+
+    raw = {
+        "version": 0.1,
+        "source": {"type": "rest", "base_url": "https://api.test", "auth": auth},
+        "stream": {"path": "/objects"},
+    }
+
+    with pytest.raises(ConfigError):
+        parse_config(raw)
+
+
+def test_auth_secret_ref_rejects_non_mapping() -> None:
+    raw = {
+        "version": 0.1,
+        "source": {
+            "type": "rest",
+            "base_url": "https://api.test",
+            "auth": {"type": "bearer", "secret": "my-scope/my-key"},
+        },
+        "stream": {"path": "/objects"},
+    }
+
+    with pytest.raises(ConfigError):
+        parse_config(raw)
+
+
+def test_option_secrets_round_trip() -> None:
+    raw = {
+        "version": 0.1,
+        "source": {"type": "rest", "base_url": "https://api.test"},
+        "stream": {
+            "path": "/objects",
+            "headers": {"Authorization": "Basic {{ options.api_key_b64 }}"},
+            "option_secrets": {"api_key_b64": {"scope": "kv-scope", "key": "b64-key"}},
+        },
+    }
+
+    config = parse_config(raw)
+    assert config.stream.option_secrets == {
+        "api_key_b64": SecretRef(scope="kv-scope", key="b64-key")
+    }
+
+    config_dict = config_to_dict(config)
+    assert config_dict["stream"]["option_secrets"] == {
+        "api_key_b64": {"scope": "kv-scope", "key": "b64-key"}
+    }
+
+    round_tripped = parse_config(config_dict)
+    assert round_tripped.stream.option_secrets == {
+        "api_key_b64": SecretRef(scope="kv-scope", key="b64-key")
+    }
+
+
+def test_option_secrets_with_unreferenced_key_is_harmless() -> None:
+    raw = {
+        "version": 0.1,
+        "source": {"type": "rest", "base_url": "https://api.test"},
+        "stream": {
+            "path": "/objects",
+            "option_secrets": {"unused_name": {"scope": "kv-scope", "key": "b64-key"}},
+        },
+    }
+
+    config = parse_config(raw)
+    assert config.stream.option_secrets == {
+        "unused_name": SecretRef(scope="kv-scope", key="b64-key")
+    }
+
+
+def test_option_secrets_requires_both_fields() -> None:
+    raw = {
+        "version": 0.1,
+        "source": {"type": "rest", "base_url": "https://api.test"},
+        "stream": {
+            "path": "/objects",
+            "option_secrets": {"api_key_b64": {"scope": "kv-scope"}},
+        },
+    }
+
+    with pytest.raises(ConfigError):
+        parse_config(raw)
+
+
+def test_option_secrets_rejects_non_mapping() -> None:
+    raw = {
+        "version": 0.1,
+        "source": {"type": "rest", "base_url": "https://api.test"},
+        "stream": {"path": "/objects", "option_secrets": ["not", "a", "mapping"]},
     }
 
     with pytest.raises(ConfigError):

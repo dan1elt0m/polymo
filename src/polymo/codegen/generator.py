@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Mapping, Optional
 
 from jinja2 import Environment, PackageLoader, StrictUndefined
 
-from ..config import PartitionConfig, RestSourceConfig
+from ..config import PartitionConfig, RestSourceConfig, SecretRef
 from .templating import _PathFormatter, _render_template
 
 
@@ -153,6 +153,14 @@ def _py_literal(value: Any) -> str:
     if isinstance(value, list):
         return "[" + ", ".join(_py_literal(v) for v in value) + "]"
     return repr(value)
+
+
+_REPLACE_ME_RHS = '"REPLACE_ME"'
+
+
+def _dbx_secret_call(ref: SecretRef) -> str:
+    """Render a `SecretRef` as a call to the generated `_dbx_secret` helper."""
+    return f"_dbx_secret({_py_literal(ref.scope)}, {_py_literal(ref.key)})"
 
 
 def _comment_escape(value: str) -> str:
@@ -404,7 +412,13 @@ def _resolved(stream, options):
     }
     headers = {k: _render_template(v, ctx) for k, v in (stream.headers or {}).items()}
     option_placeholders = list(dict.fromkeys(missing.values()))
-    return params, headers, path, option_placeholders
+    option_secrets = stream.option_secrets or {}
+    option_placeholder_refs = {
+        var: option_secrets[name]
+        for name, var in missing.items()
+        if name in option_secrets
+    }
+    return params, headers, path, option_placeholders, option_placeholder_refs
 
 
 def _require_no_xml_json_paths(stream) -> None:
@@ -440,12 +454,43 @@ def _context(config: RestSourceConfig) -> Dict[str, Any]:
     if auth.type == "oauth2" and (not auth.token_url or not auth.client_id):
         raise CodegenError("oauth2 requires token_url and client_id")
     _require_no_xml_json_paths(stream)
-    params, headers, path, option_placeholders = _resolved(stream, config.options)
+    params, headers, path, option_placeholders, option_placeholder_refs = _resolved(
+        stream, config.options
+    )
     windows = _static_windows(config)
     partition_strategy = stream.partition.strategy if stream.partition else "none"
     offset_param = stream.pagination.offset_param or "offset"
     page_param = stream.pagination.page_param or "page"
     scope = " ".join(auth.scope)
+
+    api_token_rhs = (
+        _dbx_secret_call(auth.secret)
+        if auth.type == "bearer" and auth.secret
+        else _REPLACE_ME_RHS
+    )
+    api_key_rhs = (
+        _dbx_secret_call(auth.secret)
+        if auth.type == "api_key" and auth.secret
+        else _REPLACE_ME_RHS
+    )
+    client_secret_rhs = (
+        _dbx_secret_call(auth.secret)
+        if auth.type == "oauth2" and auth.secret
+        else _REPLACE_ME_RHS
+    )
+    option_placeholder_specs = [
+        (
+            var,
+            _dbx_secret_call(option_placeholder_refs[var])
+            if var in option_placeholder_refs
+            else _REPLACE_ME_RHS,
+        )
+        for var in option_placeholders
+    ]
+    has_secret_refs = bool(
+        (auth.type in ("bearer", "api_key", "oauth2") and auth.secret)
+        or option_placeholder_refs
+    )
     return {
         "auth_type": auth.type,
         "token_url": auth.token_url,
@@ -468,6 +513,11 @@ def _context(config: RestSourceConfig) -> Dict[str, Any]:
         "params_repr": _py_literal(params),
         "headers_repr": _py_literal(headers),
         "option_placeholders": option_placeholders,
+        "option_placeholder_specs": option_placeholder_specs,
+        "api_token_rhs": api_token_rhs,
+        "api_key_rhs": api_key_rhs,
+        "client_secret_rhs": client_secret_rhs,
+        "has_secret_refs": has_secret_refs,
         "schema_ddl": stream.schema,
         "stream_name": stream.name,
         "stream_name_repr": _py_literal(stream.name),

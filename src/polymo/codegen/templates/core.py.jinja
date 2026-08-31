@@ -15,14 +15,33 @@ import os
 {% if response_format == "xml" %}
 import xml.etree.ElementTree as ET
 {% endif %}
+{% if has_secret_refs %}
+
+
+def _dbx_secret(scope: str, key: str) -> str:
+    """Resolve a Databricks secret on the driver."""
+    try:
+        from pyspark.dbutils import DBUtils  # type: ignore[import]
+        from pyspark.sql import SparkSession
+
+        session = SparkSession.getActiveSession()
+        if session is None:
+            raise RuntimeError("no active Spark session")
+        return DBUtils(session).secrets.get(scope, key)
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(
+            f"could not resolve Databricks secret {scope}/{key}: {exc}. "
+            "Outside Databricks, replace this call with the literal value."
+        ) from exc
+{% endif %}
 
 {% if option_placeholders %}
 # Runtime values referenced as {{ '{{ options.* }}' }} in the builder config.
 # Fill these in — for anything beyond local testing, fetch them from a
 # secret store instead of keeping them in this file, e.g.:
 #   OPT_API_KEY_B64 = dbutils.secrets.get("my-scope", "my-key")
-{% for var in option_placeholders %}
-{{ var }}: str = "REPLACE_ME"
+{% for var, rhs in option_placeholder_specs %}
+{{ var }}: str = {{ rhs }}
 {% endfor %}
 
 {% endif %}
@@ -70,21 +89,21 @@ def _write_state(cursor: Any) -> None:
 # secret store instead of keeping it in this file, e.g.:
 #   API_TOKEN = dbutils.secrets.get("my-scope", "my-key")
 # or an Azure Key Vault / AWS Secrets Manager client.
-API_TOKEN: str = "REPLACE_ME"
+API_TOKEN: str = {{ api_token_rhs }}
 {% endif %}
 {% if auth_type == "api_key" %}
 
 # Fill in your API key. For anything beyond local testing, fetch it from a
 # secret store instead of keeping it in this file, e.g.:
 #   API_KEY = dbutils.secrets.get("my-scope", "my-key")
-API_KEY: str = "REPLACE_ME"
+API_KEY: str = {{ api_key_rhs }}
 {% endif %}
 {% if auth_type == "oauth2" %}
 
 # Fill in your client secret. For anything beyond local testing, fetch it
 # from a secret store instead of keeping it in this file, e.g.:
 #   CLIENT_SECRET = dbutils.secrets.get("my-scope", "my-key")
-CLIENT_SECRET: str = "REPLACE_ME"
+CLIENT_SECRET: str = {{ client_secret_rhs }}
 TOKEN_URL: str = {{ token_url_repr }}
 
 

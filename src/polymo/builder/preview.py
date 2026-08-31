@@ -2,11 +2,51 @@
 
 from __future__ import annotations
 
+import json
+import re
 from itertools import islice
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..codegen import generate_core
 from ..config import RestSourceConfig
+
+# Matches a module-level `<VAR>: str = _dbx_secret(...)` assignment for one
+# of the four secret-ref slot kinds the generator can emit (API_TOKEN /
+# API_KEY / CLIENT_SECRET, and any OPT_* option placeholder). Anchored to
+# line start via MULTILINE so it only ever matches the assignment itself.
+_DBX_SECRET_ASSIGNMENT_RE = re.compile(
+    r"^(?P<var>API_TOKEN|API_KEY|CLIENT_SECRET|OPT_[A-Za-z0-9_]*): str = "
+    r"_dbx_secret\([^\n]*\)$",
+    re.MULTILINE,
+)
+
+# Slot variables a preview `token` can actually stand in for (mirrors the
+# post-exec namespace injection below). OPT_* option placeholders have no
+# override mechanism in preview at all, secret-backed or not.
+_TOKEN_OVERRIDABLE_VARS = frozenset({"API_TOKEN", "API_KEY", "CLIENT_SECRET"})
+
+
+def _substitute_secret_refs(code: str, token: Optional[str]) -> str:
+    """Source-substitute `_dbx_secret(...)` call sites before `exec`.
+
+    A module-level `_dbx_secret(...)` call executes during `exec` and would
+    raise `RuntimeError` outside Databricks (no active Spark session) — so
+    it can never be left in place for preview. Instead, each matching
+    assignment line is rewritten to a literal pre-exec: the auth slot
+    (API_TOKEN/API_KEY/CLIENT_SECRET) that matches the supplied `token`, if
+    any, gets that real value; every other secret-ref variable — including
+    every OPT_* option placeholder, which has no override path in preview —
+    gets the same `"REPLACE_ME"` dummy the unresolved-placeholder path
+    already defaults to, so `exec` succeeds and the request just sends a
+    dummy value.
+    """
+
+    def _replace(match: "re.Match[str]") -> str:
+        var = match.group("var")
+        value = token if (token and var in _TOKEN_OVERRIDABLE_VARS) else "REPLACE_ME"
+        return f"{var}: str = {json.dumps(value)}"
+
+    return _DBX_SECRET_ASSIGNMENT_RE.sub(_replace, code)
 
 
 def run_preview(
@@ -23,6 +63,7 @@ def run_preview(
     "Raw API" tab can show what happened.
     """
     code = generate_core(config)
+    code = _substitute_secret_refs(code, token)
     namespace: Dict[str, Any] = {}
     exec(compile(code, "<polymo-preview>", "exec"), namespace)  # noqa: S102
 

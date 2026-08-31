@@ -90,6 +90,65 @@ connector.
   every request. `scope` is space-joined free text in the form; `extra_params`
   is a JSON object merged into the token request body.
 
+### Databricks secret-scope references
+
+Instead of leaving the generated `API_TOKEN` / `API_KEY` / `CLIENT_SECRET`
+constant as `"REPLACE_ME"`, any auth secret slot can carry a reference to a
+Databricks secret scope: add a `secret` object alongside the other auth
+fields —
+
+```yaml
+source:
+  auth:
+    type: bearer
+    secret:
+      scope: my-scope
+      key: my-key
+```
+
+(the same shape works for `api_key` and `oauth2`'s `client_secret` slot).
+Both `scope` and `key` are required and must be non-empty — this is a
+**reference only**; the config, the generated script, and the builder's
+logs never contain the secret value itself. Codegen resolves it at runtime
+via a generated `_dbx_secret(scope, key)` helper instead:
+
+```python
+API_TOKEN: str = _dbx_secret("my-scope", "my-key")
+```
+
+`_dbx_secret` is emitted once per script, only when at least one slot
+references a secret. It resolves the value on the driver via
+`DBUtils(SparkSession.getActiveSession()).secrets.get(scope, key)`, and
+raises a clear `RuntimeError` if called outside a Databricks cluster (no
+active Spark session) — swap the call for the literal value if you need to
+run the script somewhere else.
+
+The same reference shape works for `{{ options.<name> }}` placeholders (see
+[Query parameters & headers](#query-parameters-headers) below): set
+`stream.option_secrets.<name>` to `{"scope": ..., "key": ...}` and the
+resulting `OPT_<NAME>` constant resolves via `_dbx_secret` too. An
+`option_secrets` entry for a name that isn't actually referenced anywhere is
+harmless — it's simply unused, not a config error.
+
+```yaml
+stream:
+  headers:
+    Authorization: "Basic {{ options.api_key_b64 }}"
+  option_secrets:
+    api_key_b64:
+      scope: my-scope
+      key: api-key-b64
+```
+
+The builder preview cannot resolve real Databricks secrets outside a
+Databricks cluster: previewing a secret-ref config without a session token
+sends the same `"REPLACE_ME"` dummy the unresolved-placeholder path already
+does, so the request still fires (and fails/succeeds against the real API
+exactly as an unresolved placeholder would); supplying a session token in
+the preview UI overrides the relevant auth slot (bearer/api_key/oauth2)
+with that token, the same way it does for a plain placeholder. `OPT_*`
+secret refs have no override in preview and always get the dummy.
+
 ## Query parameters & headers
 
 - **Params** (`stream.params`) → the `PARAMS` constant in the generated
@@ -363,6 +422,12 @@ There are none. Every option above is resolved once, at generation time,
 into literal constants in the exported script (`BASE_URL`, `PATH`, `PARAMS`,
 `HEADERS`, `SCHEMA`, ...). Editing the connector after export means editing
 the script directly, or changing the Builder form and re-exporting.
+
+The one exception is a [Databricks secret-scope
+reference](#databricks-secret-scope-references): the *call site* —
+`_dbx_secret("scope", "key")` — is still baked in as a literal at generation
+time, but the secret *value* it resolves is looked up fresh on the driver
+every time the generated script runs.
 
 If you're coming from the 0.x YAML runtime, see the
 [migration guide](migration-1.0.md) for the full list of what moved or

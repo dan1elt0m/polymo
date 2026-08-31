@@ -6,6 +6,7 @@ from polymo.config import (
     ErrorHandlerConfig,
     PaginationConfig,
     PartitionConfig,
+    SecretRef,
 )
 from tests.codegen.helpers import make_config
 
@@ -181,3 +182,131 @@ def test_preview_keeps_partial_raw_pages_on_mid_stream_failure(http_server):
     assert records == [{"id": 1}]
     assert any(page["status_code"] == 200 for page in raw_pages)
     assert error is not None
+
+
+# --- Databricks secret-scope references -----------------------------------
+#
+# The generated `API_TOKEN: str = _dbx_secret(...)` assignment executes at
+# module level during `exec` and would raise outside Databricks (no active
+# Spark session). `run_preview` must source-substitute it to a literal
+# before exec — a real token when the preview supplies one, else the same
+# "REPLACE_ME" dummy the plain-placeholder path already uses.
+
+
+def test_preview_secret_ref_with_token_sends_it_to_server(http_server):
+    def route(query, headers, body):
+        assert headers.get("Authorization") == "Bearer real-token"
+        return 200, [{"id": 1}], {}
+
+    http_server.routes["/posts"] = route
+    config = make_config(
+        base_url=http_server.url,
+        auth=AuthConfig(
+            type="bearer", secret=SecretRef(scope="my-scope", key="my-key")
+        ),
+    )
+    records, _, error = run_preview(config, token="real-token", limit=5)
+    assert records == [{"id": 1}]
+    assert error is None
+
+
+def test_preview_secret_ref_without_token_sends_dummy_and_succeeds(http_server):
+    def route(query, headers, body):
+        assert headers.get("Authorization") == "Bearer REPLACE_ME"
+        return 200, [{"id": 1}], {}
+
+    http_server.routes["/posts"] = route
+    config = make_config(
+        base_url=http_server.url,
+        auth=AuthConfig(
+            type="bearer", secret=SecretRef(scope="my-scope", key="my-key")
+        ),
+    )
+    records, _, error = run_preview(config, token=None, limit=5)
+    assert records == [{"id": 1}]
+    assert error is None
+
+
+def test_preview_api_key_secret_ref_with_token(http_server):
+    def route(query, headers, body):
+        assert headers.get("X-API-Key") == "key-1"
+        return 200, [{"id": 1}], {}
+
+    http_server.routes["/posts"] = route
+    config = make_config(
+        base_url=http_server.url,
+        auth=AuthConfig(
+            type="api_key",
+            api_key_in="header",
+            api_key_name="X-API-Key",
+            secret=SecretRef(scope="kv-scope", key="api-key"),
+        ),
+    )
+    records, _, error = run_preview(config, token="key-1", limit=5)
+    assert records == [{"id": 1}]
+    assert error is None
+
+
+def test_preview_oauth2_secret_ref_with_token(http_server):
+    calls = {"token": 0}
+
+    def token_route(query, headers, body):
+        calls["token"] += 1
+        return 200, {"access_token": "tok-abc"}, {}
+
+    def data_route(query, headers, body):
+        assert headers.get("Authorization") == "Bearer tok-abc"
+        return 200, [{"id": 1}], {}
+
+    http_server.routes["/token"] = token_route
+    http_server.routes["/posts"] = data_route
+    config = make_config(
+        base_url=http_server.url,
+        auth=AuthConfig(
+            type="oauth2",
+            token_url=f"{http_server.url}/token",
+            client_id="cid",
+            secret=SecretRef(scope="kv-scope", key="client-secret"),
+        ),
+    )
+    # CLIENT_SECRET is only consumed by the token-request body, so no route
+    # asserts on it directly here; the important bit is exec doesn't raise
+    # and the real token request completes successfully.
+    records, _, error = run_preview(config, token="whatever-session-token", limit=5)
+    assert records == [{"id": 1}]
+    assert error is None
+    assert calls["token"] == 1
+
+
+def test_preview_option_secret_ref_has_no_override_and_sends_dummy(http_server):
+    def route(query, headers, body):
+        assert headers.get("Authorization") == "Basic REPLACE_ME"
+        return 200, [{"id": 1}], {}
+
+    http_server.routes["/posts"] = route
+    config = make_config(
+        base_url=http_server.url,
+        headers={"Authorization": "Basic {{ options.api_key_b64 }}"},
+        option_secrets={"api_key_b64": SecretRef(scope="kv-scope", key="b64-key")},
+    )
+    records, _, error = run_preview(config, token=None, limit=5)
+    assert records == [{"id": 1}]
+    assert error is None
+
+
+def test_preview_option_secret_ref_unaffected_by_unrelated_token(http_server):
+    """A bearer preview token must not leak into an OPT_* secret-ref slot."""
+
+    def route(query, headers, body):
+        assert headers.get("Authorization") == "Basic REPLACE_ME"
+        return 200, [{"id": 1}], {}
+
+    http_server.routes["/posts"] = route
+    config = make_config(
+        base_url=http_server.url,
+        headers={"Authorization": "Basic {{ options.api_key_b64 }}"},
+        option_secrets={"api_key_b64": SecretRef(scope="kv-scope", key="b64-key")},
+    )
+    records, _, error = run_preview(config, token="some-bearer-token", limit=5)
+    assert records == [{"id": 1}]
+    assert error is None

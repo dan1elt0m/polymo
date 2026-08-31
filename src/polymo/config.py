@@ -130,6 +130,19 @@ def _resolve_secret_value(raw: Any) -> Tuple[Optional[str], bool]:
 
 
 @dataclass(frozen=True)
+class SecretRef:
+    """A reference to a secret stored in a Databricks secret scope.
+
+    Configs carry ONLY this reference (`scope` + `key`) — never the secret
+    value itself. Generated code resolves it on the driver via the
+    `_dbx_secret(scope, key)` helper (see `polymo.codegen.generator`).
+    """
+
+    scope: str
+    key: str
+
+
+@dataclass(frozen=True)
 class AuthConfig:
     """Authentication configuration for REST requests."""
 
@@ -146,6 +159,11 @@ class AuthConfig:
     # name (`api_key_name`) are kept.
     api_key_in: Literal["header", "query"] | None = None
     api_key_name: str | None = None
+    # Optional Databricks secret-scope reference for the auth secret slot
+    # (bearer token / api_key value / oauth2 client_secret — one slot each).
+    # When set, codegen resolves it via `_dbx_secret(...)` instead of the
+    # `"REPLACE_ME"` placeholder.
+    secret: SecretRef | None = None
 
 
 @dataclass(frozen=True)
@@ -255,6 +273,10 @@ class StreamConfig:
     streaming: bool = False
     response_format: Literal["json", "xml"] = "json"
     xml_record_path: Optional[str] = None
+    # Databricks secret-scope references for `{{ options.<name> }}`
+    # placeholders, keyed by option name. A name that isn't actually
+    # referenced as an unresolved option is harmless (simply unused).
+    option_secrets: Mapping[str, SecretRef] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -317,6 +339,49 @@ def parse_config(
         stream=stream,
         options=runtime_options,
     )
+
+
+def _parse_secret_ref(raw: Any, field_label: str) -> Optional[SecretRef]:
+    """Parse a `{"scope": ..., "key": ...}` Databricks secret reference.
+
+    Returns None when `raw` is None (the slot has no secret reference).
+    Both `scope` and `key` must be non-empty strings when a reference is
+    provided — this is a reference only, never a secret value.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping):
+        raise ConfigError(f"'{field_label}' must be a mapping with 'scope' and 'key'")
+
+    scope_raw = raw.get("scope")
+    key_raw = raw.get("key")
+    scope = scope_raw.strip() if isinstance(scope_raw, str) else None
+    key = key_raw.strip() if isinstance(key_raw, str) else None
+    if not scope or not key:
+        raise ConfigError(f"'{field_label}' requires non-empty 'scope' and 'key'")
+
+    return SecretRef(scope=scope, key=key)
+
+
+def _secret_ref_to_dict(ref: SecretRef) -> Dict[str, str]:
+    return {"scope": ref.scope, "key": ref.key}
+
+
+def _parse_option_secrets(raw: Any) -> Dict[str, SecretRef]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, Mapping):
+        raise ConfigError("'stream.option_secrets' must be a mapping when provided")
+
+    result: Dict[str, SecretRef] = {}
+    for name, ref_raw in raw.items():
+        ref = _parse_secret_ref(ref_raw, f"stream.option_secrets.{name}")
+        if ref is None:
+            raise ConfigError(
+                f"'stream.option_secrets.{name}' requires non-empty 'scope' and 'key'"
+            )
+        result[str(name)] = ref
+    return result
 
 
 def _reserved_query_param_names(stream: StreamConfig) -> Dict[str, str]:
@@ -388,6 +453,8 @@ def config_to_dict(config: RestSourceConfig) -> Dict[str, Any]:
     if config.auth.type == "bearer":
         # Expose only the auth type, never the token.
         source["auth"] = {"type": "bearer"}
+        if config.auth.secret:
+            source["auth"]["secret"] = _secret_ref_to_dict(config.auth.secret)
     elif config.auth.type == "api_key":
         # Expose placement and name, never the key value (which isn't
         # stored on AuthConfig in the first place).
@@ -396,6 +463,8 @@ def config_to_dict(config: RestSourceConfig) -> Dict[str, Any]:
             "in": config.auth.api_key_in,
             "name": config.auth.api_key_name,
         }
+        if config.auth.secret:
+            source["auth"]["secret"] = _secret_ref_to_dict(config.auth.secret)
     elif config.auth.type == "oauth2":
         auth_block: Dict[str, Any] = {"type": "oauth2"}
         if config.auth.token_url:
@@ -408,6 +477,8 @@ def config_to_dict(config: RestSourceConfig) -> Dict[str, Any]:
             auth_block["audience"] = config.auth.audience
         if config.auth.extra_params:
             auth_block["extra_params"] = dict(config.auth.extra_params)
+        if config.auth.secret:
+            auth_block["secret"] = _secret_ref_to_dict(config.auth.secret)
         source["auth"] = auth_block
 
     stream = config.stream
@@ -430,6 +501,12 @@ def config_to_dict(config: RestSourceConfig) -> Dict[str, Any]:
 
     if stream.headers:
         stream_dict["headers"] = dict(stream.headers)
+
+    if stream.option_secrets:
+        stream_dict["option_secrets"] = {
+            name: _secret_ref_to_dict(ref)
+            for name, ref in stream.option_secrets.items()
+        }
 
     # Always include incremental object, even if all fields are null
     incremental: Dict[str, Any] = {
@@ -510,11 +587,13 @@ def _parse_auth_config(
     if auth_type == "none":
         return AuthConfig()
 
+    auth_secret = _parse_secret_ref(raw_auth.get("secret"), "source.auth.secret")
+
     if auth_type == "bearer":
         raw_token = raw_auth.get("token")
         raw_token = raw_token.strip() if isinstance(raw_token, str) else None
         token = token_value or raw_token
-        return AuthConfig(type="bearer", token=token)
+        return AuthConfig(type="bearer", token=token, secret=auth_secret)
 
     if auth_type == "api_key":
         for secret_field in ("value", "key", "token"):
@@ -536,7 +615,10 @@ def _parse_auth_config(
             raise ConfigError("'source.auth.name' is required for api_key auth")
 
         return AuthConfig(
-            type="api_key", api_key_in=api_key_in, api_key_name=api_key_name
+            type="api_key",
+            api_key_in=api_key_in,
+            api_key_name=api_key_name,
+            secret=auth_secret,
         )
 
     # OAuth2 client credentials
@@ -592,6 +674,7 @@ def _parse_auth_config(
         scope=scope,
         audience=audience,
         extra_params=extra_params,
+        secret=auth_secret,
     )
 
 
@@ -646,6 +729,7 @@ def _parse_stream(raw: Any) -> StreamConfig:
     record_selector = _parse_record_selector(raw.get("record_selector"))
     error_handler = _parse_error_handler(raw.get("error_handler"))
     partition = _parse_partition(raw.get("partition"))
+    option_secrets = _parse_option_secrets(raw.get("option_secrets"))
 
     infer_schema = raw.get("infer_schema")
     schema = raw.get("schema")
@@ -691,6 +775,7 @@ def _parse_stream(raw: Any) -> StreamConfig:
         streaming=streaming,
         response_format=response_format,
         xml_record_path=xml_record_path,
+        option_secrets=option_secrets,
     )
 
 
