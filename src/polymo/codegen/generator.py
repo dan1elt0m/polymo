@@ -102,7 +102,7 @@ def _doc_escape(value: str) -> str:
 
 
 def _parse_partition_values(raw: Any) -> List[str]:
-    """Mirrors `_parse_partition_values` in `datasource.py`."""
+    """Parse a partition `values` config entry into a list of strings."""
     if raw is None:
         return []
     if isinstance(raw, (list, tuple)):
@@ -125,7 +125,7 @@ def _parse_partition_values(raw: Any) -> List[str]:
 
 
 def _generate_range_values(partition: PartitionConfig) -> List[str]:
-    """Mirrors `_generate_range_values_from_config` in `datasource.py`."""
+    """Generate a list of partition values from a range config."""
     start_raw = partition.range_start
     end_raw = partition.range_end
     if start_raw is None or end_raw is None:
@@ -210,7 +210,7 @@ def _render_extra_params(template: str, value: str) -> Dict[str, Any]:
 
 
 def _static_param_range_windows(partition: PartitionConfig) -> List[Dict[str, Any]]:
-    """Mirrors `_plan_param_range_partitions` in `datasource.py`."""
+    """Expand a `param_range` partition strategy into literal windows."""
     if not partition.param:
         raise CodegenError(
             "partition_strategy='param_range' requires 'param' to be set"
@@ -241,7 +241,7 @@ def _static_param_range_windows(partition: PartitionConfig) -> List[Dict[str, An
 
 
 def _static_endpoint_windows(partition: PartitionConfig) -> List[Dict[str, Any]]:
-    """Mirrors `_plan_endpoint_partitions` in `datasource.py`."""
+    """Expand an `endpoints` partition strategy into literal windows."""
     if not partition.endpoints:
         raise CodegenError(
             "partition_strategy='endpoints' requires 'endpoints' to be defined"
@@ -261,10 +261,9 @@ def _static_endpoint_windows(partition: PartitionConfig) -> List[Dict[str, Any]]
 def _static_windows(config: RestSourceConfig) -> Optional[List[Dict[str, Any]]]:
     """Expand the partition config into a literal WINDOWS list at generation time.
 
-    Mirrors `_plan_partitions` (and the strategy-specific helpers it calls) in
-    `datasource.py`. Returns `None` when windows cannot be known statically:
-    strategy "none" (no partitioning) or "pagination" (windows depend on a
-    live probe of the API, so they can't be pre-computed at generation time).
+    Returns `None` when windows cannot be known statically: strategy "none"
+    (no partitioning) or "pagination" (windows depend on a live probe of the
+    API, so they can't be pre-computed at generation time).
     """
     partition = config.stream.partition
     strategy = partition.strategy if partition else "none"
