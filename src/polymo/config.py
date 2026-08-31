@@ -3,25 +3,30 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Literal, Optional, Mapping, Sequence, Tuple
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Mapping,
+    Sequence,
+    Tuple,
+)
 import re
 
-from pyspark.sql.types import (
-    BooleanType,
-    ByteType,
-    DateType,
-    DecimalType,
-    DoubleType,
-    FloatType,
-    IntegerType,
-    LongType,
-    ShortType,
-    StringType,
-    StructField,
-    StructType,
-    TimestampType,
-    VariantType,
-)
+# pyspark is optional at generation time (it only ships in the `builder`
+# extra): a bare `pip install polymo` must be able to `import polymo` and
+# call `generate()`, including for configs with a `schema` DDL string, so
+# nothing in this module may import pyspark eagerly at module load time.
+# `parse_schema_struct` (and its helpers below) import pyspark lazily,
+# inside the functions that actually need real Spark type objects; the
+# config-parsing validation path (`_validate_ddl`) is deliberately kept
+# pyspark-free (see `_validate_ddl_syntax`) since it runs on every
+# schema-bearing config, including in `generate()`.
+if TYPE_CHECKING:
+    from pyspark.sql.types import StructType
 
 
 class ConfigError(ValueError):
@@ -1082,12 +1087,23 @@ def _ensure_positive_float(value: Any, field_name: str) -> float:
 
 
 def _validate_ddl(ddl: str) -> None:
-    """Validate schema DDL without requiring a running Spark session."""
-    parse_schema_struct(ddl)
+    """Validate schema DDL syntax without requiring pyspark to be installed.
+
+    This runs during `parse_config` for every stream with a `schema`, which
+    means it runs during `generate()` too. pyspark is only in the `builder`
+    extra, so this must not import it (see `_validate_ddl_syntax`).
+    """
+    _validate_ddl_syntax(ddl)
 
 
-def parse_schema_struct(schema_text: str) -> StructType:
-    """Parse a Spark SQL DDL string into a StructType without needing Spark."""
+def parse_schema_struct(schema_text: str) -> "StructType":
+    """Parse a Spark SQL DDL string into a real pyspark StructType.
+
+    Requires pyspark to be installed (it's a lazy, local import below since
+    pyspark is optional at generation time). Not used by config parsing or
+    codegen — those only need `_validate_ddl_syntax`'s pyspark-free check.
+    """
+    from pyspark.sql.types import StructType
 
     try:
         return StructType.fromDDL(schema_text)
@@ -1098,6 +1114,27 @@ def parse_schema_struct(schema_text: str) -> StructType:
             raise ValueError(
                 f"Unable to parse schema: {fallback_exc}"
             ) from original_exc
+
+
+def _validate_ddl_syntax(schema_text: str) -> None:
+    """Check a schema DDL string is well-formed, without pyspark.
+
+    Mirrors the field/type grammar `_parse_ddl_without_spark` understands,
+    but only validates — it never constructs Spark type objects, so it has
+    no pyspark dependency at all.
+    """
+    if not schema_text or not schema_text.strip():
+        raise ValueError("Schema definition is empty")
+
+    field_defs = _split_top_level(schema_text)
+    if not field_defs:
+        raise ValueError("Schema definition has no fields")
+
+    for field_def in field_defs:
+        parts = field_def.split(None, 1)
+        if len(parts) < 2:
+            raise ValueError(f"Invalid field definition: '{field_def}'")
+        _validate_simple_type(parts[1].strip())
 
 
 def _coerce_env(value: Any) -> Any:
@@ -1120,7 +1157,11 @@ def _resolve_env(name: str) -> str:
     return resolved
 
 
-def _parse_ddl_without_spark(schema_text: str) -> StructType:
+def _parse_ddl_without_spark(schema_text: str) -> "StructType":
+    # Local import: only reached from `parse_schema_struct`, which has
+    # already imported pyspark lazily by the time this runs.
+    from pyspark.sql.types import StructField, StructType
+
     if not schema_text or not schema_text.strip():
         raise ValueError("Schema definition is empty")
 
@@ -1166,7 +1207,65 @@ def _split_top_level(schema_text: str) -> List[str]:
 _DECIMAL_PATTERN = re.compile(r"decimal\s*\((\d+)\s*,\s*(\d+)\)", re.IGNORECASE)
 
 
+_SIMPLE_TYPE_NAMES = {
+    "string",
+    "varchar",
+    "char",
+    "text",
+    "boolean",
+    "bool",
+    "double",
+    "float64",
+    "float",
+    "real",
+    "tinyint",
+    "smallint",
+    "int",
+    "integer",
+    "bigint",
+    "long",
+    "timestamp",
+    "date",
+    "variant",
+}
+
+
+def _validate_simple_type(type_spec: str) -> None:
+    """Check a single DDL field's type expression is recognized.
+
+    pyspark-free counterpart to `_parse_simple_type`: validates the same
+    grammar without constructing any Spark type object.
+    """
+    normalized = type_spec.strip().lower()
+
+    if normalized.startswith("decimal") or normalized.startswith("numeric"):
+        return  # with or without explicit (precision, scale)
+
+    if normalized in _SIMPLE_TYPE_NAMES:
+        return
+
+    raise ValueError(f"Unsupported type expression '{type_spec}'")
+
+
 def _parse_simple_type(type_spec: str):
+    # Local import: only reached from `_parse_ddl_without_spark`, which is
+    # only reached from `parse_schema_struct` after pyspark is confirmed
+    # importable.
+    from pyspark.sql.types import (
+        BooleanType,
+        ByteType,
+        DateType,
+        DecimalType,
+        DoubleType,
+        FloatType,
+        IntegerType,
+        LongType,
+        ShortType,
+        StringType,
+        TimestampType,
+        VariantType,
+    )
+
     normalized = type_spec.strip().lower()
 
     if normalized.startswith("decimal") or normalized.startswith("numeric"):
