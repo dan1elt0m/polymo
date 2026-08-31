@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from importlib import resources
+from urllib.parse import quote, quote_plus
 
 import pytest
 
@@ -439,6 +440,53 @@ def test_sample_endpoint_redacts_secret_in_raw_page_url(http_server) -> None:
     assert response.status_code == 200
     assert token not in payload["raw_pages"][0]["url"]
     assert "***REDACTED***" in payload["raw_pages"][0]["url"]
+
+
+def test_sample_endpoint_redacts_url_encoded_secret_variants(http_server) -> None:
+    """A secret containing URL-reserved characters (space, +, /, =) is
+    percent-encoded by `requests` before it ever reaches the wire for
+    query-placed api_key auth, so `raw_pages[*]["url"]` (which mirrors
+    `response.url`) echoes back the *encoded* form — a raw-substring-only
+    redact would miss it entirely. The redaction walk must also match the
+    `quote()`/`quote_plus()` encoded variants of the secret, on top of the
+    raw one (still exercised via the query param the mock server decodes
+    server-side, and still working for header echoes elsewhere)."""
+
+    def route(query, headers, body):
+        return 200, [{"id": 1, "echoed_query": query.get("api_key")}], {}
+
+    http_server.routes["/posts"] = route
+    app = create_app()
+    client = TestClient(app)
+
+    config_dict = {
+        "version": "0.1",
+        "source": {
+            "type": "rest",
+            "base_url": http_server.url,
+            "auth": {"type": "api_key", "in": "query", "name": "api_key"},
+        },
+        "stream": {"name": "posts", "path": "/posts"},
+    }
+
+    token = "my secret+token/x="
+    response = client.post(
+        "/api/sample",
+        json={"config_dict": config_dict, "token": token, "limit": 5},
+    )
+    payload = response.json()
+    body_text = json.dumps(payload)
+
+    assert response.status_code == 200
+    # Neither the raw secret nor either of its encoded forms survive
+    # anywhere in the response.
+    assert token not in body_text
+    assert quote(token, safe="") not in body_text
+    assert quote_plus(token) not in body_text
+    assert "***REDACTED***" in payload["raw_pages"][0]["url"]
+    # The query param value, decoded back by the mock server, is caught by
+    # the raw-secret needle too (not just the encoded ones).
+    assert payload["records"][0]["echoed_query"] == "***REDACTED***"
 
 
 def test_generate_returns_200_for_api_key_header_config() -> None:

@@ -6,7 +6,8 @@ import json
 from functools import partial
 from importlib import metadata, resources
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple
+from urllib.parse import quote, quote_plus
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
@@ -189,15 +190,17 @@ def create_app() -> FastAPI:
         # Computed once here so the redaction pass below and the fetch calls
         # agree on exactly what counts as "the secret".
         secret = _resolve_preview_token(config, payload.token)
-        redact = bool(secret) and len(secret) >= _MIN_REDACTABLE_SECRET_LENGTH
+        needles: List[str] = []
+        if secret is not None and len(secret) >= _MIN_REDACTABLE_SECRET_LENGTH:
+            needles = _secret_redaction_needles(secret)
 
         raw_pages, rest_error = await run_in_threadpool(
             partial(_collect_rest_preview, config, payload.limit, payload.token)
         )
-        if redact:
-            raw_pages = _redact_secret(raw_pages, secret)
+        if needles:
+            raw_pages = _redact_secret(raw_pages, needles)
             if rest_error:
-                rest_error = _redact_secret(rest_error, secret)
+                rest_error = _redact_secret(rest_error, needles)
 
         if rest_error:
             return SampleResponse(
@@ -215,8 +218,8 @@ def create_app() -> FastAPI:
         except Exception as exc:  # pragma: no cover - surfaced to UI
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-        if redact:
-            records = _redact_secret(records, secret)
+        if needles:
+            records = _redact_secret(records, needles)
 
         return SampleResponse(
             stream=stream_config.name,
@@ -498,30 +501,60 @@ _REDACTED_MARKER = "***REDACTED***"
 _MIN_REDACTABLE_SECRET_LENGTH = 4
 
 
-def _redact_secret(value: Any, secret: str) -> Any:
-    """Recursively replace every occurrence of `secret` in `value`'s strings.
+def _secret_redaction_needles(secret: str) -> List[str]:
+    """Expand a raw secret into every substring form it might come back as.
+
+    A secret placed in a query string (api_key/query auth) doesn't reach
+    the wire raw — `requests` percent-encodes it before sending, and
+    `raw_pages[*]["url"]` echoes back `response.url`, i.e. the already
+    *encoded* value. A raw-substring-only redact would miss it whenever
+    the secret contains a URL-reserved character (space, `+`, `/`, `=`,
+    `%`, ...). This returns the raw secret plus its `quote(secret,
+    safe="")` and `quote_plus(secret)` forms — the two encodings `requests`
+    itself uses for path/query components — deduped and with anything
+    under `_MIN_REDACTABLE_SECRET_LENGTH` dropped (an encoded form can't
+    end up shorter than the raw one, but each needle is checked on its own
+    terms rather than relying on that).
+    """
+    seen: set[str] = set()
+    needles: List[str] = []
+    for variant in (secret, quote(secret, safe=""), quote_plus(secret)):
+        if len(variant) < _MIN_REDACTABLE_SECRET_LENGTH or variant in seen:
+            continue
+        seen.add(variant)
+        needles.append(variant)
+    return needles
+
+
+def _redact_secret(value: Any, needles: Sequence[str]) -> Any:
+    """Recursively replace every occurrence of any `needles` entry in
+    `value`'s strings.
 
     Best-effort, presentation-layer masking for `/api/sample`: some target
     APIs echo the credential they were sent back in their response body
     (echo/debug endpoints) or, for query-placed api_key auth, in the
     request URL itself — either would otherwise leak the user's session
     token straight back into the builder's preview UI. This only catches
-    the *exact* secret substring; a base64-encoded, hashed, or otherwise
-    transformed rendering of it downstream is out of scope and will not be
-    caught (e.g. the secret is *not* re-derived from a "Basic <token>"
-    header value — a plain substring match already handles that case since
-    the token itself still appears verbatim).
+    the exact substrings in `needles` (see `_secret_redaction_needles` for
+    which forms of the secret those cover); a base64-encoded, hashed, or
+    otherwise transformed rendering of it downstream is out of scope and
+    will not be caught (e.g. the secret is *not* re-derived from a "Basic
+    <token>" header value — a plain substring match already handles that
+    case since the token itself still appears verbatim).
 
     Dicts and lists are walked recursively (redacting values, not keys);
-    strings have the secret substring replaced; every other scalar type
-    (int, float, bool, None) is returned unchanged.
+    strings have every needle replaced; every other scalar type (int,
+    float, bool, None) is returned unchanged.
     """
     if isinstance(value, dict):
-        return {key: _redact_secret(item, secret) for key, item in value.items()}
+        return {key: _redact_secret(item, needles) for key, item in value.items()}
     if isinstance(value, list):
-        return [_redact_secret(item, secret) for item in value]
+        return [_redact_secret(item, needles) for item in value]
     if isinstance(value, str):
-        return value.replace(secret, _REDACTED_MARKER)
+        redacted = value
+        for needle in needles:
+            redacted = redacted.replace(needle, _REDACTED_MARKER)
+        return redacted
     return value
 
 
