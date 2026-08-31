@@ -57,6 +57,7 @@ export const INITIAL_FORM_STATE: ConfigFormState = {
   authAudience: '',
   authExtraParams: '',
   streamPath: '',
+  streaming: false,
   params: {},
   headers: {},
   paginationType: 'none',

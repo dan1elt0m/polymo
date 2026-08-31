@@ -1,20 +1,17 @@
 import { atom } from "jotai";
 import { atomWithStorage, createJSONStorage } from "jotai/utils";
 import type { ConfigFormState, SampleState, StatusState, SavedConnector } from "../types";
-import { DEFAULT_ERROR_HANDLER, INITIAL_FORM_STATE } from "../lib/initial-data";
+import { INITIAL_FORM_STATE } from "../lib/initial-data";
 import { formStateToConfig } from "../lib/transform";
 import {
 	DEFAULT_PAGE_SIZE,
 	DEFAULT_SAMPLE_LIMIT,
 	SAMPLE_VIEWS,
 } from "../lib/constants";
-import yaml from "js-yaml";
 
 export const configFormStateAtom = atom<ConfigFormState>(INITIAL_FORM_STATE);
-export const builderViewAtom = atom<"ui" | "yaml">("ui");
-export const yamlTextAtom = atom<string>("");
-export const yamlErrorAtom = atom<string | null>(null);
-export const lastEditedAtom = atom<"ui" | "yaml">("ui");
+export const builderViewAtom = atom<"ui" | "code">("ui");
+export const lastEditedAtom = atom<"ui">("ui");
 export const statusAtom = atom<StatusState>({ tone: "info", message: "Ready to configure" });
 export const isValidatingAtom = atom(false);
 export const isSavingAtom = atom(false);
@@ -113,104 +110,29 @@ export const streamOptionsAtom = atom((get) => {
 });
 
 export const configPayloadAtom = atom((get) => {
-	const view = get(builderViewAtom);
-	if (view === "yaml") {
-		return { config: get(yamlTextAtom) };
-	}
 	const formState = get(configFormStateAtom);
 	const config = formStateToConfig(formState);
 	return { config_dict: config };
 });
 
-// Derived atom to convert form state to YAML
-export const formStateToYamlAtom = atom((get) => {
-  const formState = get(configFormStateAtom);
-  const cfg = formStateToConfig(formState) as any;
-  const ordered: any = {
-    version: cfg.version,
-    source: {
-      type: cfg.source.type,
-      base_url: cfg.source.base_url,
-    },
-    stream: {
-      // name omitted intentionally
-      path: cfg.stream.path,
-      infer_schema: cfg.stream.infer_schema,
-      schema: cfg.stream.schema || null,
-      pagination: { type: cfg.stream.pagination.type },
-      params: Object.keys(cfg.stream.params || {}).length ? cfg.stream.params : {},
-      incremental: {
-        mode: cfg.stream.incremental.mode,
-        cursor_param: cfg.stream.incremental.cursor_param,
-        cursor_field: cfg.stream.incremental.cursor_field,
-      },
-      record_selector: {
-        field_path: cfg.stream.record_selector?.field_path || [],
-        record_filter: cfg.stream.record_selector?.record_filter ?? null,
-        cast_to_schema_types: !!cfg.stream.record_selector?.cast_to_schema_types,
-      },
-      error_handler: {
-        max_retries: cfg.stream.error_handler?.max_retries ?? DEFAULT_ERROR_HANDLER.max_retries,
-        retry_statuses: Array.isArray(cfg.stream.error_handler?.retry_statuses)
-          ? cfg.stream.error_handler.retry_statuses
-          : [...DEFAULT_ERROR_HANDLER.retry_statuses],
-        retry_on_timeout: cfg.stream.error_handler?.retry_on_timeout ?? DEFAULT_ERROR_HANDLER.retry_on_timeout,
-        retry_on_connection_errors:
-          cfg.stream.error_handler?.retry_on_connection_errors ?? DEFAULT_ERROR_HANDLER.retry_on_connection_errors,
-        backoff: {
-          initial_delay_seconds:
-            cfg.stream.error_handler?.backoff?.initial_delay_seconds ?? DEFAULT_ERROR_HANDLER.backoff.initial_delay_seconds,
-          max_delay_seconds:
-            cfg.stream.error_handler?.backoff?.max_delay_seconds ?? DEFAULT_ERROR_HANDLER.backoff.max_delay_seconds,
-          multiplier:
-            cfg.stream.error_handler?.backoff?.multiplier ?? DEFAULT_ERROR_HANDLER.backoff.multiplier,
-        },
-      },
-    },
-  };
-  if (!Object.keys(ordered.stream.params).length) delete ordered.stream.params;
-  if (!ordered.stream.schema) ordered.stream.schema = null;
-  if (
-    ordered.stream.record_selector &&
-    !ordered.stream.record_selector.field_path.length &&
-    ordered.stream.record_selector.record_filter == null &&
-    !ordered.stream.record_selector.cast_to_schema_types
-  ) {
-    delete ordered.stream.record_selector;
-  }
-  const partition = (cfg.stream as any).partition;
-  if (partition && partition.strategy && partition.strategy !== 'none') {
-    const partitionBlock: Record<string, any> = { strategy: partition.strategy };
+export interface GeneratedCodeState {
+	script: string;
+	stream: string;
+	error: string | null;
+	loading: boolean;
+}
 
-    if (partition.param) partitionBlock.param = partition.param;
-    if (partition.values) partitionBlock.values = partition.values;
+export const DEFAULT_GENERATED_CODE_STATE: GeneratedCodeState = {
+	script: "",
+	stream: "",
+	error: null,
+	loading: false,
+};
 
-    if (partition.range_start !== undefined && partition.range_start !== null) {
-      partitionBlock.range_start = partition.range_start;
-    }
-    if (partition.range_end !== undefined && partition.range_end !== null) {
-      partitionBlock.range_end = partition.range_end;
-    }
-    if (partition.range_step !== undefined && partition.range_step !== null) {
-      partitionBlock.range_step = partition.range_step;
-    }
-    if (partition.range_kind) partitionBlock.range_kind = partition.range_kind;
-
-    if (partition.value_template) partitionBlock.value_template = partition.value_template;
-    if (partition.extra_template) partitionBlock.extra_template = partition.extra_template;
-
-    if (Array.isArray(partition.endpoints) && partition.endpoints.length) {
-      partitionBlock.endpoints = [...partition.endpoints];
-    }
-
-    ordered.stream.partition = partitionBlock;
-  }
-  if (cfg.source.auth) {
-    ordered.source.auth = { ...cfg.source.auth };
-  }
-  return yaml.dump(ordered, { noRefs: true, lineWidth: 120, sortKeys: false, quotingType: "'" }).trimEnd();
-});
-
+// Holds the generated PySpark script for the current form-state config dict.
+// Refreshed (debounced) whenever configFormStateAtom changes; replaces the
+// old client-side form-state -> YAML derivation.
+export const generatedCodeAtom = atom<GeneratedCodeState>(DEFAULT_GENERATED_CODE_STATE);
 
 export const bearerTokenAtom = atom<string>('');
 export const readerOptionsAtom = atom<Record<string, string>>({});

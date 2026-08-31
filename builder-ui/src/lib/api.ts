@@ -1,4 +1,4 @@
-import type { SamplePayload, ValidationPayload } from "../types";
+import type { GenerateResponse, SamplePayload, ValidationPayload } from "../types";
 
 async function postJson<T>(path: string, body: unknown): Promise<T> {
 	const response = await fetch(path, {
@@ -24,4 +24,8 @@ export function validateConfigRequest(body: unknown): Promise<ValidationPayload>
 
 export function sampleRequest(body: unknown): Promise<SamplePayload> {
 	return postJson<SamplePayload>("/api/sample", body);
+}
+
+export function generateScript(configDict: unknown): Promise<GenerateResponse> {
+	return postJson<GenerateResponse>("/api/generate", { config_dict: configDict });
 }

@@ -2,28 +2,20 @@
 
 from __future__ import annotations
 
-import json
 from functools import partial
 from importlib import metadata, resources
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
-import yaml
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
-from ..config import (
-    ConfigError,
-    RestSourceConfig,
-    config_to_dict,
-    dump_config,
-    parse_config,
-)
-from ..datasource import _plan_partitions
-from ..rest_client import PaginationWindow, RestClient
+from ..codegen import CodegenError, generate
+from ..config import ConfigError, RestSourceConfig, config_to_dict, parse_config
+from .preview import run_preview
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from pyspark.sql import SparkSession
@@ -32,35 +24,31 @@ PACKAGE_ROOT = resources.files(__package__)
 TEMPLATES = Jinja2Templates(directory=str(PACKAGE_ROOT.joinpath("templates")))
 STATIC_PATH = PACKAGE_ROOT.joinpath("static")
 
-SAMPLE_CONFIG = """\
-version: 0.1
-source:
-  type: rest
-  base_url: https://jsonplaceholder.typicode.com
-stream:
-  name: posts
-  path: /posts
-  params:
-    _limit: 25
-  pagination:
-    type: none
-  incremental:
-    mode: null
-    cursor_param: null
-    cursor_field: null
-  infer_schema: true
-  schema: null
-"""
-
-SAMPLE_CONFIG_OBJECT = parse_config(yaml.safe_load(SAMPLE_CONFIG))
-SAMPLE_CONFIG_DICT = config_to_dict(SAMPLE_CONFIG_OBJECT)
-SAMPLE_CONFIG_YAML = dump_config(SAMPLE_CONFIG_OBJECT)
+SAMPLE_CONFIG_DICT = {
+    "version": "0.1",
+    "source": {
+        "type": "rest",
+        "base_url": "https://jsonplaceholder.typicode.com",
+    },
+    "stream": {
+        "name": "posts",
+        "path": "/posts",
+        "params": {"_limit": 25},
+        "pagination": {"type": "none"},
+        "incremental": {
+            "mode": None,
+            "cursor_param": None,
+            "cursor_field": None,
+        },
+        "infer_schema": True,
+        "schema": None,
+    },
+}
 
 
 class ValidationRequest(BaseModel):
-    config: Optional[str] = Field(None, description="YAML configuration text")
-    config_dict: Optional[Dict[str, Any]] = Field(
-        None, description="Configuration provided as a dictionary"
+    config_dict: Dict[str, Any] = Field(
+        description="Configuration provided as a dictionary"
     )
     token: Optional[str] = Field(
         None, description="Bearer token supplied separately (not stored)"
@@ -71,24 +59,16 @@ class ValidationRequest(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    @model_validator(mode="after")
-    def _ensure_payload(self) -> "ValidationRequest":
-        if self.config is None and self.config_dict is None:
-            raise ValueError("Either 'config' or 'config_dict' must be provided")
-        return self
-
 
 class ValidationResponse(BaseModel):
     valid: bool
     stream: str | None = None
     message: Optional[str] = None
     config: Optional[Dict[str, Any]] = None
-    yaml: Optional[str] = None
 
 
 class SampleRequest(BaseModel):
-    config: Optional[str] = None
-    config_dict: Optional[Dict[str, Any]] = None
+    config_dict: Dict[str, Any]
     token: Optional[str] = None
     limit: int = Field(20, ge=1, le=500, description="Maximum records to preview")
     options: Optional[Dict[str, Any]] = Field(
@@ -96,12 +76,6 @@ class SampleRequest(BaseModel):
     )
 
     model_config = ConfigDict(extra="ignore")
-
-    @model_validator(mode="after")
-    def _ensure_payload(self) -> "SampleRequest":
-        if self.config is None and self.config_dict is None:
-            raise ValueError("Either 'config' or 'config_dict' must be provided")
-        return self
 
 
 class SampleResponse(BaseModel):
@@ -116,12 +90,15 @@ class SampleResponse(BaseModel):
     rest_error: Optional[str] = None
 
 
-class FormatRequest(BaseModel):
+class GenerateRequest(BaseModel):
     config_dict: Dict[str, Any]
 
+    model_config = ConfigDict(extra="ignore")
 
-class FormatResponse(BaseModel):
-    yaml: str
+
+class GenerateResponse(BaseModel):
+    script: str
+    stream: str
 
 
 def create_app() -> FastAPI:
@@ -149,7 +126,6 @@ def create_app() -> FastAPI:
             request,
             "index.html",
             {
-                "sample_config": SAMPLE_CONFIG_YAML,
                 "sample_config_dict": SAMPLE_CONFIG_DICT,
             },
         )
@@ -158,7 +134,7 @@ def create_app() -> FastAPI:
     async def validate_config(payload: ValidationRequest) -> ValidationResponse:
         try:
             config = _load_config_payload(
-                payload.config, payload.config_dict, payload.token, payload.options
+                payload.config_dict, payload.token, payload.options
             )
         except ConfigError as exc:
             return ValidationResponse(valid=False, stream=None, message=str(exc))
@@ -171,14 +147,13 @@ def create_app() -> FastAPI:
             stream=config.stream.name,
             message="Configuration is valid",
             config=config_dict,
-            yaml=dump_config(config),
         )
 
     @app.post("/api/sample", response_model=SampleResponse)
     async def sample_records(payload: SampleRequest) -> SampleResponse:
         try:
             config = _load_config_payload(
-                payload.config, payload.config_dict, payload.token, payload.options
+                payload.config_dict, payload.token, payload.options
             )
         except ConfigError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -188,7 +163,7 @@ def create_app() -> FastAPI:
         stream_config = config.stream
 
         raw_pages, rest_error = await run_in_threadpool(
-            partial(_collect_rest_preview, config, payload.limit)
+            partial(_collect_rest_preview, config, payload.limit, payload.token)
         )
 
         if rest_error:
@@ -215,13 +190,14 @@ def create_app() -> FastAPI:
             rest_error=None,
         )
 
-    @app.post("/api/format", response_model=FormatResponse)
-    async def format_config(payload: FormatRequest) -> FormatResponse:
+    @app.post("/api/generate", response_model=GenerateResponse)
+    async def generate_script(payload: GenerateRequest) -> GenerateResponse:
         try:
             config = parse_config(payload.config_dict)
-        except ConfigError as exc:
+            script = generate(config)
+        except (ConfigError, CodegenError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return FormatResponse(yaml=dump_config(config))
+        return GenerateResponse(script=script, stream=config.stream.name)
 
     @app.get("/api/meta")
     async def get_meta() -> Dict[str, str]:
@@ -235,145 +211,87 @@ def create_app() -> FastAPI:
 
 
 def _load_config_payload(
-    config_text: Optional[str],
-    config_dict: Optional[Dict[str, Any]],
+    config_dict: Dict[str, Any],
     token: Optional[str] = None,
     options: Optional[Dict[str, Any]] = None,
 ) -> RestSourceConfig:
-    if config_dict is not None:
-        return parse_config(config_dict, token=token, options=options)
-    if config_text is None:
-        raise ConfigError("Configuration payload is missing")
-    return _parse_yaml(config_text, token=token, options=options)
+    return parse_config(config_dict, token=token, options=options)
 
 
-def _parse_yaml(
-    text: str,
-    token: Optional[str] = None,
-    options: Optional[Dict[str, Any]] = None,
-) -> RestSourceConfig:
-    try:
-        parsed = yaml.safe_load(text)
-    except yaml.YAMLError as exc:
-        raise ConfigError(f"Invalid YAML: {exc}") from exc
-    return parse_config(parsed, token=token, options=options)
+def _resolve_preview_token(
+    config: RestSourceConfig, token: Optional[str]
+) -> Optional[str]:
+    """Fall back to a token embedded in the config's auth block, if any.
+
+    The builder passes the token supplied by the UI separately from the
+    config_dict payload, but a config can also carry a token directly
+    in its auth block (e.g. round-tripped from a previously-saved config).
+    """
+    if not token and config.auth:
+        if config.auth.type == "bearer" and config.auth.token:
+            return config.auth.token
+        if config.auth.type == "oauth2" and config.auth.client_secret:
+            return config.auth.client_secret
+    return token
 
 
 def _collect_rest_preview(
-    config: RestSourceConfig, limit: int
+    config: RestSourceConfig, limit: int, token: Optional[str] = None
 ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
-    pages: List[Dict[str, Any]] = []
-    total_records = 0
-
-    windows = _plan_partitions(config)
-    window_sequence: List[Optional[PaginationWindow]] = windows if windows else [None]
-
+    resolved_token = _resolve_preview_token(config, token)
     try:
-        with RestClient(
-            base_url=config.base_url, auth=config.auth, options=config.options
-        ) as client:
-            page_counter = 0
-            for window in window_sequence:
-                for page in client.fetch_pages(config.stream, window=window):
-                    remaining = max(0, limit - total_records)
-                    if remaining <= 0:
-                        break
-
-                    page_records = list(page.records)
-                    if remaining < len(page_records):
-                        page_records = page_records[:remaining]
-
-                    total_records += len(page_records)
-                    page_counter += 1
-
-                    entry = {
-                        "page": page_counter,
-                        "url": page.url,
-                        "status_code": page.status_code,
-                        "headers": dict(page.headers),
-                        "records": page_records,
-                        "payload": page.payload,
-                    }
-                    if window and window.endpoint_name:
-                        entry["endpoint"] = window.endpoint_name
-
-                    pages.append(entry)
-
-                    if total_records >= limit:
-                        break
-                if total_records >= limit:
-                    break
-        return pages, None
+        _, raw_pages, error = run_preview(config, token=resolved_token, limit=limit)
+        return raw_pages, error
     except Exception as exc:
-        return pages, str(exc)
+        # Defensive: run_preview itself only surfaces fetch failures via its
+        # `error` return value; this guards against anything else going
+        # wrong before/around that (e.g. codegen failing).
+        return [], str(exc)
 
 
 def _collect_records(
     config: RestSourceConfig, token: str | None, limit: int
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
-    """Collect processed records and dtypes using PySpark DataSource."""
+    """Collect preview records (via the generated fetch code) and their dtypes."""
 
-    from ..config import config_to_dict
+    resolved_token = _resolve_preview_token(config, token)
+    records, _, _ = run_preview(config, token=resolved_token, limit=limit)
 
-    if config.auth and not token:
-        if config.auth.type == "bearer" and config.auth.token:
-            token = config.auth.token
-        if config.auth.type == "oauth2" and config.auth.client_secret:
-            token = config.auth.client_secret
-
-    config_dict = config_to_dict(config)
+    if not records:
+        return records, []
 
     spark = _get_or_create_spark()
     try:
         df = _get_preview_df(
-            config_dict=config_dict,
-            token=token,
-            spark=spark,
-            reader_options=config.options,
+            records=records, schema_ddl=config.stream.schema, spark=spark
         )
-        records = df.limit(limit).collect()
         dtypes = df.dtypes
-        record_dicts = [row.asDict(recursive=True) for row in records]
-        dtype_dicts: List[Dict[str, str]] = []
-        sample_row = record_dicts[0] if record_dicts else {}
-        for column, dtype in dtypes:
-            if sample_row and column in sample_row:
-                dtype_dicts.append({"column": column, "type": str(dtype)})
-        return record_dicts, dtype_dicts
+        sample_row = records[0]
+        dtype_dicts: List[Dict[str, str]] = [
+            {"column": column, "type": str(dtype)}
+            for column, dtype in dtypes
+            if column in sample_row
+        ]
+        return records, dtype_dicts
     finally:
         spark.stop()
 
 
 def _get_preview_df(
     *,
-    config_dict: ConfigDict,
-    token: Optional[str],
+    records: List[Dict[str, Any]],
+    schema_ddl: Optional[str],
     spark: "SparkSession",
-    reader_options: Dict[str, Any],
 ):
-    """Get a Spark DataFrame for previewing data from the specified stream."""
+    """Build a Spark DataFrame from already-fetched preview records.
 
-    from polymo import ApiReader
-
-    _get_or_create_spark()
-    spark.dataSource.register(ApiReader)
-    config_json = json.dumps(config_dict, sort_keys=True)
-    options: Dict[str, str] = {"config_json": config_json}
-
-    if token is not None:
-        options["token"] = token
-
-    if source := config_dict.get("source", {}):
-        if auth := source.get("auth"):
-            if auth.get("type") == "oauth2":
-                options["oauth_client_secret"] = token
-
-    for key, value in reader_options.items():
-        if key in {"config_path", "token"}:
-            continue
-        options[key] = value
-
-    return spark.read.format("polymo").options(**options).load()
+    Used only to infer/validate column dtypes for the builder UI; the
+    records themselves are already known (fetched by `run_preview`), so no
+    additional network access happens here.
+    """
+    if schema_ddl:
+        return spark.createDataFrame(records, schema=schema_ddl)
+    return spark.createDataFrame(records)
 
 
 def _get_or_create_spark() -> Any:

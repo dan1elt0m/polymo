@@ -4,8 +4,6 @@ import { useAtom, useAtomValue } from "jotai";
 import {
 	configFormStateAtom,
 	builderViewAtom,
-	yamlTextAtom,
-	yamlErrorAtom,
 	lastEditedAtom,
 	statusAtom,
 	isValidatingAtom,
@@ -13,7 +11,7 @@ import {
 	sampleAtom,
 	streamOptionsAtom,
 	configPayloadAtom,
-	formStateToYamlAtom,
+	generatedCodeAtom,
 	bearerTokenAtom,
 	runtimeOptionsAtom,
 	readerOptionsAtom,
@@ -22,18 +20,17 @@ import {
 	DEFAULT_SAMPLE_STATE,
 } from "./atoms";
 import { configToFormState, formStateToConfig } from "./lib/transform";
-import { buildPysparkScript, buildScriptFileName } from "./lib/pysparkExport";
-import { validateConfigRequest, sampleRequest } from "./lib/api";
+import { validateConfigRequest, sampleRequest, generateScript } from "./lib/api";
 import { BuilderPanel } from "./components/BuilderPanel";
-import { YamlEditor } from "./components/YamlEditor";
+import { CodePane } from "./components/CodePane";
 import { SamplePreview } from "./components/SamplePreview";
 import { ThemeMenu } from "./components/ThemeMenu";
 import { LandingScreen } from "./components/LandingScreen";
 import type { ConfigFormState, ValidationResponse, RestSourceConfig, SavedConnector } from "./types";
 import { MAX_SAMPLE_ROWS, SAMPLE_VIEWS } from "./lib/constants";
-import yaml from 'js-yaml';
 import { INITIAL_FORM_STATE } from "./lib/initial-data";
 import { createId } from "./lib/id";
+import { configFileName, CONFIG_FILE_EXTENSION } from "./lib/filename";
 
 const cloneFormState = (state: ConfigFormState): ConfigFormState => JSON.parse(JSON.stringify(state));
 
@@ -47,14 +44,13 @@ const slugify = (value: string): string => {
 		.replace(/^-+|-+$/g, '') || 'connector';
 };
 
-const stripExtension = (name: string): string => name.replace(/\.[^.]+$/, '').trim();
+const stripExtension = (name: string): string =>
+	name.replace(/\.polymo\.json$/i, '').replace(/\.[^.]+$/, '').trim();
 
 const App: React.FC = () => {
 	const [showLandingScreen, setShowLandingScreen] = React.useState(true);
 	const [configFormState, setConfigFormState] = useAtom(configFormStateAtom);
 	const [builderView, setBuilderView] = useAtom(builderViewAtom);
-	const [yamlText, setYamlText] = useAtom(yamlTextAtom);
-	const [yamlError, setYamlError] = useAtom(yamlErrorAtom);
 	const [lastEdited, setLastEdited] = useAtom(lastEditedAtom);
 	const [status, setStatus] = useAtom(statusAtom);
 	const [isValidating, setIsValidating] = useAtom(isValidatingAtom);
@@ -63,18 +59,13 @@ const App: React.FC = () => {
 	const [readerOptions, setReaderOptions] = useAtom(readerOptionsAtom);
 	const streamOptions = useAtomValue(streamOptionsAtom);
 	const configPayload = useAtomValue(configPayloadAtom);
-	const formStateYaml = useAtomValue(formStateToYamlAtom);
+	const [generatedCode, setGeneratedCode] = useAtom(generatedCodeAtom);
 	const bearerToken = useAtomValue(bearerTokenAtom); // moved from inside handlePreview
 	const runtimeOptions = useAtomValue(runtimeOptionsAtom);
 	const [savedConnectors, setSavedConnectors] = useAtom(savedConnectorsAtom);
 	const [activeConnectorId, setActiveConnectorId] = useAtom(activeConnectorIdAtom);
-	const [yamlErrorLine, setYamlErrorLine] = React.useState<number | null>(null);
-	const [yamlErrorCol, setYamlErrorCol] = React.useState<number | null>(null);
-	const [yamlSnapshot, setYamlSnapshot] = React.useState<string | null>(null);
-	const [formSnapshot, setFormSnapshot] = React.useState<ConfigFormState | null>(null);
-	const [showYamlInvalidModal, setShowYamlInvalidModal] = React.useState(false);
 	const [showSaveModal, setShowSaveModal] = React.useState(false);
-	const [saveFileName, setSaveFileName] = React.useState('config.yml');
+	const [saveFileName, setSaveFileName] = React.useState(`config${CONFIG_FILE_EXTENSION}`);
 	const [saveDirHandle, setSaveDirHandle] = React.useState<any | null>(null); // directory handle
 	const [saveDirName, setSaveDirName] = React.useState<string | null>(null);
 	const [isRenamingConnector, setIsRenamingConnector] = React.useState(false);
@@ -114,19 +105,14 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 	), [savedConnectors, activeConnectorId]);
 
 	const updateSaveFileName = React.useCallback((name: string) => {
-		setSaveFileName(`${slugify(name)}.yml`);
+		setSaveFileName(`${slugify(name)}${CONFIG_FILE_EXTENSION}`);
 	}, [setSaveFileName]);
 
 	const resetWorkingState = React.useCallback(() => {
 		setSample(createSampleState());
-		setYamlError(null);
-		setYamlErrorLine(null);
-		setYamlErrorCol(null);
-		setYamlSnapshot(null);
-		setFormSnapshot(null);
 		setIsValidating(false);
 		setIsSaving(false);
-	}, [setFormSnapshot, setIsSaving, setIsValidating, setSample, setYamlError, setYamlErrorCol, setYamlErrorLine, setYamlSnapshot]);
+	}, [setIsSaving, setIsValidating, setSample]);
 
 	const generateConnectorName = React.useCallback((baseName?: string, existing: SavedConnector[] = savedConnectors) => {
 		const trimmed = baseName && baseName.trim() ? baseName.trim() : 'Untitled connector';
@@ -143,26 +129,11 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 	const loadConnector = React.useCallback(
 		(connector: SavedConnector, options?: { message?: string }) => {
 			resetWorkingState();
-			let effectiveFormState = cloneFormState(connector.formState);
-			// Fallback: if the stored formState looks empty but we have YAML, attempt to rebuild from YAML
-			const looksEmpty = !effectiveFormState.baseUrl && !effectiveFormState.streamPath && Object.keys(effectiveFormState.params || {}).length === 0;
-			if (looksEmpty && connector.yaml && connector.yaml.trim().length) {
-				try {
-					const loaded: any = yaml.load(connector.yaml) || {};
-					if (loaded && typeof loaded === 'object') {
-						const parsed = configToFormState(loaded as RestSourceConfig);
-						// Preserve auth fields from existing state if any
-						parsed.authType = effectiveFormState.authType || parsed.authType;
-						parsed.authToken = effectiveFormState.authToken || parsed.authToken;
-						effectiveFormState = cloneFormState(parsed);
-					}
-				} catch {/* ignore parse errors; keep existing */}
-			}
+			const effectiveFormState = cloneFormState(connector.formState);
 			setActiveConnectorId(connector.id);
 			setConfigFormState(effectiveFormState);
-			setYamlText(connector.yaml);
 			setLastEdited(connector.lastEdited);
-			setBuilderView(connector.builderView ?? 'ui');
+			setBuilderView(connector.builderView === 'code' ? 'code' : 'ui');
 			setReaderOptions({ ...connector.readerOptions });
 			setStatus({ tone: 'info', message: options?.message ?? `Loaded ${connector.name}` });
 			updateSaveFileName(connector.name);
@@ -179,7 +150,6 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 			setReaderOptions,
 			setShowLandingScreen,
 			setStatus,
-			setYamlText,
 			updateSaveFileName,
 		],
 	);
@@ -188,9 +158,7 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 		(options?: {
 			name?: string;
 			formState?: ConfigFormState;
-			yamlText?: string;
-			lastEdited?: 'ui' | 'yaml';
-			builderView?: 'ui' | 'yaml';
+			builderView?: 'ui' | 'code';
 			readerOptions?: Record<string, string>;
 			statusMessage?: string;
 		}) => {
@@ -202,8 +170,7 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 				createdAt: now,
 				updatedAt: now,
 				formState: cloneFormState(options?.formState ?? INITIAL_FORM_STATE),
-				yaml: options?.yamlText ?? '',
-				lastEdited: options?.lastEdited ?? 'ui',
+				lastEdited: 'ui',
 				builderView: options?.builderView ?? 'ui',
 				readerOptions: { ...(options?.readerOptions ?? {}) },
 			};
@@ -226,15 +193,13 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 	}, [createConnector]);
 
 	const handleImportConnector = React.useCallback(
-		(config: RestSourceConfig, yamlContent: string, meta?: { suggestedName?: string }) => {
+		(config: RestSourceConfig, meta?: { suggestedName?: string }) => {
 			const formState = configToFormState(config);
 			const derivedFromPath = (config.stream?.path || '').split('/').filter(Boolean).pop() || 'imported';
 			const baseName = meta?.suggestedName ? stripExtension(meta.suggestedName) : derivedFromPath || 'Imported connector';
 			createConnector({
 				name: baseName,
 				formState,
-				yamlText: yamlContent.trimEnd(),
-				lastEdited: 'yaml',
 				statusMessage: `Loaded ${baseName}`,
 			});
 		},
@@ -280,19 +245,25 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 		(id: string) => {
 			const connector = savedConnectors.find((entry) => entry.id === id);
 			if (!connector) return;
-			const yamlTextToSave = connector.yaml && connector.yaml.trim().length
-				? connector.yaml
-				: yaml.dump(formStateToConfig(connector.formState), { noRefs: true, lineWidth: 120, sortKeys: false, quotingType: "'" }).trimEnd();
-			const blob = new Blob([yamlTextToSave], { type: 'text/yaml' });
-			const link = document.createElement('a');
-			link.href = URL.createObjectURL(blob);
-			link.download = `${slugify(connector.name)}.yml`;
-			document.body.appendChild(link);
-			link.click();
-			document.body.removeChild(link);
-			URL.revokeObjectURL(link.href);
+			try {
+				// Saved configs may be incomplete work-in-progress; export the raw
+				// config dict as-is rather than requiring it to validate first.
+				const configDict = formStateToConfig(connector.formState);
+				const contents = JSON.stringify(configDict, null, 2);
+				const blob = new Blob([contents], { type: 'application/json' });
+				const link = document.createElement('a');
+				link.href = URL.createObjectURL(blob);
+				link.download = `${slugify(connector.name)}${CONFIG_FILE_EXTENSION}`;
+				document.body.appendChild(link);
+				link.click();
+				document.body.removeChild(link);
+				URL.revokeObjectURL(link.href);
+				setStatus({ tone: 'success', message: `Saved ${connector.name}` });
+			} catch (error) {
+				setStatus({ tone: 'error', message: formatError(error) });
+			}
 		},
-		[savedConnectors],
+		[savedConnectors, setStatus],
 	);
 
 	const handleRenameSavedConnector = React.useCallback(
@@ -356,7 +327,6 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 				return {
 					...entry,
 					formState: cloneFormState(configFormState),
-					yaml: yamlText,
 					lastEdited,
 					builderView,
 					readerOptions: { ...readerOptions },
@@ -365,49 +335,35 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 			}));
 		}, 400);
 		return () => window.clearTimeout(handle);
-	}, [activeConnectorId, builderView, configFormState, lastEdited, readerOptions, setSavedConnectors, yamlText, showLandingScreen]);
+	}, [activeConnectorId, builderView, configFormState, lastEdited, readerOptions, setSavedConnectors, showLandingScreen]);
 
 	// Instead, just mark initialLoadRef consumed once after first render
 	React.useEffect(() => { if (initialLoadRef.current) initialLoadRef.current = false; }, []);
 
-	// sync form state -> yaml when UI edits
+	// Regenerate the PySpark script pane whenever the form-state config dict
+	// changes, debounced by 400ms. Replaces the old client-side form-state ->
+	// YAML derivation now that codegen happens on the backend.
 	React.useEffect(() => {
-		if (lastEdited !== "ui") return;
-		const next = formStateYaml.trimEnd();
-		if (yamlText.trimEnd() !== next) {
-			setYamlText(next);
-		}
-		setYamlError(null);
-	}, [formStateYaml, lastEdited, setYamlText, setYamlError, yamlText]);
-
-	// sync yaml -> form state when YAML edits (debounced with lint)
-	React.useEffect(() => {
-		if (lastEdited !== 'yaml') return;
+		if (showLandingScreen) return;
+		setGeneratedCode((prev) => ({ ...prev, loading: true }));
+		let cancelled = false;
 		const handle = window.setTimeout(() => {
-			try {
-				const loaded: any = yaml.load(yamlText) || {};
-				if (loaded && typeof loaded === 'object') {
-					const nextState = configToFormState(loaded as RestSourceConfig);
-					setConfigFormState(nextState);
-					setStatus({ tone: 'info', message: 'YAML parsed' });
-					setYamlError(null);
-					setYamlErrorLine(null);
-					setYamlErrorCol(null);
-				}
-			} catch (e: any) {
-				const reason = e?.reason || e?.message || 'Invalid YAML';
-				setYamlError(reason);
-				if (e?.mark && typeof e.mark.line === 'number') {
-					setYamlErrorLine(e.mark.line); // 0-based
-					setYamlErrorCol(typeof e.mark.column === 'number' ? e.mark.column : null);
-				} else {
-					setYamlErrorLine(null);
-					setYamlErrorCol(null);
-				}
-			}
-		}, 300); // debounce 300ms
-		return () => window.clearTimeout(handle);
-	}, [yamlText, lastEdited, setConfigFormState, setStatus, setYamlError]);
+			const configDict = formStateToConfig(configFormState);
+			generateScript(configDict)
+				.then((result) => {
+					if (cancelled) return;
+					setGeneratedCode({ script: result.script, stream: result.stream, error: null, loading: false });
+				})
+				.catch((error) => {
+					if (cancelled) return;
+					setGeneratedCode((prev) => ({ ...prev, script: "", error: formatError(error), loading: false }));
+				});
+		}, 400);
+		return () => {
+			cancelled = true;
+			window.clearTimeout(handle);
+		};
+	}, [configFormState, setGeneratedCode, showLandingScreen]);
 
 	const busy = sample.loading || isValidating;
 	const [validateFlashClass, setValidateFlashClass] = React.useState('');
@@ -461,29 +417,25 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 		(payload: ValidationResponse) => {
 			if (!payload.valid || !payload.config) return;
 
-			if (builderView === "yaml" && payload.yaml) {
-				setYamlText(payload.yaml);
-			} else {
-				const nextState = configToFormState(payload.config);
-				// Preserve existing auth details since backend strips secrets.
-				if (configFormState.authType !== 'none') {
-					nextState.authType = configFormState.authType;
-					nextState.authToken = configFormState.authToken;
-					nextState.authApiKeyParamName = configFormState.authApiKeyParamName;
-					nextState.authTokenUrl = configFormState.authTokenUrl;
-					nextState.authClientId = configFormState.authClientId;
-					nextState.authScopes = configFormState.authScopes;
-					nextState.authAudience = configFormState.authAudience;
-					nextState.authExtraParams = configFormState.authExtraParams;
-				}
-				setConfigFormState(nextState);
+			const nextState = configToFormState(payload.config);
+			// Preserve existing auth details since backend strips secrets.
+			if (configFormState.authType !== 'none') {
+				nextState.authType = configFormState.authType;
+				nextState.authToken = configFormState.authToken;
+				nextState.authApiKeyParamName = configFormState.authApiKeyParamName;
+				nextState.authTokenUrl = configFormState.authTokenUrl;
+				nextState.authClientId = configFormState.authClientId;
+				nextState.authScopes = configFormState.authScopes;
+				nextState.authAudience = configFormState.authAudience;
+				nextState.authExtraParams = configFormState.authExtraParams;
 			}
+			setConfigFormState(nextState);
 		},
-		[builderView, setConfigFormState, setYamlText, configFormState]
+		[setConfigFormState, configFormState]
 	);
 
 	const runValidation = React.useCallback(
-		async ({ updateYaml = false, applyResponse = true }: { updateYaml?: boolean; applyResponse?: boolean } = {}) => {
+		async ({ applyResponse = true }: { applyResponse?: boolean } = {}) => {
 			setIsValidating(true);
 			try {
 				const shouldSendToken = configFormState.authType === 'bearer' || configFormState.authType === 'oauth2';
@@ -498,22 +450,18 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 					applyValidationPayload(payload);
 				}
 
-				if (updateYaml && payload.yaml) {
-					setYamlText(payload.yaml);
-				}
-
 				return payload;
 			} finally {
 				setIsValidating(false);
 			}
 		},
-		[applyValidationPayload, configFormState.authType, configPayload, setIsValidating, setYamlText, bearerToken, runtimeOptions]
+		[applyValidationPayload, configFormState.authType, configPayload, setIsValidating, bearerToken, runtimeOptions]
 	);
 
 	const handleValidate = React.useCallback(async () => {
 		try {
 			setStatus({ tone: "info", message: "Validating configuration…" });
-			const result = await runValidation({ updateYaml: builderView === "yaml", applyResponse: true });
+			const result = await runValidation({ applyResponse: true });
 
 			if (result.valid) {
 				setStatus({ tone: "success", message: "Configuration is valid" });
@@ -523,7 +471,7 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 		} catch (error) {
 			setStatus({ tone: "error", message: formatError(error) });
 		}
-	}, [builderView, runValidation, setStatus]);
+	}, [runValidation, setStatus]);
 
 	const handlePreview = React.useCallback(async () => {
 		if (!streamOptions.length) {
@@ -546,7 +494,7 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 
 		try {
 			// Don't apply the validation response to form state during preview
-			await runValidation({ updateYaml: builderView === "yaml", applyResponse: false });
+			await runValidation({ applyResponse: false });
 			setStatus({ tone: "info", message: "Fetching sample..." });
 				const shouldSendToken = configFormState.authType === 'bearer' || configFormState.authType === 'oauth2';
 				const authSecret = shouldSendToken ? bearerToken : '';
@@ -583,71 +531,13 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 			setSample((prev) => ({ ...prev, loading: false }));
 			setStatus({ tone: "error", message: formatError(error) });
 		}
-	}, [builderView, configFormState.authType, configPayload, runValidation, sample.limit, sample.stream, setSample, setStatus, streamOptions, bearerToken, runtimeOptions]);
-
-	const handleYamlChange = React.useCallback(
-		(value: string) => {
-			setYamlText(value);
-			setLastEdited("yaml");
-		},
-		[setLastEdited, setYamlText],
-	);
+	}, [configFormState.authType, configPayload, runValidation, sample.limit, sample.stream, setSample, setStatus, streamOptions, bearerToken, runtimeOptions]);
 
 	const handleViewChange = React.useCallback(
 		(value: string) => {
-			// If switching INTO YAML: capture snapshot
-			if (value === "yaml" && builderView !== "yaml") {
-				setYamlSnapshot(formStateYaml);
-				setFormSnapshot(configFormState);
-				setBuilderView("yaml");
-				setStatus({ tone: "info", message: "Switched to YAML editor" });
-				return;
-			}
-			// If switching to UI from YAML -> validate first
-			if (value === "ui" && builderView === "yaml") {
-				(async () => {
-					setStatus({ tone: "info", message: "Validating YAML before switching…" });
-					try {
-					const payload = await validateConfigRequest({
-						config: yamlText,
-						token: bearerToken,
-						options: runtimeOptions,
-					});
-						if (payload.valid && payload.config) {
-							const nextState = configToFormState(payload.config as any);
-							// Preserve current auth settings
-							if (configFormState.authType !== 'none') {
-								nextState.authType = configFormState.authType;
-								nextState.authToken = configFormState.authToken;
-								nextState.authApiKeyParamName = configFormState.authApiKeyParamName;
-								nextState.authTokenUrl = configFormState.authTokenUrl;
-								nextState.authClientId = configFormState.authClientId;
-								nextState.authScopes = configFormState.authScopes;
-								nextState.authAudience = configFormState.authAudience;
-								nextState.authExtraParams = configFormState.authExtraParams;
-							}
-							setConfigFormState(nextState);
-							setBuilderView("ui");
-							setLastEdited("ui");
-							setYamlError(null);
-							setStatus({ tone: "success", message: "YAML valid. Switched to UI." });
-						} else {
-							const msg = payload.message || "Invalid YAML";
-							setYamlError(msg);
-							setShowYamlInvalidModal(true);
-							setStatus({ tone: "error", message: msg });
-						}
-					} catch (e) {
-						const msg = formatError(e);
-						setYamlError(msg);
-						setShowYamlInvalidModal(true);
-						setStatus({ tone: "error", message: msg });
-					}
-				})();
-				return;
-			}
+			setBuilderView(value === "code" ? "code" : "ui");
 		},
-		[builderView, configFormState, formStateYaml, setBuilderView, setConfigFormState, setLastEdited, setStatus, yamlText, setYamlError, bearerToken, runtimeOptions]
+		[setBuilderView],
 	);
 
 	const handleSampleViewChange = React.useCallback(
@@ -697,13 +587,15 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 
 	const handleSave = React.useCallback(async (explicitName?: string) => {
 		if (isSaving) return;
-		const targetName = (explicitName || saveFileName || 'config.yml').trim() || 'config.yml';
+		const defaultName = `config${CONFIG_FILE_EXTENSION}`;
+		const targetName = (explicitName || saveFileName || defaultName).trim() || defaultName;
 		setIsSaving(true);
-		setStatus({ tone: "info", message: "Validating & saving…" });
+		setStatus({ tone: "info", message: "Saving…" });
 		try {
-			await runValidation({ updateYaml: builderView === "yaml", applyResponse: false });
-			const yamlToDownload = builderView === "yaml" ? yamlText : formStateYaml;
-			await downloadTextFile(yamlToDownload, targetName, saveDirHandle, 'text/yaml');
+			// Work-in-progress configs may not be complete/valid yet; save the
+			// current form state as-is so it can be reloaded and finished later.
+			const contents = JSON.stringify(configPayload.config_dict, null, 2);
+			await downloadTextFile(contents, targetName, saveDirHandle, 'application/json');
 			setStatus({ tone: "success", message: `Saved ${saveDirName ? saveDirName + '/' : ''}${targetName}` });
 			window.setTimeout(() => {
 				setStatus({ tone: "info", message: "Ready to configure" });
@@ -713,42 +605,23 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 		} finally {
 			setIsSaving(false);
 		}
-	}, [builderView, formStateYaml, isSaving, runValidation, saveFileName, saveDirHandle, saveDirName, setIsSaving, setStatus, yamlText]);
+	}, [isSaving, configPayload, saveFileName, saveDirHandle, saveDirName, setIsSaving, setStatus]);
 
-	const handleExportPySpark = React.useCallback(async () => {
-		if (isSaving) return;
-		setIsSaving(true);
-		setStatus({ tone: 'info', message: 'Validating & generating PySpark script…' });
-		try {
-			const result = await runValidation({ updateYaml: builderView === 'yaml', applyResponse: false });
-			if (!result?.valid) {
-				throw new Error(result?.message || 'Configuration is invalid');
-			}
-			const configObject = (result.config as RestSourceConfig | undefined) ?? formStateToConfig(configFormState);
-			const scriptContents = buildPysparkScript(configObject as RestSourceConfig);
-			const scriptName = buildScriptFileName(saveFileName);
-			await downloadTextFile(scriptContents, scriptName, saveDirHandle, 'text/x-python');
-			setStatus({ tone: 'success', message: `Saved ${saveDirName ? `${saveDirName}/` : ''}${scriptName}` });
-			window.setTimeout(() => {
-				setStatus({ tone: 'info', message: 'Ready to configure' });
-			}, 3000);
-		} catch (error) {
-			setStatus({ tone: 'error', message: formatError(error) });
-		} finally {
-			setIsSaving(false);
-		}
-	}, [builderView, configFormState, isSaving, runValidation, saveDirHandle, saveDirName, saveFileName, setIsSaving, setStatus]);
+	const openSaveModal = React.useCallback(() => {
+		setSaveFileName(configFileName(generatedCode.stream || configFormState.streamPath));
+		setShowSaveModal(true);
+	}, [configFormState.streamPath, generatedCode.stream]);
 
 	React.useEffect(() => {
 		const handler = (event: KeyboardEvent) => {
 			if ((event.metaKey || event.ctrlKey) && event.key === "s") {
 				event.preventDefault();
-				setShowSaveModal(true);
+				openSaveModal();
 			}
 		};
 		window.addEventListener("keydown", handler);
 		return () => window.removeEventListener("keydown", handler);
-	}, []);
+	}, [openSaveModal]);
 
 	// Theme management (light/dark/system)
 	const getSystemDark = () => (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches);
@@ -898,7 +771,7 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 						onClick={() => currentConnector && handleExportSavedConnector(currentConnector.id)}
 						disabled={!currentConnector}
 					>
-						Export
+						Save config
 					</button>
 					<ThemeMenu mode={themeMode} effective={effectiveTheme} onChange={setThemeMode} />
 				</div>
@@ -927,10 +800,10 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 											UI Builder
 										</Tabs.Trigger>
 										<Tabs.Trigger
-											value="yaml"
+											value="code"
 											className="rounded-full px-4 py-1.5 transition text-slate-11 dark:text-drac-foreground/80 hover:text-slate-12 dark:hover:text-drac-foreground data-[state=active]:bg-blue-9 data-[state=active]:text-white data-[state=active]:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-7"
 										>
-											YAML Editor
+											Generated Code
 										</Tabs.Trigger>
 									</Tabs.List>
 									<div className="flex items-center gap-3">
@@ -945,11 +818,11 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 						<button
 							type="button"
 							className="inline-flex items-center gap-1 rounded-full bg-blue-9 px-5 py-2 text-sm font-semibold text-white shadow-soft transition hover:bg-blue-10 disabled:opacity-50 disabled:cursor-not-allowed"
-							onClick={() => setShowSaveModal(true)}
+							onClick={openSaveModal}
 							disabled={busy}
 							data-testid="open-export-modal"
 						>
-											Export
+											Save config
 										</button>
 									</div>
 								</div>
@@ -962,8 +835,13 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 										onUpdateParam={handleUpdateParam}
 									/>
 								</Tabs.Content>
-								<Tabs.Content value="yaml" className="outline-none">
-									<YamlEditor value={yamlText} onChange={handleYamlChange} error={yamlError} errorLine={yamlErrorLine} errorCol={yamlErrorCol} />
+								<Tabs.Content value="code" className="outline-none">
+									<CodePane
+										script={generatedCode.script}
+										stream={generatedCode.stream}
+										error={generatedCode.error}
+										loading={generatedCode.loading}
+									/>
 								</Tabs.Content>
 							</Tabs.Root>
 						</section>
@@ -992,53 +870,12 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 					</>
 				)}
 			</main>
-			{showYamlInvalidModal && (
-				<div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-					<div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
-					<div role="dialog" aria-modal="true" className="relative z-10 w-full max-w-md rounded-xl border border-border dark:border-drac-border bg-surface dark:bg-drac-surface shadow-soft p-6 flex flex-col gap-5">
-						<header className="flex items-start justify-between gap-4">
-							<h2 className="text-lg font-semibold text-slate-12 dark:text-drac-foreground">Invalid YAML</h2>
-						</header>
-						<p className="text-sm text-slate-11 dark:text-drac-foreground/80 leading-relaxed">Your YAML did not validate. Continue editing to fix the issues, or revert to the last valid configuration captured before entering the YAML editor.</p>
-						<div className="flex flex-col gap-2 rounded-md bg-red-3/50 dark:bg-red-9/15 border border-red-7/50 px-3 py-2 text-xs">
-							<p className="font-medium text-red-11 dark:text-red-9">Error</p>
-							<p className="text-red-11 dark:text-red-9 whitespace-pre-wrap break-words">{yamlError || 'Validation error.'}</p>
-						</div>
-						<div className="flex justify-end gap-3 pt-1">
-							<button
-								type="button"
-								className="rounded-full px-4 py-2 text-sm font-medium border border-border dark:border-drac-border text-slate-12 dark:text-drac-foreground hover:bg-blue-3/60 dark:hover:bg-blue-9/30 transition"
-								onClick={() => { setShowYamlInvalidModal(false); setStatus({ tone: 'info', message: 'Continue editing YAML' }); }}
-							>
-								Continue Editing
-							</button>
-							<button
-								type="button"
-								className="rounded-full px-4 py-2 text-sm font-semibold bg-red-9 text-white hover:bg-red-10 shadow-soft transition"
-								onClick={() => {
-									if (formSnapshot && yamlSnapshot !== null) {
-										setConfigFormState(formSnapshot);
-										setYamlText(yamlSnapshot);
-										setLastEdited('ui');
-										setBuilderView('ui');
-										setStatus({ tone: 'success', message: 'Reverted to previous configuration' });
-										setYamlError(null);
-									}
-									setShowYamlInvalidModal(false);
-								}}
-							>
-								Revert Changes
-							</button>
-						</div>
-					</div>
-				</div>
-			)}
 			{showSaveModal && (
 				<div className="fixed inset-0 z-50 flex items-center justify-center p-4">
 					<div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => !isSaving && setShowSaveModal(false)} />
 					<div role="dialog" aria-modal="true" className="relative z-10 w-full max-w-md rounded-2xl border border-border bg-surface dark:bg-drac-surface shadow-soft p-6 flex flex-col gap-5">
 						<header className="flex items-start justify-between gap-4">
-							<h2 className="text-lg font-semibold text-slate-12 dark:text-drac-foreground">Save Configuration</h2>
+							<h2 className="text-lg font-semibold text-slate-12 dark:text-drac-foreground">Save config</h2>
 						</header>
 						<div className="space-y-4">
 							<label className="flex flex-col gap-2">
@@ -1048,7 +885,7 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 								className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-slate-12 shadow-sm focus-visible:border-blue-7 dark:border-drac-border dark:bg-drac-surface dark:text-drac-foreground"
 								value={saveFileName}
 								onChange={(e) => setSaveFileName(e.target.value)}
-								placeholder="config.yml"
+								placeholder={`config${CONFIG_FILE_EXTENSION}`}
 								data-testid="export-file-name-input"
 							/>
 							</label>
@@ -1088,20 +925,12 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 							</button>
 							<button
 								type="button"
-								className="rounded-full px-4 py-2 text-sm font-medium border border-border dark:border-drac-border text-slate-12 dark:text-drac-foreground hover:bg-blue-3/60 dark:hover:bg-blue-9/35 transition disabled:opacity-50"
-								onClick={() => { setShowSaveModal(false); handleExportPySpark(); }}
-								disabled={isSaving}
-							>
-								Export PySpark
-							</button>
-							<button
-								type="button"
 								className="rounded-full px-5 py-2 text-sm font-semibold bg-blue-9 text-white hover:bg-blue-10 shadow-soft transition disabled:opacity-50"
 								onClick={() => { setShowSaveModal(false); handleSave(saveFileName); }}
 								disabled={isSaving || !saveFileName.trim()}
 								data-testid="confirm-export"
 							>
-								{isSaving ? 'Saving…' : 'Save File'}
+								{isSaving ? 'Saving…' : 'Save'}
 							</button>
 						</div>
 					</div>
@@ -1154,8 +983,8 @@ function downloadTextFile(contents: string, fileName = 'config.txt', directoryHa
 					suggestedName: fileName,
 					types: [
 						{
-							description: mimeType === 'text/yaml' ? 'YAML Files' : 'Text Files',
-							accept: { [mimeType]: mimeType === 'text/yaml' ? ['.yml', '.yaml'] : ['.txt', '.py', '.text'] },
+							description: mimeType === 'application/json' ? 'JSON Files' : 'Text Files',
+							accept: { [mimeType]: mimeType === 'application/json' ? ['.json'] : ['.txt', '.py', '.text'] },
 						},
 					],
 				});

@@ -77,6 +77,7 @@ export interface StreamConfig {
   record_selector: RecordSelectorConfig;
   error_handler?: ErrorHandlerConfig;
   partition?: PartitionConfig;
+  streaming?: boolean;
 }
 
 export interface SourceConfig {
@@ -103,11 +104,16 @@ export interface ValidationResponse {
   stream?: string | null;
   message?: string;
   config?: RestSourceConfig;
-  yaml?: string;
 }
 
 // Payload aliases used by api.ts
 export type ValidationPayload = ValidationResponse;
+
+export interface GenerateResponse {
+  script: string;
+  stream: string;
+}
+
 export interface SamplePayload {
   stream: string;
   records: Record<string, any>[];
@@ -138,6 +144,7 @@ export interface ConfigFormState {
   authAudience?: string;
   authExtraParams?: string;
   streamPath: string;
+  streaming: boolean;
   params: Record<string, string>;
   paginationType: 'none' | 'link_header' | 'offset' | 'cursor' | 'page';
   // Added pagination input fields used by the Builder UI (not yet serialized to backend config)
@@ -195,9 +202,8 @@ export interface SavedConnector {
   createdAt: string;
   updatedAt: string;
   formState: ConfigFormState;
-  yaml: string;
-  lastEdited: 'ui' | 'yaml';
-  builderView: 'ui' | 'yaml';
+  lastEdited: 'ui';
+  builderView: 'ui' | 'code';
   readerOptions: Record<string, string>;
 }
 

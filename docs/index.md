@@ -23,8 +23,8 @@ Polymo is a helper for pyspark that turns everyday web APIs into tables you can 
 1. **Launch the Builder (optional but recommended).** Run `polymo builder --port 9000` and open the provided link in your browser.
 2. **Describe your API.** Fill in a base URL like `https://jsonplaceholder.typicode.com`, pick the endpoint `/posts`, and add filters such as `_limit: 20` if you only need a sample.
 3. **Preview the data.** Press the Preview button to see a table of records, the raw API replies, and any error messages.
-4. **Save the connector.** Download the YAML config or write it directly to your project folder. Tokens stay out of the file and are passed in later.
-5. **Use it in Spark.** Load the file with the short code snippet below or copy/paste from the Builder’s tips panel.
+4. **Export it.** Switch to the Generated Code tab to copy or download a standalone Python script for the connector — no polymo runtime dependency required. Save the work-in-progress form as a JSON config too if you want to keep editing it later.
+5. **Or use the legacy YAML runtime.** If you still rely on the 0.x `spark.read.format("polymo")` connector (see the [Configuration guide](config.md)), write a YAML config by hand or with the `PolymoConfig` helper and load it with the short snippet below.
 
 The Builder keeps a local library of every connector you work on. Use the header’s connector picker to hop between drafts, open the library to rename or export them, and never worry about losing your place. The header also shows the Polymo version so you always know which build you’re on.
 

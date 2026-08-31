@@ -28,3 +28,4 @@ builder-ui/test-results/
 .coverage
 
 blogs/
+*.tsbuildinfo

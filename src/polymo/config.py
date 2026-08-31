@@ -358,6 +358,7 @@ def config_to_dict(config: RestSourceConfig) -> Dict[str, Any]:
         "infer_schema": stream.infer_schema,
         "schema": stream.schema,
         "pagination": _pagination_to_dict(stream.pagination),
+        "streaming": stream.streaming,
     }
 
     if stream.params:
@@ -587,6 +588,8 @@ def _parse_stream(raw: Any) -> StreamConfig:
     resolved_params = {key: _coerce_env(value) for key, value in params.items()}
     resolved_headers = {key: _coerce_env(value) for key, value in headers.items()}
 
+    streaming = bool(raw.get("streaming", False))
+
     return StreamConfig(
         name=name,
         path=path,
@@ -599,6 +602,7 @@ def _parse_stream(raw: Any) -> StreamConfig:
         record_selector=record_selector,
         error_handler=error_handler,
         partition=partition,
+        streaming=streaming,
     )
 
 

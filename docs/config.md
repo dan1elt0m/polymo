@@ -1,5 +1,7 @@
 # Configuration Guide
 
+> **Legacy interface.** YAML configs and the Spark custom data source they feed (`spark.read.format("polymo")`) are the 0.x runtime interface and are slated for removal in Polymo 1.0, which pivots to a dev-time code generator instead. New connectors should use the [Builder UI](builder-ui.md), which exports a standalone Lakeflow Declarative Pipelines script with no polymo runtime dependency. Everything below still works today but will not carry forward.
+
 Polymo stores connector settings in a short YAML file. Think of it as a recipe that explains where to fetch data, which knobs to turn on the API, and how to treat the results. You can create the file by hand or export it from the Builder UI—both formats are identical.
 
 ## What a minimal config looks like
