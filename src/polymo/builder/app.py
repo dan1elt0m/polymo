@@ -183,9 +183,21 @@ def create_app() -> FastAPI:
 
         stream_config = config.stream
 
+        # The session secret (bearer token / api_key / oauth2 client secret)
+        # that will actually go out on the wire, resolved the same way
+        # `_collect_rest_preview`/`_collect_records` resolve it internally.
+        # Computed once here so the redaction pass below and the fetch calls
+        # agree on exactly what counts as "the secret".
+        secret = _resolve_preview_token(config, payload.token)
+        redact = bool(secret) and len(secret) >= _MIN_REDACTABLE_SECRET_LENGTH
+
         raw_pages, rest_error = await run_in_threadpool(
             partial(_collect_rest_preview, config, payload.limit, payload.token)
         )
+        if redact:
+            raw_pages = _redact_secret(raw_pages, secret)
+            if rest_error:
+                rest_error = _redact_secret(rest_error, secret)
 
         if rest_error:
             return SampleResponse(
@@ -202,6 +214,9 @@ def create_app() -> FastAPI:
             )
         except Exception as exc:  # pragma: no cover - surfaced to UI
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+        if redact:
+            records = _redact_secret(records, secret)
 
         return SampleResponse(
             stream=stream_config.name,
@@ -472,6 +487,42 @@ def _load_config_payload(
     options: Optional[Dict[str, Any]] = None,
 ) -> RestSourceConfig:
     return parse_config(config_dict, token=token, options=options)
+
+
+_REDACTED_MARKER = "***REDACTED***"
+
+# Session secrets under this length are not redacted: a 1-3 char "secret"
+# is common enough as an unrelated substring (an id, a short field value)
+# that blind substring replacement would mangle legitimate preview output
+# for essentially no confidentiality benefit.
+_MIN_REDACTABLE_SECRET_LENGTH = 4
+
+
+def _redact_secret(value: Any, secret: str) -> Any:
+    """Recursively replace every occurrence of `secret` in `value`'s strings.
+
+    Best-effort, presentation-layer masking for `/api/sample`: some target
+    APIs echo the credential they were sent back in their response body
+    (echo/debug endpoints) or, for query-placed api_key auth, in the
+    request URL itself — either would otherwise leak the user's session
+    token straight back into the builder's preview UI. This only catches
+    the *exact* secret substring; a base64-encoded, hashed, or otherwise
+    transformed rendering of it downstream is out of scope and will not be
+    caught (e.g. the secret is *not* re-derived from a "Basic <token>"
+    header value — a plain substring match already handles that case since
+    the token itself still appears verbatim).
+
+    Dicts and lists are walked recursively (redacting values, not keys);
+    strings have the secret substring replaced; every other scalar type
+    (int, float, bool, None) is returned unchanged.
+    """
+    if isinstance(value, dict):
+        return {key: _redact_secret(item, secret) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_secret(item, secret) for item in value]
+    if isinstance(value, str):
+        return value.replace(secret, _REDACTED_MARKER)
+    return value
 
 
 def _resolve_preview_token(

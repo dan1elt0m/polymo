@@ -81,6 +81,8 @@ The right-hand panel is where you test your work — this runs the same fetch/pa
 
 If something goes wrong — wrong URL, missing token, network issue — the error appears in the status pill and the Raw API view so you can fix it quickly.
 
+If the target API echoes your session token back in its response (an echo/debug endpoint, or a query-placed `api_key`), the preview masks it as `***REDACTED***` wherever it appears — in Records, DataFrame, and Raw API (payloads and URLs alike). This masking is best-effort: it only matches the exact token substring, so a base64-encoded or otherwise transformed copy of it in the response won't be caught.
+
 ## Saving your work
 Saving in the Builder is about preserving your work-in-progress *configuration*, not the generated script — download the script separately from the Generated Code pane once you're happy with it.
 

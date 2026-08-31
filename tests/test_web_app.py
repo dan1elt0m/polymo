@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from importlib import resources
 
 import pytest
@@ -265,6 +266,179 @@ def test_sample_endpoint_inlines_supplied_options_for_preview(http_server) -> No
     assert payload["rest_error"] is None
     assert payload["records"] == [{"id": 1}]
     assert payload["raw_pages"][0]["status_code"] == 200
+
+
+def test_sample_endpoint_redacts_echoed_secret_in_records_and_raw_pages(
+    http_server,
+) -> None:
+    """The mock API echoes the Authorization header it received back into
+    the response body — simulating an echo/debug endpoint. The session
+    token supplied to /api/sample must not appear verbatim anywhere in the
+    response: neither in `records` nor in `raw_pages` payloads."""
+
+    def route(query, headers, body):
+        return 200, [{"id": 1, "echoed": headers.get("Authorization")}], {}
+
+    http_server.routes["/posts"] = route
+    app = create_app()
+    client = TestClient(app)
+
+    config_dict = {
+        "version": "0.1",
+        "source": {
+            "type": "rest",
+            "base_url": http_server.url,
+            "auth": {"type": "bearer"},
+        },
+        "stream": {"name": "posts", "path": "/posts"},
+    }
+
+    token = "supersecrettoken123"
+    response = client.post(
+        "/api/sample",
+        json={"config_dict": config_dict, "token": token, "limit": 5},
+    )
+    payload = response.json()
+    body_text = json.dumps(payload)
+
+    assert response.status_code == 200
+    assert token not in body_text
+    assert "***REDACTED***" in body_text
+    assert payload["records"][0]["echoed"] == "Bearer ***REDACTED***"
+    assert payload["raw_pages"][0]["payload"][0]["echoed"] == "Bearer ***REDACTED***"
+
+
+def test_sample_endpoint_leaves_output_untouched_without_token(http_server) -> None:
+    def route(query, headers, body):
+        return 200, [{"id": 1, "echoed": headers.get("Authorization")}], {}
+
+    http_server.routes["/posts"] = route
+    app = create_app()
+    client = TestClient(app)
+
+    config_dict = {
+        "version": "0.1",
+        "source": {
+            "type": "rest",
+            "base_url": http_server.url,
+            "auth": {"type": "bearer"},
+        },
+        "stream": {"name": "posts", "path": "/posts"},
+    }
+
+    response = client.post("/api/sample", json={"config_dict": config_dict, "limit": 5})
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert "***REDACTED***" not in json.dumps(payload)
+    assert payload["records"][0]["echoed"] == "Bearer REPLACE_ME"
+
+
+def test_sample_endpoint_leaves_short_token_untouched(http_server) -> None:
+    """A 1-3 char "secret" is too short to safely substring-replace (it would
+    mangle unrelated output), so redaction is skipped below a length floor."""
+
+    def route(query, headers, body):
+        return 200, [{"id": 1, "echoed": headers.get("Authorization")}], {}
+
+    http_server.routes["/posts"] = route
+    app = create_app()
+    client = TestClient(app)
+
+    config_dict = {
+        "version": "0.1",
+        "source": {
+            "type": "rest",
+            "base_url": http_server.url,
+            "auth": {"type": "bearer"},
+        },
+        "stream": {"name": "posts", "path": "/posts"},
+    }
+
+    response = client.post(
+        "/api/sample",
+        json={"config_dict": config_dict, "token": "abc", "limit": 5},
+    )
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert "***REDACTED***" not in json.dumps(payload)
+    assert payload["records"][0]["echoed"] == "Bearer abc"
+
+
+def test_sample_endpoint_redacts_secret_in_xml_raw_payload(http_server) -> None:
+    """raw_pages payloads for XML/non-JSON responses are captured as a raw
+    string (see `run_preview`'s `recording_request`), not a dict, so the
+    redaction walk must also mask plain string payloads."""
+
+    token = "xml-secret-token"
+
+    def route(query, headers, body):
+        xml_body = (
+            "<contacts>"
+            f'<contact id="1"><auth>{headers.get("Authorization")}</auth></contact>'
+            "</contacts>"
+        )
+        return 200, xml_body, {"Content-Type": "application/xml"}
+
+    http_server.routes["/contacts"] = route
+    app = create_app()
+    client = TestClient(app)
+
+    config_dict = {
+        "version": "0.1",
+        "source": {
+            "type": "rest",
+            "base_url": http_server.url,
+            "auth": {"type": "bearer"},
+        },
+        "stream": {
+            "name": "contacts",
+            "path": "/contacts",
+            "response_format": "xml",
+            "xml_record_path": ".//contact",
+        },
+    }
+
+    response = client.post(
+        "/api/sample",
+        json={"config_dict": config_dict, "token": token, "limit": 5},
+    )
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert token not in payload["raw_pages"][0]["payload"]
+    assert "***REDACTED***" in payload["raw_pages"][0]["payload"]
+
+
+def test_sample_endpoint_redacts_secret_in_raw_page_url(http_server) -> None:
+    """api_key/query auth places the secret directly in the request URL,
+    which `raw_pages[*]["url"]` echoes back verbatim from the response."""
+
+    http_server.routes["/posts"] = lambda q, h, b: (200, [{"id": 1}], {})
+    app = create_app()
+    client = TestClient(app)
+
+    config_dict = {
+        "version": "0.1",
+        "source": {
+            "type": "rest",
+            "base_url": http_server.url,
+            "auth": {"type": "api_key", "in": "query", "name": "api_key"},
+        },
+        "stream": {"name": "posts", "path": "/posts"},
+    }
+
+    token = "query-secret-token"
+    response = client.post(
+        "/api/sample",
+        json={"config_dict": config_dict, "token": token, "limit": 5},
+    )
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert token not in payload["raw_pages"][0]["url"]
+    assert "***REDACTED***" in payload["raw_pages"][0]["url"]
 
 
 def test_generate_returns_200_for_api_key_header_config() -> None:
