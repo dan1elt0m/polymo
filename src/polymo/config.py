@@ -307,6 +307,9 @@ def parse_config(
 
     stream = _parse_stream(stream_raw)
 
+    if auth.type == "api_key" and auth.api_key_in == "query":
+        _check_api_key_query_collision(auth, stream)
+
     return RestSourceConfig(
         version=version,
         base_url=base_url.rstrip("/"),
@@ -314,6 +317,62 @@ def parse_config(
         stream=stream,
         options=runtime_options,
     )
+
+
+def _reserved_query_param_names(stream: StreamConfig) -> Dict[str, str]:
+    """Query parameter names the generated script populates itself.
+
+    Maps each reserved name to a human-readable label of where it comes
+    from, for use in the api_key/query collision error message. Only
+    includes names that are actually applied at request time for this
+    stream's configuration — e.g. `pagination.offset_param` is irrelevant
+    (and excluded) unless `pagination.type == "offset"`, since that's the
+    only pagination type whose fetch loop ever assigns it into `params`.
+    Mirrors the branches in `core.py.jinja` exactly.
+    """
+    reserved: Dict[str, str] = {}
+    pagination = stream.pagination
+
+    if pagination.type == "offset":
+        if pagination.offset_param:
+            reserved[pagination.offset_param] = "pagination.offset_param"
+        if pagination.limit_param:
+            reserved[pagination.limit_param] = "pagination.limit_param"
+    elif pagination.type == "page":
+        if pagination.page_param:
+            reserved[pagination.page_param] = "pagination.page_param"
+        if pagination.limit_param:
+            reserved[pagination.limit_param] = "pagination.limit_param"
+    elif pagination.type == "cursor" and not pagination.next_url_path:
+        # The next_url_path branch never assigns a named cursor param into
+        # `params` (it follows a server-supplied URL instead), so only the
+        # plain-cursor branch's default-resolved name is reserved.
+        cursor_param = pagination.cursor_param or "cursor"
+        reserved[cursor_param] = "pagination.cursor_param"
+        if pagination.limit_param:
+            reserved[pagination.limit_param] = "pagination.limit_param"
+
+    if stream.incremental.cursor_param:
+        reserved[stream.incremental.cursor_param] = "incremental.cursor_param"
+
+    if stream.partition.strategy == "param_range" and stream.partition.param:
+        reserved[stream.partition.param] = "partition.param"
+
+    return reserved
+
+
+def _check_api_key_query_collision(auth: AuthConfig, stream: StreamConfig) -> None:
+    """Guard against a query-placed api_key name masking a real request
+    param (or being masked by one — either way, one of the two values is
+    silently dropped since they'd share a single dict key)."""
+    reserved = _reserved_query_param_names(stream)
+    label = reserved.get(auth.api_key_name or "")
+    if label:
+        raise ConfigError(
+            f"'source.auth.name' ({auth.api_key_name!r}) collides with"
+            f" {label} ({auth.api_key_name!r}); choose a different query"
+            " parameter name for api_key auth"
+        )
 
 
 def config_to_dict(config: RestSourceConfig) -> Dict[str, Any]:
@@ -458,6 +517,13 @@ def _parse_auth_config(
         return AuthConfig(type="bearer", token=token)
 
     if auth_type == "api_key":
+        for secret_field in ("value", "key", "token"):
+            if secret_field in raw_auth:
+                raise ConfigError(
+                    "api_key values are supplied at runtime and are never stored"
+                    " in configs"
+                )
+
         api_key_in = raw_auth.get("in")
         if api_key_in not in {"header", "query"}:
             raise ConfigError(

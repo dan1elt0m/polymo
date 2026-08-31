@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from polymo.codegen import generate_core
-from polymo.config import AuthConfig, PaginationConfig
+from polymo.config import AuthConfig, PaginationConfig, PartitionConfig
 from tests.codegen.helpers import assert_hygiene, make_config, run_generated
 
 
@@ -128,6 +128,40 @@ def test_api_key_streaming_fetch_page_query(http_server):
     )
     module = run_generated(config, override_globals={"API_KEY": "sekrit-123"})
     assert module.fetch_page(0) == [{"id": 1}]
+
+
+def test_api_key_query_survives_windowed_extra_params(http_server):
+    # Regression: the api_key query assignment used to happen BEFORE
+    # `params.update(extra_params)`, so a windowed (param_range/endpoints
+    # partition) fetch could silently clobber it. It's now emitted last,
+    # right before the request, so extra_params can never overwrite it —
+    # verified across every window a param_range partition produces.
+    seen = []
+
+    def route(query, headers, body):
+        seen.append(dict(query))
+        return 200, [{"id": 1}], {}
+
+    http_server.routes["/posts"] = route
+    config = make_config(
+        base_url=http_server.url,
+        auth=AuthConfig(type="api_key", api_key_in="query", api_key_name="api_key"),
+        partition=PartitionConfig(
+            strategy="param_range", param="region", values=("us", "eu")
+        ),
+    )
+    module = run_generated(config, override_globals={"API_KEY": "sekrit-123"})
+    assert module.WINDOWS == [
+        {"extra_params": {"region": "us"}},
+        {"extra_params": {"region": "eu"}},
+    ]
+    for window in module.WINDOWS:
+        assert list(module.fetch_records(**window)) == [{"id": 1}]
+
+    assert len(seen) == 2
+    for query, expected_region in zip(seen, ("us", "eu")):
+        assert query.get("api_key") == "sekrit-123"
+        assert query.get("region") == expected_region
 
 
 def test_api_key_streaming_fetch_page_header(http_server):

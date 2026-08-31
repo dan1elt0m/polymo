@@ -29,6 +29,10 @@ _ENV = Environment(
 
 def _identifier(name: str) -> str:
     cleaned = re.sub(r"\W", "_", name)
+    if cleaned and set(cleaned) == {"_"}:
+        # symbol-only names (e.g. "!!!") would otherwise sanitize to a
+        # colliding, ugly "___" — fall back to a real word instead.
+        return "stream"
     if not cleaned or cleaned[0].isdigit():
         cleaned = f"t_{cleaned}"
     return cleaned

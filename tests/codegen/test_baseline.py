@@ -46,3 +46,12 @@ def test_dp_table_name_is_valid_sql_identifier():
     script = generate(config)
     assert '@dp.table(name="resource_m9d7_ebf2_json")' in script
     assert "m9d7-ebf2" not in script.split("@dp.table", 1)[1]
+
+
+def test_dp_table_name_symbol_only_falls_back_to_stream():
+    # A name that sanitizes to nothing but underscores (e.g. "!!!" -> "___")
+    # would otherwise be an ugly, collision-prone table name; fall back to
+    # a real word instead.
+    config = make_config(base_url="https://api.example.com", name="!!!")
+    script = generate(config)
+    assert '@dp.table(name="stream")' in script

@@ -360,6 +360,139 @@ def test_api_key_auth_missing_in_raises() -> None:
         parse_config(raw)
 
 
+@pytest.mark.parametrize("secret_field", ["value", "key", "token"])
+def test_api_key_auth_rejects_inline_secret_field(secret_field: str) -> None:
+    raw = {
+        "version": 0.1,
+        "source": {
+            "type": "rest",
+            "base_url": "https://api.test",
+            "auth": {
+                "type": "api_key",
+                "in": "header",
+                "name": "X-API-Key",
+                secret_field: "sekrit-123",
+            },
+        },
+        "stream": {
+            "name": "sample",
+            "path": "/resources",
+        },
+    }
+
+    with pytest.raises(ConfigError, match="never stored"):
+        parse_config(raw)
+
+
+@pytest.mark.parametrize(
+    "pagination,incremental,partition,colliding_name",
+    [
+        # offset_param resolves to its default "offset" for type="offset"
+        # even when not set explicitly — the reviewer's repro case.
+        ({"type": "offset"}, None, None, "offset"),
+        (
+            {"type": "offset", "page_size": 10, "limit_param": "limit"},
+            None,
+            None,
+            "limit",
+        ),
+        ({"type": "page"}, None, None, "page"),
+        (
+            {"type": "page", "page_size": 10, "limit_param": "per_page"},
+            None,
+            None,
+            "per_page",
+        ),
+        # cursor_param resolves to its default "cursor" for type="cursor"
+        # when neither cursor_param nor next_url_path override it and no
+        # next_url_path is set.
+        (
+            {"type": "cursor", "cursor_param": "after", "cursor_path": ["next"]},
+            None,
+            None,
+            "after",
+        ),
+        (None, {"mode": "cursor", "cursor_param": "since"}, None, "since"),
+        (
+            None,
+            None,
+            {"strategy": "param_range", "param": "region", "values": ["a", "b"]},
+            "region",
+        ),
+    ],
+)
+def test_api_key_query_collision_raises(
+    pagination, incremental, partition, colliding_name
+) -> None:
+    stream: dict = {
+        "name": "sample",
+        "path": "/resources",
+    }
+    if pagination is not None:
+        stream["pagination"] = pagination
+    if incremental is not None:
+        stream["incremental"] = incremental
+    if partition is not None:
+        stream["partition"] = partition
+
+    raw = {
+        "version": 0.1,
+        "source": {
+            "type": "rest",
+            "base_url": "https://api.test",
+            "auth": {"type": "api_key", "in": "query", "name": colliding_name},
+        },
+        "stream": stream,
+    }
+
+    with pytest.raises(ConfigError, match="collides with"):
+        parse_config(raw)
+
+
+def test_api_key_query_no_collision_when_cursor_param_unused_by_next_url() -> None:
+    # next_url_path pagination never assigns a named cursor param into
+    # params (it follows a server-supplied URL instead), so "cursor" isn't
+    # actually reserved here even though it would be for plain cursor_param
+    # pagination.
+    raw = {
+        "version": 0.1,
+        "source": {
+            "type": "rest",
+            "base_url": "https://api.test",
+            "auth": {"type": "api_key", "in": "query", "name": "cursor"},
+        },
+        "stream": {
+            "name": "sample",
+            "path": "/resources",
+            "pagination": {"type": "cursor", "next_url_path": ["meta", "next"]},
+        },
+    }
+
+    config = parse_config(raw)
+    assert config.auth.api_key_name == "cursor"
+
+
+def test_api_key_header_placement_never_collides_with_query_params() -> None:
+    # Header and query params live in separate namespaces; a header-placed
+    # api_key never collides with a query param name.
+    raw = {
+        "version": 0.1,
+        "source": {
+            "type": "rest",
+            "base_url": "https://api.test",
+            "auth": {"type": "api_key", "in": "header", "name": "offset"},
+        },
+        "stream": {
+            "name": "sample",
+            "path": "/resources",
+            "pagination": {"type": "offset"},
+        },
+    }
+
+    config = parse_config(raw)
+    assert config.auth.api_key_name == "offset"
+
+
 def test_partition_param_range_range_block() -> None:
     raw = {
         "version": 0.1,

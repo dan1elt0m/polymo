@@ -236,9 +236,6 @@ def fetch_records(extra_params=None, path=None):
     offset = {{ start_offset }}
     while True:
         params = dict(PARAMS)
-{% if auth_type == "api_key" and api_key_in == "query" %}
-        params[{{ api_key_name_repr }}] = API_KEY
-{% endif %}
         if extra_params:
             params.update(extra_params)
 {% if limit_param and page_size %}
@@ -248,6 +245,9 @@ def fetch_records(extra_params=None, path=None):
 {% if incremental_mode %}
         if state_cursor is not None:
             params[{{ cursor_param_inc_repr }}] = state_cursor
+{% endif %}
+{% if auth_type == "api_key" and api_key_in == "query" %}
+        params[{{ api_key_name_repr }}] = API_KEY
 {% endif %}
         response = _request(session, f"{BASE_URL}{url_path}", params)
         records = _records({% if response_format == "xml" %}ET.fromstring(response.content){% else %}response.json(){% endif %})
@@ -280,9 +280,6 @@ def fetch_records(extra_params=None, path=None):
     page = {{ start_page }}
     while True:
         params = dict(PARAMS)
-{% if auth_type == "api_key" and api_key_in == "query" %}
-        params[{{ api_key_name_repr }}] = API_KEY
-{% endif %}
         if extra_params:
             params.update(extra_params)
 {% if limit_param and page_size %}
@@ -292,6 +289,9 @@ def fetch_records(extra_params=None, path=None):
 {% if incremental_mode %}
         if state_cursor is not None:
             params[{{ cursor_param_inc_repr }}] = state_cursor
+{% endif %}
+{% if auth_type == "api_key" and api_key_in == "query" %}
+        params[{{ api_key_name_repr }}] = API_KEY
 {% endif %}
         response = _request(session, f"{BASE_URL}{url_path}", params)
 {% if response_format == "xml" %}
@@ -337,14 +337,14 @@ def fetch_records(extra_params=None, path=None):
     state_cursor = _read_state().get("cursor")
 {% endif %}
     url, params = f"{BASE_URL}{url_path}", dict(PARAMS)
-{% if auth_type == "api_key" and api_key_in == "query" %}
-    params[{{ api_key_name_repr }}] = API_KEY
-{% endif %}
     if extra_params:
         params.update(extra_params)
 {% if incremental_mode %}
     if state_cursor is not None:
         params[{{ cursor_param_inc_repr }}] = state_cursor
+{% endif %}
+{% if auth_type == "api_key" and api_key_in == "query" %}
+    params[{{ api_key_name_repr }}] = API_KEY
 {% endif %}
     while True:
         response = _request(session, url, params)
@@ -373,9 +373,6 @@ def fetch_records(extra_params=None, path=None):
     cursor = {{ initial_cursor_repr }}
     while True:
         params = dict(PARAMS)
-{% if auth_type == "api_key" and api_key_in == "query" %}
-        params[{{ api_key_name_repr }}] = API_KEY
-{% endif %}
         if extra_params:
             params.update(extra_params)
 {% if limit_param and page_size %}
@@ -386,6 +383,9 @@ def fetch_records(extra_params=None, path=None):
 {% if incremental_mode %}
         if state_cursor is not None:
             params[{{ cursor_param_inc_repr }}] = state_cursor
+{% endif %}
+{% if auth_type == "api_key" and api_key_in == "query" %}
+        params[{{ api_key_name_repr }}] = API_KEY
 {% endif %}
         response = _request(session, f"{BASE_URL}{url_path}", params)
 {% if response_format == "xml" %}
@@ -429,14 +429,14 @@ def fetch_records(extra_params=None, path=None):
     state_cursor = _read_state().get("cursor")
 {% endif %}
     url, params = f"{BASE_URL}{url_path}", dict(PARAMS)
-{% if auth_type == "api_key" and api_key_in == "query" %}
-    params[{{ api_key_name_repr }}] = API_KEY
-{% endif %}
     if extra_params:
         params.update(extra_params)
 {% if incremental_mode %}
     if state_cursor is not None:
         params[{{ cursor_param_inc_repr }}] = state_cursor
+{% endif %}
+{% if auth_type == "api_key" and api_key_in == "query" %}
+    params[{{ api_key_name_repr }}] = API_KEY
 {% endif %}
     while url:
         response = _request(session, url, params)
@@ -464,15 +464,15 @@ def fetch_records(extra_params=None, path=None):
     session.headers[{{ api_key_name_repr }}] = API_KEY
 {% endif %}
     params = dict(PARAMS)
-{% if auth_type == "api_key" and api_key_in == "query" %}
-    params[{{ api_key_name_repr }}] = API_KEY
-{% endif %}
     if extra_params:
         params.update(extra_params)
 {% if incremental_mode %}
     state_cursor = _read_state().get("cursor")
     if state_cursor is not None:
         params[{{ cursor_param_inc_repr }}] = state_cursor
+{% endif %}
+{% if auth_type == "api_key" and api_key_in == "query" %}
+    params[{{ api_key_name_repr }}] = API_KEY
 {% endif %}
     response = _request(session, f"{BASE_URL}{url_path}", params)
     records = _records({% if response_format == "xml" %}ET.fromstring(response.content){% else %}response.json(){% endif %})
@@ -546,9 +546,6 @@ def fetch_page(page_index):
     session.headers[{{ api_key_name_repr }}] = API_KEY
 {% endif %}
     params = dict(PARAMS)
-{% if auth_type == "api_key" and api_key_in == "query" %}
-    params[{{ api_key_name_repr }}] = API_KEY
-{% endif %}
 {% if limit_param and page_size %}
     params[{{ limit_param_repr }}] = {{ page_size }}
 {% endif %}
@@ -556,6 +553,9 @@ def fetch_page(page_index):
     params[{{ page_param_repr }}] = {{ start_page }} + page_index
 {% else %}
     params[{{ offset_param_repr }}] = {{ start_offset }} + page_index * {{ page_size }}
+{% endif %}
+{% if auth_type == "api_key" and api_key_in == "query" %}
+    params[{{ api_key_name_repr }}] = API_KEY
 {% endif %}
     response = _request(session, f"{BASE_URL}{PATH}", params)
     return _records({% if response_format == "xml" %}ET.fromstring(response.content){% else %}response.json(){% endif %})
