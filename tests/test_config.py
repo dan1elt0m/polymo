@@ -313,3 +313,76 @@ def test_streaming_flag_round_trip() -> None:
     # Round-trip through parse_config (as /api/generate does with config_dict payloads).
     reparsed = parse_config(config_dict)
     assert reparsed.stream.streaming is True
+
+
+def test_response_format_defaults_to_json() -> None:
+    raw = {
+        "version": 0.1,
+        "source": {"type": "rest", "base_url": "https://api.test"},
+        "stream": {"path": "/objects"},
+    }
+
+    config = parse_config(raw)
+
+    assert config.stream.response_format == "json"
+    assert config.stream.xml_record_path is None
+    assert config_to_dict(config)["stream"]["response_format"] == "json"
+    assert config_to_dict(config)["stream"]["xml_record_path"] is None
+
+
+def test_response_format_xml_round_trip() -> None:
+    raw = {
+        "version": 0.1,
+        "source": {"type": "rest", "base_url": "https://api.test"},
+        "stream": {
+            "path": "/contacts",
+            "response_format": "xml",
+            "xml_record_path": ".//contact",
+        },
+    }
+
+    config = parse_config(raw)
+
+    assert config.stream.response_format == "xml"
+    assert config.stream.xml_record_path == ".//contact"
+
+    config_dict = config_to_dict(config)
+    assert config_dict["stream"]["response_format"] == "xml"
+    assert config_dict["stream"]["xml_record_path"] == ".//contact"
+
+    reparsed = parse_config(config_dict)
+    assert reparsed.stream.response_format == "xml"
+    assert reparsed.stream.xml_record_path == ".//contact"
+
+
+def test_response_format_rejects_unsupported_value() -> None:
+    raw = {
+        "version": 0.1,
+        "source": {"type": "rest", "base_url": "https://api.test"},
+        "stream": {"path": "/objects", "response_format": "yaml"},
+    }
+
+    with pytest.raises(ConfigError):
+        parse_config(raw)
+
+
+def test_xml_record_path_without_xml_format_is_config_error() -> None:
+    raw = {
+        "version": 0.1,
+        "source": {"type": "rest", "base_url": "https://api.test"},
+        "stream": {"path": "/objects", "xml_record_path": ".//contact"},
+    }
+
+    with pytest.raises(ConfigError):
+        parse_config(raw)
+
+
+def test_xml_format_without_record_path_is_config_error() -> None:
+    raw = {
+        "version": 0.1,
+        "source": {"type": "rest", "base_url": "https://api.test"},
+        "stream": {"path": "/objects", "response_format": "xml"},
+    }
+
+    with pytest.raises(ConfigError):
+        parse_config(raw)

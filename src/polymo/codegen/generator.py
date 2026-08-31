@@ -305,12 +305,39 @@ def _resolved(stream, options):
     return params, headers, path
 
 
+def _require_no_xml_json_paths(stream) -> None:
+    """XML responses can't be walked with the JSON-path digging helpers.
+
+    These pagination/selector features all read a decoded JSON payload
+    (`_dig`, or the record_selector's `field_path` walk); none of them make
+    sense against an `xml.etree.ElementTree` element, so combining any of
+    them with `response_format: xml` is rejected at generation time (which
+    also guards the builder preview, since it calls `generate_core` too).
+    """
+    if stream.response_format != "xml":
+        return
+    incompatible = (
+        ("cursor_path", stream.pagination.cursor_path),
+        ("next_url_path", stream.pagination.next_url_path),
+        ("total_pages_path", stream.pagination.total_pages_path),
+        ("total_records_path", stream.pagination.total_records_path),
+        ("record_selector.field_path", stream.record_selector.field_path),
+    )
+    for feature_name, value in incompatible:
+        if value:
+            raise CodegenError(
+                f"{feature_name} reads JSON paths and cannot be combined with"
+                " response_format: xml"
+            )
+
+
 def _context(config: RestSourceConfig) -> Dict[str, Any]:
     stream = config.stream
     eh = stream.error_handler
     auth = config.auth
     if auth.type == "oauth2" and (not auth.token_url or not auth.client_id):
         raise CodegenError("oauth2 requires token_url and client_id")
+    _require_no_xml_json_paths(stream)
     params, headers, path = _resolved(stream, config.options)
     windows = _static_windows(config)
     partition_strategy = stream.partition.strategy if stream.partition else "none"
@@ -384,6 +411,8 @@ def _context(config: RestSourceConfig) -> Dict[str, Any]:
         "has_windows": bool(windows),
         "partition_strategy": partition_strategy,
         "streaming": stream.streaming,
+        "response_format": stream.response_format,
+        "xml_record_path_repr": _py_literal(stream.xml_record_path),
     }
 
 

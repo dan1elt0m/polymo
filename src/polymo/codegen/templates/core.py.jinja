@@ -11,6 +11,9 @@ import requests
 import json
 import os
 {% endif %}
+{% if response_format == "xml" %}
+import xml.etree.ElementTree as ET
+{% endif %}
 
 BASE_URL = {{ base_url_repr }}
 PATH = {{ path_repr }}
@@ -133,6 +136,23 @@ def _dig(payload, path):
 
 
 {% endif %}
+{% if response_format == "xml" %}
+XML_RECORD_PATH = {{ xml_record_path_repr }}
+
+
+def _records(root):
+    """Flatten each matched XML element into a record dict."""
+    records = []
+    for element in root.findall(XML_RECORD_PATH):
+        record = {f"@{key}": value for key, value in element.attrib.items()}
+        for child in element:
+            record[child.tag] = child.text
+        records.append(record)
+{% if record_filter_expr %}
+    records = [record for record in records if ({{ record_filter_expr }})]
+{% endif %}
+    return records
+{% else %}
 def _records(payload):
     """Normalise a response payload to a list of dicts."""
 {% if field_path %}
@@ -168,6 +188,7 @@ def _records(payload):
     records = [record for record in records if ({{ record_filter_expr }})]
 {% endif %}
     return records
+{% endif %}
 
 
 {% if streaming %}
@@ -206,7 +227,7 @@ def fetch_records(extra_params=None, path=None):
             params[{{ cursor_param_inc_repr }}] = state_cursor
 {% endif %}
         response = _request(session, f"{BASE_URL}{url_path}", params)
-        records = _records(response.json())
+        records = _records({% if response_format == "xml" %}ET.fromstring(response.content){% else %}response.json(){% endif %})
         if not records:
             return
         yield from records
@@ -245,7 +266,11 @@ def fetch_records(extra_params=None, path=None):
             params[{{ cursor_param_inc_repr }}] = state_cursor
 {% endif %}
         response = _request(session, f"{BASE_URL}{url_path}", params)
+{% if response_format == "xml" %}
+        payload = ET.fromstring(response.content)
+{% else %}
         payload = response.json()
+{% endif %}
         records = _records(payload)
         if not records:
             return
@@ -290,7 +315,11 @@ def fetch_records(extra_params=None, path=None):
 {% endif %}
     while True:
         response = _request(session, url, params)
+{% if response_format == "xml" %}
+        payload = ET.fromstring(response.content)
+{% else %}
         payload = response.json()
+{% endif %}
         records = _records(payload)
         if records:
             yield from records
@@ -323,7 +352,11 @@ def fetch_records(extra_params=None, path=None):
             params[{{ cursor_param_inc_repr }}] = state_cursor
 {% endif %}
         response = _request(session, f"{BASE_URL}{url_path}", params)
+{% if response_format == "xml" %}
+        payload = ET.fromstring(response.content)
+{% else %}
         payload = response.json()
+{% endif %}
         records = _records(payload)
         if records:
             yield from records
@@ -366,7 +399,7 @@ def fetch_records(extra_params=None, path=None):
 {% endif %}
     while url:
         response = _request(session, url, params)
-        records = _records(response.json())
+        records = _records({% if response_format == "xml" %}ET.fromstring(response.content){% else %}response.json(){% endif %})
         if records:
             yield from records
 {% if incremental_mode and not has_windows %}
@@ -396,7 +429,7 @@ def fetch_records(extra_params=None, path=None):
         params[{{ cursor_param_inc_repr }}] = state_cursor
 {% endif %}
     response = _request(session, f"{BASE_URL}{url_path}", params)
-    records = _records(response.json())
+    records = _records({% if response_format == "xml" %}ET.fromstring(response.content){% else %}response.json(){% endif %})
     yield from records
 {% if incremental_mode and not has_windows %}
     for record in records:
@@ -427,5 +460,5 @@ def fetch_page(page_index):
     params[{{ offset_param_repr }}] = {{ start_offset }} + page_index * {{ page_size }}
 {% endif %}
     response = _request(session, f"{BASE_URL}{PATH}", params)
-    return _records(response.json())
+    return _records({% if response_format == "xml" %}ET.fromstring(response.content){% else %}response.json(){% endif %})
 {% endif %}

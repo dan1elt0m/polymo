@@ -248,6 +248,8 @@ class StreamConfig:
     error_handler: ErrorHandlerConfig = field(default_factory=ErrorHandlerConfig)
     partition: PartitionConfig = field(default_factory=PartitionConfig)
     streaming: bool = False
+    response_format: Literal["json", "xml"] = "json"
+    xml_record_path: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -344,6 +346,8 @@ def config_to_dict(config: RestSourceConfig) -> Dict[str, Any]:
         "schema": stream.schema,
         "pagination": _pagination_to_dict(stream.pagination),
         "streaming": stream.streaming,
+        "response_format": stream.response_format,
+        "xml_record_path": stream.xml_record_path,
     }
 
     if stream.params:
@@ -563,6 +567,17 @@ def _parse_stream(raw: Any) -> StreamConfig:
 
     streaming = bool(raw.get("streaming", False))
 
+    response_format = raw.get("response_format", "json") or "json"
+    if response_format not in {"json", "xml"}:
+        raise ConfigError(f"Unsupported response_format: {response_format}")
+
+    xml_record_path = _maybe_str(raw.get("xml_record_path"), "xml_record_path")
+
+    if xml_record_path and response_format != "xml":
+        raise ConfigError("'xml_record_path' requires 'response_format: xml'")
+    if response_format == "xml" and not xml_record_path:
+        raise ConfigError("'response_format: xml' requires 'xml_record_path' to be set")
+
     return StreamConfig(
         name=name,
         path=path,
@@ -576,6 +591,8 @@ def _parse_stream(raw: Any) -> StreamConfig:
         error_handler=error_handler,
         partition=partition,
         streaming=streaming,
+        response_format=response_format,
+        xml_record_path=xml_record_path,
     )
 
 

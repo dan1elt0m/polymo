@@ -84,6 +84,37 @@ def test_preview_windowed_config_stops_early_once_limit_reached(http_server):
     assert error is None
 
 
+def test_preview_xml_config_parses_records(http_server):
+    body = (
+        "<contacts>"
+        '<contact id="7"><email>a@b.nl</email></contact>'
+        '<contact id="8"><email>c@d.nl</email></contact>'
+        "</contacts>"
+    )
+    http_server.routes["/contacts"] = lambda q, h, b: (
+        200,
+        body,
+        {"Content-Type": "application/vnd.maileon.api+xml"},
+    )
+    config = make_config(
+        base_url=http_server.url,
+        name="contacts",
+        path="/contacts",
+        response_format="xml",
+        xml_record_path=".//contact",
+    )
+    records, raw_pages, error = run_preview(config, token=None, limit=10)
+    assert records == [
+        {"@id": "7", "email": "a@b.nl"},
+        {"@id": "8", "email": "c@d.nl"},
+    ]
+    assert raw_pages[0]["status_code"] == 200
+    # `_request`'s recording wrapper falls back to `response.text` when the
+    # body isn't JSON, so the raw XML string should show up unmodified here.
+    assert raw_pages[0]["payload"] == body
+    assert error is None
+
+
 def test_preview_streaming_config_uses_fetch_records(http_server):
     http_server.routes["/posts"] = lambda q, h, b: (200, [{"id": 1}, {"id": 2}], {})
     config = make_config(
