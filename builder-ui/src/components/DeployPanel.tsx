@@ -10,6 +10,7 @@ import {
 	listDatabricksSchemas,
 	runDatabricksPipeline,
 } from "../lib/api";
+import { validateFormState } from "../lib/transform";
 import { InfoTooltip } from "./InfoTooltip";
 
 const DEFAULT_PROJECT_DIR = "~/polymo-projects";
@@ -61,6 +62,8 @@ export const DeployPanel: React.FC = () => {
 	const [lastDeployOk, setLastDeployOk] = React.useState(false);
 	const [running, setRunning] = React.useState(false);
 
+	const [validationErrors, setValidationErrors] = React.useState<string[]>([]);
+
 	const [log, setLog] = React.useState<string[]>([]);
 	const logRef = React.useRef<HTMLPreElement | null>(null);
 
@@ -69,6 +72,26 @@ export const DeployPanel: React.FC = () => {
 			setProjectName(defaultProjectName);
 		}
 	}, [defaultProjectName, projectNameTouched]);
+
+	// A bootstrapped project_path/deploy result is only valid for the
+	// project name + directory it was created with. If either changes
+	// (directly, or via the default-name sync above) after a successful
+	// bootstrap, the old path no longer refers to what the user is about
+	// to deploy/run — drop it so Deploy/Run re-disable until the user
+	// bootstraps again at the new location.
+	React.useEffect(() => {
+		setProjectPath(null);
+		setLastDeployOk(false);
+	}, [projectName, projectDir]);
+
+	// Clear a stale bootstrap validation message once the underlying
+	// config actually changes, so it doesn't linger after the user fixes
+	// the issue elsewhere in the builder. Guarded so this doesn't force a
+	// re-render on every keystroke across the whole builder once the
+	// message is already cleared.
+	React.useEffect(() => {
+		setValidationErrors((prev) => (prev.length > 0 ? [] : prev));
+	}, [configFormState]);
 
 	const appendLog = React.useCallback((line: string) => {
 		setLog((prev) => [...prev, line]);
@@ -154,6 +177,18 @@ export const DeployPanel: React.FC = () => {
 
 	const handleBootstrap = React.useCallback(async () => {
 		if (!catalog || !schema || !projectName.trim() || !projectDir.trim()) return;
+
+		// Gate on the same client-side validation the rest of the builder
+		// uses before hitting the backend, so an incomplete configuration
+		// surfaces as a clear inline message here instead of a raw 400 in
+		// the output log.
+		const errors = validateFormState(configFormState);
+		if (errors.length > 0) {
+			setValidationErrors(errors);
+			return;
+		}
+		setValidationErrors([]);
+
 		setBootstrapping(true);
 		setProjectPath(null);
 		setLastDeployOk(false);
@@ -176,7 +211,7 @@ export const DeployPanel: React.FC = () => {
 		} finally {
 			setBootstrapping(false);
 		}
-	}, [catalog, schema, projectName, projectDir, overwrite, configPayload, appendLog]);
+	}, [catalog, schema, projectName, projectDir, overwrite, configPayload, configFormState, appendLog]);
 
 	const handleDeploy = React.useCallback(async () => {
 		if (!projectPath) return;
@@ -334,6 +369,23 @@ export const DeployPanel: React.FC = () => {
 				/>
 				Overwrite bundle files in existing folder — other files are left in place
 			</label>
+
+			{validationErrors.length > 0 && (
+				<div
+					className="flex items-start gap-2 rounded-md border border-error/40 bg-red-3/60 dark:bg-drac-red/25 dark:border-drac-red/40 px-3 py-2 text-xs text-error shadow-sm"
+					data-status="error"
+				>
+					<span className="mt-0.5 inline-block h-2 w-2 flex-shrink-0 rounded-full bg-error" />
+					<div className="leading-snug">
+						<p className="font-medium">Fix the configuration before bootstrapping:</p>
+						<ul className="list-disc pl-4">
+							{validationErrors.map((error) => (
+								<li key={error}>{error}</li>
+							))}
+						</ul>
+					</div>
+				</div>
+			)}
 
 			<div className="flex flex-wrap items-center gap-3">
 				<button type="button" className={BUTTON_CLASS} onClick={handleBootstrap} disabled={!canBootstrap}>

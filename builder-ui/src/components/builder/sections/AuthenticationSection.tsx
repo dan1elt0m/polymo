@@ -37,6 +37,27 @@ export const AuthenticationSection: React.FC<AuthenticationSectionProps> = ({
   }, [state.authType]);
 
   const profile = useAtomValue(databricksProfileAtom);
+
+  // Secret scopes/keys are per-workspace. If the shared Databricks profile
+  // changes (picked in the Deploy tab), a previously-selected scope/key
+  // almost certainly doesn't exist in the new workspace — clear both so a
+  // stale reference from the old workspace never ships silently. Cleared
+  // unconditionally (not just in secret_scope mode) since the fields
+  // should already be empty in inline mode, so this is a no-op there; the
+  // `previousProfileRef` skip avoids wiping a scope/key just-loaded from a
+  // saved connector on first mount, when `profile` hasn't actually
+  // "changed" from the user's perspective.
+  const previousProfileRef = React.useRef(profile);
+  React.useEffect(() => {
+    if (previousProfileRef.current !== profile) {
+      if (state.authSecretScope || state.authSecretKey) {
+        onUpdateState({ authSecretScope: "", authSecretKey: "" });
+      }
+      previousProfileRef.current = profile;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile]);
+
   const [scopes, setScopes] = React.useState<string[]>([]);
   const [scopesLoading, setScopesLoading] = React.useState(false);
   const [scopesError, setScopesError] = React.useState<string | null>(null);
