@@ -85,8 +85,10 @@ when the underlying settings look the same:
   `total_records_path` hints let the Spark data source plan one partition
   per page and fan reads out across executors. Generated scripts run
   pagination-strategy connectors as a single sequential loop — only
-  `param_range` and `endpoints` partitioning produce a parallel
-  `sc.parallelize(...)` fan-out in the generated code now. The `total_pages_*`
-  hints still work as a pagination stop condition; `total_records_*` is
-  accepted by the config shape for compatibility but has no effect on
-  generated code.
+  `param_range` and `endpoints` partitioning produce a parallel fan-out in
+  the generated code now: the inline `DataSource` every batch `@dp.table`
+  reads through (see [How the batch table
+  reads](config.md#how-the-batch-table-reads)) turns each window into its
+  own `InputPartition`. The `total_pages_*` hints still work as a
+  pagination stop condition; `total_records_*` is accepted by the config
+  shape for compatibility but has no effect on generated code.

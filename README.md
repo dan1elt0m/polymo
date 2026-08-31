@@ -34,10 +34,16 @@ PARAMS: dict = {"_limit": 20}
 
 # … fetch/retry helpers elided …
 
+# … inline Data Source (RestSource/_Reader) elided; the batch @dp.table
+# below ingests through it, same as Lakeflow requires for the streaming
+# variant …
+
+spark.dataSource.register(RestSource)
+
+
 @dp.table(name="posts")
 def posts():
-    rows = list(fetch_records())
-    return spark.createDataFrame(rows)
+    return spark.read.format("posts_source").load()
 ```
 
 See [docs/superpowers/specs/2026-08-28-codegen-pivot-design.md](docs/superpowers/specs/2026-08-28-codegen-pivot-design.md) for the full design behind this pivot.

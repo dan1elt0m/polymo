@@ -131,20 +131,57 @@ spark = SparkSession.getActiveSession()
 SCHEMA = "id BIGINT, updated STRING"
 
 
+from pyspark.sql.datasource import DataSource, DataSourceReader, InputPartition  # noqa: E402
+
+
+class RestSource(DataSource):
+    @classmethod
+    def name(cls):
+        return "posts_source"
+
+    def schema(self):
+        return SCHEMA
+
+    def reader(self, schema):
+        return _Reader(schema)
+
+
+class _Reader(DataSourceReader):
+    def __init__(self, schema):
+        self._columns = [field.name for field in schema.fields]
+
+    def partitions(self):
+        return [InputPartition(index) for index in range(len(WINDOWS))]
+
+    def read(self, partition):
+        records = fetch_records(**WINDOWS[partition.value])
+        cursor = None
+        for record in records:
+            value = record.get("updated")
+            if value is not None and (cursor is None or value > cursor):
+                cursor = value
+            yield tuple(_cell(record.get(column)) for column in self._columns)
+        # read() runs per partition on the executor that owns it, so each
+        # partition writes its own max cursor independently; with more than
+        # one partition, whichever write lands last wins (roughly the same
+        # outcome as taking the max across partitions). STATE_PATH must
+        # point somewhere every executor can reach (e.g. a Databricks
+        # Volume, per the comment on it above) for this to work at all.
+        _write_state(cursor)
+
+
+def _cell(value):
+    """Nested structures become JSON strings; scalars pass through."""
+    if isinstance(value, (dict, list)):
+        import json
+
+        return json.dumps(value)
+    return value
+
+
+spark.dataSource.register(RestSource)
+
+
 @dp.table(name="posts")
 def posts():
-    sc = spark.sparkContext
-    rows = sc.parallelize(WINDOWS, len(WINDOWS)).flatMap(
-        lambda window: list(fetch_records(**window))
-    ).collect()
-    # fetch_records runs on executors under parallelize/flatMap, which don't
-    # share memory with the driver, so the cursor can't be tracked as
-    # in-process state; compute it here instead, from the rows collected
-    # back on the driver.
-    cursor_values = [
-        r.get("updated")
-        for r in rows
-        if isinstance(r, dict) and r.get("updated") is not None
-    ]
-    _write_state(max(cursor_values) if cursor_values else None)
-    return spark.createDataFrame(rows, schema=SCHEMA)
+    return spark.read.format("posts_source").load()

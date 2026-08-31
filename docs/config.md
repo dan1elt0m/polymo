@@ -45,9 +45,14 @@ the Builder and leaving everything else at its default.
   `PATH`. Must start with `/`. You can use placeholders like
   `/repos/{owner}/{repo}`; the Builder's reader options are wired to fill
   these in — see [Reader options](#reader-options) below.
-- **Streaming table** (`stream.streaming`) — when on, the generated script
-  registers a small Spark `DataSource` inline and builds the `@dp.table`
-  with `spark.readStream.format(...)` instead of a plain batch read.
+- **Streaming table** (`stream.streaming`) — every generated `@dp.table`
+  ingests through a small Spark `DataSource` registered inline in the
+  script — Lakeflow Declarative Pipelines requires a Spark data source
+  either way, so batch tables get one too (see
+  [How the batch table reads](#how-the-batch-table-reads) below). Turning
+  this on switches which kind: the inline source becomes a
+  `SimpleDataSourceStreamReader` and the table reads via
+  `spark.readStream.format(...)` instead of `spark.read.format(...)`.
   Requires an explicit schema and `offset` or `page` pagination; not
   compatible with incremental sync or a partition strategy.
 - **Response format** (`stream.response_format`, `stream.xml_record_path`)
@@ -146,7 +151,24 @@ the same sequential fetch loop.
     accepted for config compatibility but has no effect on generated code.
     If you need real parallelism, use `param_range` or `endpoints`
     partitioning instead (below) — those *do* generate a parallel
-    `sc.parallelize(...)` fan-out.
+    fan-out, one `InputPartition` per window.
+
+## How the batch table reads
+
+Every generated `@dp.table` — batch or streaming — ingests through a Spark
+`DataSource` registered inline in the script, because Lakeflow Declarative
+Pipelines requires a Spark data source rather than a bare Python value; a
+batch table can no longer just build a `DataFrame` in Python and return it.
+Concretely, the script defines a `RestSource(DataSource)` (its `schema()`
+returns the DDL, its `reader()` builds a `_Reader`) and a
+`_Reader(DataSourceReader)` whose `read()` calls `fetch_records()` and
+yields one tuple per record; the table body is just
+`spark.read.format("<name>_source").load()`. When the connector has no
+windows, `_Reader` reads everything in a single partition; when it does
+(`param_range` / `endpoints`, see [Partitioning](#partitioning) below),
+`_Reader.partitions()` returns one `InputPartition` per window and `read()`
+fetches only that window's records — Spark runs each partition on whichever
+executor it schedules it to, in parallel.
 
 ## Partitioning
 
@@ -157,14 +179,15 @@ the generated `@dp.table` function fetches data:
 - **pagination** — same sequential fetch; this strategy exists for
   compatibility but does not change codegen (see the note above).
 - **param_range** — generates one static request "window" per value at
-  generation time, then fans them out with
-  `sc.parallelize(WINDOWS, len(WINDOWS)).flatMap(...)`. Supply either
-  explicit `values` (comma-separated) or a range (`range_start`,
-  `range_end`, `range_step`, and `range_kind: date` for date ranges).
-  `value_template` / `extra_template` shape how each value is injected into
-  request parameters.
+  generation time; the inline Data Source (see
+  [above](#how-the-batch-table-reads)) turns each into its own
+  `InputPartition`, so windows are fetched in parallel across executors.
+  Supply either explicit `values` (comma-separated) or a range
+  (`range_start`, `range_end`, `range_step`, and `range_kind: date` for date
+  ranges). `value_template` / `extra_template` shape how each value is
+  injected into request parameters.
 - **endpoints** — one window per path. Each entry is `/path` or
-  `name:/path`. Also parallelized via `sc.parallelize`.
+  `name:/path`. Also parallelized, one partition per endpoint.
 
 Only `param_range` and `endpoints` produce this parallel fan-out, because
 only they can be fully expanded into a literal list of windows at generation
@@ -182,10 +205,16 @@ generated script track a cursor between runs:
   `<stream-name>_state.json` file next to itself (created automatically) and
   sends it via `cursor_param`.
 - After the run, the newest value of `cursor_field` seen across the fetched
-  records is written back to that file.
-- For `param_range` / `endpoints` connectors (which run in parallel via
-  `sc.parallelize`), the cursor is computed back on the driver from the
-  collected rows, since worker processes don't share the driver's memory.
+  records is written back to that file — from inside the inline Data
+  Source's `read()` (see [How the batch table
+  reads](#how-the-batch-table-reads) above), which tracks the max locally
+  as it yields records and writes it once done.
+- For `param_range` / `endpoints` connectors, `read()` runs once per
+  partition/window, so each partition tracks and writes its own max
+  independently; with more than one partition, whichever write lands last
+  wins. `STATE_PATH` must point somewhere every partition's executor can
+  reach (e.g. a Databricks Volume — see the note below) for state to be
+  read back correctly on the next run.
 
 The Incremental panel also has **State path**, **Start value**, **State
 key**, and **Keep in memory** fields. These only affect what the **Preview**
@@ -226,9 +255,15 @@ This section is JSON-only; it has no effect on XML responses (see below).
 
 ## Schema
 
-Toggle **Infer schema** (`stream.infer_schema`) to let the generated script
-sample the API and infer a Spark schema at read time — good for getting
-started, but the shape can shift if the API's response shape changes.
+Toggle **Infer schema** (`stream.infer_schema`) to skip pinning a DDL. The
+inline Data Source's `schema()` (see [How the batch table
+reads](#how-the-batch-table-reads) above) then calls a generated
+`_infer_schema()` helper, which samples up to the first 50 records from
+`fetch_records()` and derives a DDL string from their Python types — good
+for getting started, but it costs an extra request every time the table
+runs, and the shape can shift if the API's response shape changes.
+**An explicit schema is recommended** for anything beyond initial
+exploration.
 
 Turn it off and fill in **Schema** (`stream.schema`) to pin an explicit
 Spark SQL DDL string, comma-separated `name TYPE` pairs:
@@ -251,6 +286,15 @@ object you want as a typed column today, either flatten it with a
 on, or edit the generated script's `SCHEMA` constant by hand after export
 (the generator's DDL validator only runs at generation time, not on a
 script you've already exported and modified).
+
+Rather than reject a dict/list value it finds in a record at read time, the
+generated `_cell()` helper JSON-encodes it into a string, so it lands in a
+`STRING` column instead of crashing the read. Any other mismatch between a
+declared column's type and the actual value the API returns (e.g. a field
+you typed as `INT` that sometimes comes back as text) is not handled —
+Spark raises when it can't fit the value into the column, same as it always
+has. Fix it in your schema, not by relying on the generated code to coerce
+it for you.
 
 ## XML responses
 

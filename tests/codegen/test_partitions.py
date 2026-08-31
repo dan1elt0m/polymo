@@ -46,11 +46,16 @@ def test_endpoints_windows(http_server):
     assert records == [{"src": "a"}, {"src": "b"}]
 
 
-def test_endpoints_windows_incremental_schema_computes_cursor_on_driver():
-    # fetch_records executes on Spark executors under parallelize/flatMap for
-    # windowed streams, so the module-level LAST_CURSOR mutation never reaches
-    # the driver. The windowed dp table must instead derive the cursor from
-    # the rows collected back on the driver.
+def test_endpoints_windows_incremental_schema_tracks_cursor_per_partition():
+    # Batch dp tables now ingest through an inline PySpark custom Data
+    # Source (see dp.py.jinja): each window becomes an InputPartition and
+    # `_Reader.read()` runs per partition on whichever executor owns it, so
+    # (unlike the old sc.parallelize().collect() version) there is never a
+    # single driver-side list of rows to compute a cursor from. Instead
+    # `read()` tracks its own partition-local max of `cursor_field` in a
+    # plain local variable and calls `_write_state()` once it's done
+    # yielding — see the comment above that call in the generated script for
+    # the last-writer-wins caveat with multiple partitions.
     config = make_config(
         base_url="https://api.example.com",
         partition=PartitionConfig(strategy="endpoints", endpoints=("/a", "/b")),
@@ -62,15 +67,18 @@ def test_endpoints_windows_incremental_schema_computes_cursor_on_driver():
     script = generate(config)
     assert_hygiene(script)
 
-    dp_section = script.split('@dp.table(name="posts")', 1)[1]
-    assert "cursor_values" in dp_section
-    assert "_write_state(max(cursor_values) if cursor_values else None)" in dp_section
+    dp_section = script.split("class RestSource(DataSource):", 1)[1]
+    assert "def partitions(self):" in dp_section
+    assert "InputPartition(index) for index in range(len(WINDOWS))" in dp_section
+    assert "fetch_records(**WINDOWS[partition.value])" in dp_section
+    assert 'record.get("updated")' in dp_section
+    assert "_write_state(cursor)" in dp_section
     assert 'LAST_CURSOR["value"]' not in dp_section
     assert "# records are not tagged with their source endpoint" in script
 
     # LAST_CURSOR is dead module state for windowed configs: fetch_records
     # runs on executors, so a module-level LAST_CURSOR mutated there is never
-    # read back by the driver (the dp table above computes the cursor from
-    # collected rows instead). It must not be declared or mutated anywhere in
-    # the generated script for a windowed+incremental config.
+    # read back by anything (the dp table above tracks the cursor locally,
+    # inside read(), instead). It must not be declared or mutated anywhere
+    # in the generated script for a windowed+incremental config.
     assert "LAST_CURSOR" not in script

@@ -20,13 +20,22 @@ def test_schema_ddl_emitted_in_dp_wiring():
     script = generate(config)
     assert_hygiene(script)
     assert 'SCHEMA = "id BIGINT, name STRING"' in script
-    assert "schema=SCHEMA" in script
+    # the inline DataSource's schema() returns the explicit DDL directly,
+    # no runtime inference needed
+    assert "return SCHEMA" in script
+    assert "_infer_schema" not in script
 
 
 def test_no_schema_falls_back_to_inference():
+    # With no explicit DDL, the DataSource's schema() must still return
+    # something (Spark's custom Data Source API has no equivalent of
+    # createDataFrame's automatic dtype inference from Python objects), so
+    # the generated script samples a few records and derives a DDL itself.
     config = make_config(base_url="https://x")
     script = generate(config)
-    assert "SCHEMA" not in script
+    assert "SCHEMA =" not in script
+    assert "def _infer_schema():" in script
+    assert "return _infer_schema()" in script
 
 
 def test_curly_brace_path_placeholder_resolved_at_generation_time():

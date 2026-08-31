@@ -92,7 +92,70 @@ from pyspark.sql import SparkSession  # noqa: E402
 spark = SparkSession.getActiveSession()
 
 
+from pyspark.sql.datasource import DataSource, DataSourceReader  # noqa: E402
+
+
+def _infer_schema():
+    """Sample the first records to derive a DDL schema (explicit SCHEMA recommended)."""
+    from itertools import islice
+
+    sample = list(islice(fetch_records(), 50))
+    if not sample:
+        raise RuntimeError(
+            "cannot infer a schema from an empty response; set an explicit schema"
+        )
+    fields = {}
+    for record in sample:
+        for key, value in record.items():
+            if key in fields and fields[key] != "STRING":
+                continue
+            if isinstance(value, bool):
+                fields[key] = "BOOLEAN"
+            elif isinstance(value, int):
+                fields[key] = "BIGINT"
+            elif isinstance(value, float):
+                fields[key] = "DOUBLE"
+            elif value is None:
+                fields.setdefault(key, "STRING")
+            else:
+                fields[key] = "STRING"
+    return ", ".join(f"`{name}` {type_}" for name, type_ in fields.items())
+
+
+class RestSource(DataSource):
+    @classmethod
+    def name(cls):
+        return "contacts_source"
+
+    def schema(self):
+        return _infer_schema()
+
+    def reader(self, schema):
+        return _Reader(schema)
+
+
+class _Reader(DataSourceReader):
+    def __init__(self, schema):
+        self._columns = [field.name for field in schema.fields]
+
+    def read(self, partition):
+        records = fetch_records()
+        for record in records:
+            yield tuple(_cell(record.get(column)) for column in self._columns)
+
+
+def _cell(value):
+    """Nested structures become JSON strings; scalars pass through."""
+    if isinstance(value, (dict, list)):
+        import json
+
+        return json.dumps(value)
+    return value
+
+
+spark.dataSource.register(RestSource)
+
+
 @dp.table(name="contacts")
 def contacts():
-    rows = list(fetch_records())
-    return spark.createDataFrame(rows)
+    return spark.read.format("contacts_source").load()
