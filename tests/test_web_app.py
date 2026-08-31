@@ -89,6 +89,28 @@ def test_generate_returns_script() -> None:
     assert "import polymo" not in payload["script"]
 
 
+def test_generate_uses_explicit_stream_name_as_table_name() -> None:
+    """Feature: builder UI 'Table name' field. When `stream.name` is set in
+    the config dict it becomes the dp table name, overriding the
+    path-derived default (which for `/data/records` would be
+    `data_records`, not `my_table`)."""
+    app = create_app()
+    client = TestClient(app)
+
+    config_dict = {
+        "version": "0.1",
+        "source": {"type": "rest", "base_url": "https://example.com"},
+        "stream": {"name": "my_table", "path": "/data/records"},
+    }
+
+    response = client.post("/api/generate", json={"config_dict": config_dict})
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload["stream"] == "my_table"
+    assert '@dp.table(name="my_table")' in payload["script"]
+
+
 def test_generate_rejects_invalid_config() -> None:
     app = create_app()
     client = TestClient(app)

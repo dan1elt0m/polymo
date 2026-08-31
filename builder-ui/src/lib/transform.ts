@@ -284,6 +284,7 @@ export function formStateToConfig(formState: ConfigFormState): RestSourceConfig 
       ...(authBlock ? { auth: authBlock } : {}),
     },
     stream: {
+      ...(formState.streamName?.trim() ? { name: formState.streamName.trim() } : {}),
       path: effectiveStreamPath,
       params: cleanParams,
       headers: cleanHeaders,
@@ -382,7 +383,7 @@ export function formStateToConfig(formState: ConfigFormState): RestSourceConfig 
       error_handler: errorHandler,
       ...(partitionConfig ? { partition: partitionConfig } : {}),
     },
-  } as any; // backend ignores missing name
+  } as any; // stream.name is optional; backend derives one from the path when omitted
 }
 
 /**
@@ -481,6 +482,7 @@ export function configToFormState(config: RestSourceConfig): ConfigFormState {
 
   const rawStreamPath = (config.stream as any).path || '';
   const streamPath = partitionStrategy === 'endpoints' && rawStreamPath === '/' ? '' : rawStreamPath;
+  const streamName = (config.stream as any).name || '';
 
   const authConfig = (config.source?.auth ?? (config as any).auth) as AuthConfig | undefined;
   const authType = (authConfig?.type as ConfigFormState['authType']) || 'none';
@@ -504,6 +506,7 @@ export function configToFormState(config: RestSourceConfig): ConfigFormState {
     authScopes,
     authAudience,
     authExtraParams,
+    streamName,
     streamPath,
     streaming: Boolean(config.stream.streaming),
     responseFormat: config.stream.response_format === 'xml' ? 'xml' : 'json',

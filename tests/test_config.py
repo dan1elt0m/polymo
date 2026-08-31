@@ -79,6 +79,48 @@ def test_config_to_dict() -> None:
     assert config_dict["stream"]["error_handler"]["max_retries"] == 5
 
 
+def test_config_to_dict_round_trips_explicit_stream_name() -> None:
+    raw = {
+        "version": 0.1,
+        "source": {
+            "type": "rest",
+            "base_url": "https://api.test",
+        },
+        "stream": {
+            "name": "my_table",
+            "path": "/objects",
+        },
+    }
+
+    config = parse_config(raw)
+    assert config.stream.name == "my_table"
+
+    config_dict = config_to_dict(config)
+    assert config_dict["stream"]["name"] == "my_table"
+
+    round_tripped = parse_config(config_dict)
+    assert round_tripped.stream.name == "my_table"
+
+
+def test_config_to_dict_includes_derived_stream_name() -> None:
+    raw = {
+        "version": 0.1,
+        "source": {
+            "type": "rest",
+            "base_url": "https://api.test",
+        },
+        "stream": {
+            "path": "/objects",
+        },
+    }
+
+    config = parse_config(raw)
+    assert config.stream.name == "objects"
+
+    config_dict = config_to_dict(config)
+    assert config_dict["stream"]["name"] == "objects"
+
+
 def test_record_selector_round_trip() -> None:
     raw = {
         "version": 0.1,

@@ -58,6 +58,7 @@ export const INITIAL_FORM_STATE: ConfigFormState = {
   authScopes: '',
   authAudience: '',
   authExtraParams: '',
+  streamName: '',
   streamPath: '',
   streaming: false,
   responseFormat: 'json',

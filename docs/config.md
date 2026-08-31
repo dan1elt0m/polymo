@@ -41,6 +41,10 @@ the Builder and leaving everything else at its default.
 - **Base URL** (`source.base_url`) — the root of every request. The
   generated script stores it as the `BASE_URL` constant. Leave off the
   trailing slash.
+- **Table name** (`stream.name`) — becomes the dp table name
+  (`@dp.table(name=...)`), sanitized to a SQL identifier at export time.
+  Optional: leave it blank and the Builder derives one from the stream path
+  instead (e.g. `/v1/items` → `v1_items`).
 - **Stream Path** (`stream.path`) — appended to `BASE_URL` and stored as
   `PATH`. Must start with `/`. You can use placeholders like
   `/repos/{owner}/{repo}`; the Builder's reader options are wired to fill

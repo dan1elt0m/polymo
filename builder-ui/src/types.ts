@@ -66,7 +66,9 @@ export interface PartitionConfig {
 }
 
 export interface StreamConfig {
-  // name removed from persisted config; backend derives internally
+  // dp table name; defaults to a path-derived name on the backend when
+  // omitted or blank.
+  name?: string | null;
   path: string;
   params: Record<string, any>;
   headers?: Record<string, any>;
@@ -142,6 +144,7 @@ export interface ConfigFormState {
   authScopes?: string;
   authAudience?: string;
   authExtraParams?: string;
+  streamName: string;
   streamPath: string;
   streaming: boolean;
   responseFormat: 'json' | 'xml';

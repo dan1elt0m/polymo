@@ -40,6 +40,21 @@ export const BaseConfigurationSection: React.FC<BaseConfigurationSectionProps> =
         />
       </label>
 
+      <label className="flex flex-col gap-2">
+        <div className="flex items-center gap-1">
+          <span className="text-sm font-medium text-slate-11">Table name</span>
+          <InfoTooltip text="Becomes the dp table name in the generated script (sanitized to a SQL identifier on export). Defaults to a name derived from the stream path when left blank." />
+        </div>
+        <input
+          type="text"
+          className="rounded-lg border border-border bg-background px-4 py-3 text-sm text-slate-12 shadow-sm focus-visible:border-blue-7 dark:border-slate-6 dark:bg-slate-2 transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
+          placeholder="orders (defaults to a name derived from the stream path)"
+          value={state.streamName}
+          onChange={(e) => onUpdateState({ streamName: e.target.value })}
+          data-testid="stream-name-input"
+        />
+      </label>
+
       <label className="flex items-center gap-2">
         <input
           type="checkbox"

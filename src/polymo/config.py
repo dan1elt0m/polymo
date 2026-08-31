@@ -340,7 +340,10 @@ def config_to_dict(config: RestSourceConfig) -> Dict[str, Any]:
 
     stream = config.stream
     stream_dict: Dict[str, Any] = {
-        # 'name' intentionally omitted from external representation
+        # 'name' becomes the dp table name (sanitized to a SQL identifier
+        # at codegen time); always included so the builder UI's "Table
+        # name" field round-trips through /api/validate.
+        "name": stream.name,
         "path": stream.path,
         "infer_schema": stream.infer_schema,
         "schema": stream.schema,
