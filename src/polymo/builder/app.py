@@ -6,7 +6,7 @@ from functools import partial
 from importlib import metadata, resources
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -15,6 +15,7 @@ from starlette.concurrency import run_in_threadpool
 
 from ..codegen import CodegenError, generate
 from ..config import ConfigError, RestSourceConfig, config_to_dict, parse_config
+from . import databricks
 from .preview import run_preview
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -183,7 +184,83 @@ def create_app() -> FastAPI:
     async def get_meta() -> Dict[str, str]:
         return {"version": _polymo_version()}
 
+    @app.get("/api/databricks/profiles")
+    async def list_databricks_profiles() -> Dict[str, List[str]]:
+        return {"profiles": databricks.list_profiles()}
+
+    @app.get("/api/databricks/catalogs")
+    async def list_databricks_catalogs(
+        profile: Optional[str] = Query(None),
+    ) -> Dict[str, List[str]]:
+        data = await run_in_threadpool(
+            _run_databricks_cli, ["catalogs", "list"], profile
+        )
+        return {
+            "catalogs": databricks.extract_names(
+                data, wrapper_keys=("catalogs",), item_key="name"
+            )
+        }
+
+    @app.get("/api/databricks/schemas")
+    async def list_databricks_schemas(
+        catalog: str = Query(...),
+        profile: Optional[str] = Query(None),
+    ) -> Dict[str, List[str]]:
+        data = await run_in_threadpool(
+            _run_databricks_cli, ["schemas", "list", catalog], profile
+        )
+        return {
+            "schemas": databricks.extract_names(
+                data, wrapper_keys=("schemas",), item_key="name"
+            )
+        }
+
+    @app.get("/api/databricks/secret-scopes")
+    async def list_databricks_secret_scopes(
+        profile: Optional[str] = Query(None),
+    ) -> Dict[str, List[str]]:
+        data = await run_in_threadpool(
+            _run_databricks_cli, ["secrets", "list-scopes"], profile
+        )
+        return {
+            "secret_scopes": databricks.extract_names(
+                data, wrapper_keys=("scopes",), item_key="name"
+            )
+        }
+
+    @app.get("/api/databricks/secret-keys")
+    async def list_databricks_secret_keys(
+        scope: str = Query(...),
+        profile: Optional[str] = Query(None),
+    ) -> Dict[str, List[str]]:
+        data = await run_in_threadpool(
+            _run_databricks_cli, ["secrets", "list-secrets", scope], profile
+        )
+        return {
+            "secret_keys": databricks.extract_names(
+                data, wrapper_keys=("secrets",), item_key="key"
+            )
+        }
+
     return app
+
+
+def _run_databricks_cli(args: List[str], profile: Optional[str]) -> Any:
+    """Run a `databricks` CLI read command, mapping failures to HTTP errors.
+
+    - Missing CLI executable -> 501, so the UI can distinguish "install the
+      CLI" from an actual command failure.
+    - Non-zero exit / timeout -> 502 with a short stderr-derived detail.
+    """
+    try:
+        return databricks.run_cli(args, profile=profile)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=501, detail=databricks.CLI_NOT_FOUND_DETAIL
+        ) from exc
+    except databricks.DatabricksCliError as exc:
+        detail = exc.stderr or str(exc)
+        raise HTTPException(status_code=502, detail=detail) from exc
 
 
 def _load_config_payload(
