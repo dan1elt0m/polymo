@@ -570,6 +570,12 @@ def _context(config: RestSourceConfig) -> Dict[str, Any]:
         "streaming": stream.streaming,
         "response_format": stream.response_format,
         "xml_record_path_repr": _py_literal(stream.xml_record_path),
+        # Overridden by `codegen.bundle` when rendering `dp.py.jinja` as a
+        # standalone pipeline file for a Databricks Asset Bundle project
+        # (see `_bundle_import_names` there); left falsy here so the
+        # concatenated core+dp output of `generate()` is unaffected.
+        "bundle_pkg": None,
+        "bundle_imports": [],
     }
 
 
@@ -577,7 +583,13 @@ def generate_core(config: RestSourceConfig) -> str:
     return _ENV.get_template("core.py.jinja").render(**_context(config))
 
 
-def generate(config: RestSourceConfig) -> str:
+def validate_dp_wiring(config: RestSourceConfig) -> None:
+    """Raise `CodegenError` if `config` can't be expressed as a `dp.table`.
+
+    Shared by `generate()` (single-file export) and
+    `codegen.bundle.generate_bundle()` (Asset Bundle project) so the two
+    can never drift on which configs are rejected.
+    """
     stream = config.stream
     if stream.streaming and (
         not stream.schema or stream.pagination.type not in ("offset", "page")
@@ -595,6 +607,10 @@ def generate(config: RestSourceConfig) -> str:
         raise CodegenError("streaming does not support incremental state")
     if stream.streaming and _static_windows(config):
         raise CodegenError("streaming does not support partition strategies")
+
+
+def generate(config: RestSourceConfig) -> str:
+    validate_dp_wiring(config)
     core = generate_core(config)
     dp_wiring = _ENV.get_template("dp.py.jinja").render(**_context(config))
     return core + "\n\n" + dp_wiring

@@ -1,5 +1,12 @@
+{% if bundle_pkg %}
+from typing import Any, Iterator
+
+{% endif %}
 from pyspark import pipelines as dp  # noqa: E402
 from pyspark.sql import SparkSession  # noqa: E402
+{% if bundle_pkg %}
+from {{ bundle_pkg }}.client import {{ bundle_imports | join(", ") }}  # noqa: E402
+{% endif %}
 
 spark = SparkSession.getActiveSession()
 

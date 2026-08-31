@@ -40,6 +40,10 @@ dev = [
     "pre-commit>=4.3.0",
     "pytest>=8.4.2",
     "pytest-cov>=7.0.0",
+    # Test-only: parses generated databricks.yml in tests/codegen/test_bundle.py.
+    # Runtime code never imports yaml (bundle output is generated as text,
+    # not read back with a YAML parser).
+    "pyyaml>=6.0",
     "requests>=2.31",
     "ruff>=0.13.3",
 ]
@@ -76,7 +80,7 @@ Issues = "https://github.com/dan1elt0m/polymo/issues"
 # Golden fixtures capture `generate()`'s literal output byte-for-byte; ruff
 # must not reformat them or the golden tests would drift from what the
 # generator actually produces.
-extend-exclude = ["tests/codegen/golden"]
+extend-exclude = ["tests/codegen/golden", "tests/codegen/golden_bundle"]
 
 [tool.pytest.ini_options]
 markers = [

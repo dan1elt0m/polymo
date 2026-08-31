@@ -1,0 +1,5 @@
+{
+  "pipeline_key": "jsonplaceholder_demo_pipeline",
+  "stream": "posts",
+  "generated_by": "polymo 1.3.0"
+}

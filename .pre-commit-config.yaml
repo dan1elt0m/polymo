@@ -5,10 +5,10 @@ repos:
       - id: ruff-format
         args:
         - "--config=pyproject.toml"
-        exclude: ^tests/codegen/golden/
+        exclude: ^tests/codegen/golden/|^tests/codegen/golden_bundle/
       - id: ruff-check
         args:
         - "--fix"
         - "--config=pyproject.toml"
-        exclude: ^tests/codegen/golden/
+        exclude: ^tests/codegen/golden/|^tests/codegen/golden_bundle/
 
