@@ -374,6 +374,9 @@ export function formStateToConfig(formState: ConfigFormState): RestSourceConfig 
       infer_schema: formState.inferSchema,
       schema: formState.schema || null,
       streaming: formState.streaming,
+      response_format: formState.responseFormat || 'json',
+      xml_record_path:
+        formState.responseFormat === 'xml' ? (formState.xmlRecordPath?.trim() || null) : null,
       record_selector: {
         field_path: fieldPathSegments,
         record_filter: recordFilter ? recordFilter : null,
@@ -506,6 +509,8 @@ export function configToFormState(config: RestSourceConfig): ConfigFormState {
     authExtraParams,
     streamPath,
     streaming: Boolean(config.stream.streaming),
+    responseFormat: config.stream.response_format === 'xml' ? 'xml' : 'json',
+    xmlRecordPath: config.stream.xml_record_path || '',
     params: stringParams,
     headers: stringHeaders,
     paginationType: config.stream.pagination?.type || 'none',
@@ -634,6 +639,10 @@ export function validateFormState(formState: ConfigFormState): string[] {
 
   if (!formState.inferSchema && !formState.schema.trim()) {
     errors.push('Either schema inference must be enabled or a schema must be provided');
+  }
+
+  if (formState.responseFormat === 'xml' && !formState.xmlRecordPath?.trim()) {
+    errors.push('XML record path is required when response format is XML');
   }
 
   return errors;

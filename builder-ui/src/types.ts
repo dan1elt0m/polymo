@@ -78,6 +78,8 @@ export interface StreamConfig {
   error_handler?: ErrorHandlerConfig;
   partition?: PartitionConfig;
   streaming?: boolean;
+  response_format?: 'json' | 'xml';
+  xml_record_path?: string | null;
 }
 
 export interface SourceConfig {
@@ -142,6 +144,8 @@ export interface ConfigFormState {
   authExtraParams?: string;
   streamPath: string;
   streaming: boolean;
+  responseFormat: 'json' | 'xml';
+  xmlRecordPath?: string;
   params: Record<string, string>;
   paginationType: 'none' | 'link_header' | 'offset' | 'cursor' | 'page';
   // Added pagination input fields used by the Builder UI (not yet serialized to backend config)

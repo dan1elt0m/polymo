@@ -42,6 +42,8 @@ export const INITIAL_CONFIG: RestSourceConfig = {
       cast_to_schema_types: false,
     },
     error_handler: DEFAULT_ERROR_HANDLER,
+    response_format: 'json',
+    xml_record_path: null,
   },
 };
 
@@ -58,6 +60,8 @@ export const INITIAL_FORM_STATE: ConfigFormState = {
   authExtraParams: '',
   streamPath: '',
   streaming: false,
+  responseFormat: 'json',
+  xmlRecordPath: '',
   params: {},
   headers: {},
   paginationType: 'none',
