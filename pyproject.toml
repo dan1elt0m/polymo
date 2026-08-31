@@ -45,7 +45,14 @@ dev = [
     # not read back with a YAML parser).
     "pyyaml>=6.0",
     "requests>=2.31",
-    "ruff>=0.13.3",
+    # Capped below 0.16: ruff 0.16 turned on new default lint rules
+    # (UP035, PLR0133) that flag polymo's own generated-code templates
+    # (checked byte-for-byte against tests/codegen/golden/) as violations.
+    # This is a linter-version regression, not a security issue -- ruff
+    # isn't on the dependency-vulnerability list -- so it's pinned here
+    # rather than rewriting the codegen templates to chase a newer
+    # linter's opinions.
+    "ruff>=0.13.3,<0.16",
 ]
 docs = [
     "mkdocs>=1.4.2",
