@@ -3,27 +3,30 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Mapping, Sequence, Tuple
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Mapping,
+    Sequence,
+    Tuple,
+)
 import re
 
-import yaml
-from pyspark.sql.types import (
-    BooleanType,
-    ByteType,
-    DateType,
-    DecimalType,
-    DoubleType,
-    FloatType,
-    IntegerType,
-    LongType,
-    ShortType,
-    StringType,
-    StructField,
-    StructType,
-    TimestampType,
-    VariantType,
-)
+# pyspark is optional at generation time (it only ships in the `builder`
+# extra): a bare `pip install polymo` must be able to `import polymo` and
+# call `generate()`, including for configs with a `schema` DDL string, so
+# nothing in this module may import pyspark eagerly at module load time.
+# `parse_schema_struct` (and its helpers below) import pyspark lazily,
+# inside the functions that actually need real Spark type objects; the
+# config-parsing validation path (`_validate_ddl`) is deliberately kept
+# pyspark-free (see `_validate_ddl_syntax`) since it runs on every
+# schema-bearing config, including in `generate()`.
+if TYPE_CHECKING:
+    from pyspark.sql.types import StructType
 
 
 class ConfigError(ValueError):
@@ -245,6 +248,8 @@ class StreamConfig:
     error_handler: ErrorHandlerConfig = field(default_factory=ErrorHandlerConfig)
     partition: PartitionConfig = field(default_factory=PartitionConfig)
     streaming: bool = False
+    response_format: Literal["json", "xml"] = "json"
+    xml_record_path: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -256,24 +261,6 @@ class RestSourceConfig:
     auth: AuthConfig
     stream: StreamConfig
     options: Dict[str, Any] = field(default_factory=dict)
-
-
-def load_config(
-    path: str | Path,
-    token: str | None = None,
-    options: Optional[Mapping[str, Any]] = None,
-) -> RestSourceConfig:
-    """Load and validate a REST source configuration from YAML.
-
-    Authentication details (token) are supplied separately and are NOT part of the YAML.
-    """
-
-    config_path = Path(path)
-    if not config_path.exists():
-        raise ConfigError(f"Configuration file not found: {config_path}")
-
-    raw = yaml.safe_load(config_path.read_text())
-    return parse_config(raw, token=token, options=options)
 
 
 def parse_config(
@@ -359,6 +346,8 @@ def config_to_dict(config: RestSourceConfig) -> Dict[str, Any]:
         "schema": stream.schema,
         "pagination": _pagination_to_dict(stream.pagination),
         "streaming": stream.streaming,
+        "response_format": stream.response_format,
+        "xml_record_path": stream.xml_record_path,
     }
 
     if stream.params:
@@ -420,16 +409,6 @@ def config_to_dict(config: RestSourceConfig) -> Dict[str, Any]:
     }
 
 
-def dump_config(config: RestSourceConfig) -> str:
-    """Render a configuration as canonical YAML.
-
-    Auth is intentionally stripped to avoid persisting secrets or auth type in YAML.
-    """
-
-    data = config_to_dict(config)
-    return yaml.safe_dump(data, sort_keys=False)
-
-
 def _parse_auth_config(
     raw_auth: Any,
     runtime_token: Optional[str],
@@ -467,12 +446,10 @@ def _parse_auth_config(
 
     client_id = raw_auth.get("client_id")
     client_secret_raw = raw_auth.get("client_secret")
-    client_secret, client_secret_redacted = _resolve_secret_value(client_secret_raw)
+    client_secret, _ = _resolve_secret_value(client_secret_raw)
 
     secret_from_options_raw = runtime_options.pop("oauth_client_secret", None)
-    secret_from_options, options_secret_redacted = _resolve_secret_value(
-        secret_from_options_raw
-    )
+    secret_from_options, _ = _resolve_secret_value(secret_from_options_raw)
 
     client_secret = client_secret or token_value or secret_from_options
 
@@ -590,6 +567,17 @@ def _parse_stream(raw: Any) -> StreamConfig:
 
     streaming = bool(raw.get("streaming", False))
 
+    response_format = raw.get("response_format", "json") or "json"
+    if response_format not in {"json", "xml"}:
+        raise ConfigError(f"Unsupported response_format: {response_format}")
+
+    xml_record_path = _maybe_str(raw.get("xml_record_path"), "xml_record_path")
+
+    if xml_record_path and response_format != "xml":
+        raise ConfigError("'xml_record_path' requires 'response_format: xml'")
+    if response_format == "xml" and not xml_record_path:
+        raise ConfigError("'response_format: xml' requires 'xml_record_path' to be set")
+
     return StreamConfig(
         name=name,
         path=path,
@@ -603,6 +591,8 @@ def _parse_stream(raw: Any) -> StreamConfig:
         error_handler=error_handler,
         partition=partition,
         streaming=streaming,
+        response_format=response_format,
+        xml_record_path=xml_record_path,
     )
 
 
@@ -1112,12 +1102,23 @@ def _ensure_positive_float(value: Any, field_name: str) -> float:
 
 
 def _validate_ddl(ddl: str) -> None:
-    """Validate schema DDL without requiring a running Spark session."""
-    parse_schema_struct(ddl)
+    """Validate schema DDL syntax without requiring pyspark to be installed.
+
+    This runs during `parse_config` for every stream with a `schema`, which
+    means it runs during `generate()` too. pyspark is only in the `builder`
+    extra, so this must not import it (see `_validate_ddl_syntax`).
+    """
+    _validate_ddl_syntax(ddl)
 
 
-def parse_schema_struct(schema_text: str) -> StructType:
-    """Parse a Spark SQL DDL string into a StructType without needing Spark."""
+def parse_schema_struct(schema_text: str) -> "StructType":
+    """Parse a Spark SQL DDL string into a real pyspark StructType.
+
+    Requires pyspark to be installed (it's a lazy, local import below since
+    pyspark is optional at generation time). Not used by config parsing or
+    codegen — those only need `_validate_ddl_syntax`'s pyspark-free check.
+    """
+    from pyspark.sql.types import StructType
 
     try:
         return StructType.fromDDL(schema_text)
@@ -1128,6 +1129,27 @@ def parse_schema_struct(schema_text: str) -> StructType:
             raise ValueError(
                 f"Unable to parse schema: {fallback_exc}"
             ) from original_exc
+
+
+def _validate_ddl_syntax(schema_text: str) -> None:
+    """Check a schema DDL string is well-formed, without pyspark.
+
+    Mirrors the field/type grammar `_parse_ddl_without_spark` understands,
+    but only validates — it never constructs Spark type objects, so it has
+    no pyspark dependency at all.
+    """
+    if not schema_text or not schema_text.strip():
+        raise ValueError("Schema definition is empty")
+
+    field_defs = _split_top_level(schema_text)
+    if not field_defs:
+        raise ValueError("Schema definition has no fields")
+
+    for field_def in field_defs:
+        parts = field_def.split(None, 1)
+        if len(parts) < 2:
+            raise ValueError(f"Invalid field definition: '{field_def}'")
+        _validate_simple_type(parts[1].strip())
 
 
 def _coerce_env(value: Any) -> Any:
@@ -1150,7 +1172,11 @@ def _resolve_env(name: str) -> str:
     return resolved
 
 
-def _parse_ddl_without_spark(schema_text: str) -> StructType:
+def _parse_ddl_without_spark(schema_text: str) -> "StructType":
+    # Local import: only reached from `parse_schema_struct`, which has
+    # already imported pyspark lazily by the time this runs.
+    from pyspark.sql.types import StructField, StructType
+
     if not schema_text or not schema_text.strip():
         raise ValueError("Schema definition is empty")
 
@@ -1196,7 +1222,65 @@ def _split_top_level(schema_text: str) -> List[str]:
 _DECIMAL_PATTERN = re.compile(r"decimal\s*\((\d+)\s*,\s*(\d+)\)", re.IGNORECASE)
 
 
+_SIMPLE_TYPE_NAMES = {
+    "string",
+    "varchar",
+    "char",
+    "text",
+    "boolean",
+    "bool",
+    "double",
+    "float64",
+    "float",
+    "real",
+    "tinyint",
+    "smallint",
+    "int",
+    "integer",
+    "bigint",
+    "long",
+    "timestamp",
+    "date",
+    "variant",
+}
+
+
+def _validate_simple_type(type_spec: str) -> None:
+    """Check a single DDL field's type expression is recognized.
+
+    pyspark-free counterpart to `_parse_simple_type`: validates the same
+    grammar without constructing any Spark type object.
+    """
+    normalized = type_spec.strip().lower()
+
+    if normalized.startswith("decimal") or normalized.startswith("numeric"):
+        return  # with or without explicit (precision, scale)
+
+    if normalized in _SIMPLE_TYPE_NAMES:
+        return
+
+    raise ValueError(f"Unsupported type expression '{type_spec}'")
+
+
 def _parse_simple_type(type_spec: str):
+    # Local import: only reached from `_parse_ddl_without_spark`, which is
+    # only reached from `parse_schema_struct` after pyspark is confirmed
+    # importable.
+    from pyspark.sql.types import (
+        BooleanType,
+        ByteType,
+        DateType,
+        DecimalType,
+        DoubleType,
+        FloatType,
+        IntegerType,
+        LongType,
+        ShortType,
+        StringType,
+        TimestampType,
+        VariantType,
+    )
+
     normalized = type_spec.strip().lower()
 
     if normalized.startswith("decimal") or normalized.startswith("numeric"):

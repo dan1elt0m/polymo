@@ -1,45 +1,85 @@
-# Python & Spark Helpers
+# Python API Reference
 
-Most teams are happy using the [Builder UI](builder-ui.md), which exports a standalone Python script with no polymo runtime dependency. The helpers below are for the legacy 0.x YAML runtime (`spark.read.format("polymo")`) if you're still using it — see the [Configuration guide](config.md) for details. If you want to automate things in Python or inside a Spark notebook, Polymo exposes a small helper module. The code is short and friendly—you can copy/paste it as-is.
-
-## Loading a connector in Spark
-
-```python
-from pyspark.sql import SparkSession
-from polymo import ApiReader
-
-spark = SparkSession.builder.getOrCreate()
-spark.dataSource.register(ApiReader)
-
-df = (
-    spark.read.format("polymo")
-    .option("config_path", "./config.yml")  # YAML file you saved earlier
-    .option("token", "YOUR_TOKEN")          # Only if the API needs one
-    .options(owner="dan1elt0m", repo="polymo")  # Extra values used in templates
-    .load()
-)
-
-df.show()
-```
-
-Structured Streaming works out of the box:
+Most people never call polymo from Python — the [Builder UI](builder-ui.md)
+covers the whole workflow (describe, preview, export). The five names below
+are the entire public surface of the `polymo` package; they exist mainly for
+the Builder itself (`src/polymo/builder/app.py` calls `parse_config` and
+`generate` behind `/api/validate`, `/api/sample`, and `/api/generate`), and
+for scripting connector generation outside the UI — e.g. generating a batch
+of connectors from a list of API definitions in CI.
 
 ```python
-stream_df = (
-    spark.readStream.format("polymo")
-    .option("config_path", "./config.yml")
-    .option("stream_batch_size", 100)
-    .option("stream_progress_path", "/tmp/polymo-progress.json")
-    .load()
-)
-
-query = stream_df.writeStream.format("memory").outputMode("append").queryName("polymo")
-query.start()
+from polymo import CodegenError, RestSourceConfig, config_to_dict, generate, parse_config
 ```
 
-Key ideas:
-- `config_path` points to the YAML file. If you already have the config as a Python dict, you can skip writing it to disk and send it with `.option("config_json", json.dumps(config_dict))` instead—or build one with `PolymoConfig` and call `config.reader_config()`. Only one of `config_path` or `config_json` may be supplied.
-- Pass sensitive values (tokens, keys) with `.option(...)` so they never touch the config file.
-- You can add as many `.option("name", "value")` calls as you need. They show up inside templates as `{{ options.name }}`.
+## `parse_config(raw, token=None, options=None) -> RestSourceConfig`
 
-The `ApiReader` class is what tells Spark how to interpret the config. Register it once per Spark session and you are good to go.
+Validates a plain dict describing a connector and returns a
+`RestSourceConfig`. The dict shape is the same one the
+[Connector options reference](config.md#shape-of-a-connector) documents —
+`{"version": "0.1", "source": {...}, "stream": {...}}` — and is what the
+Builder's saved `*.polymo.json` files and its `/api/*` request bodies carry
+around internally. Raises `polymo.config.ConfigError` (a `ValueError`
+subclass) on anything invalid, including an unsupported schema DDL string.
+
+```python
+from polymo import parse_config
+
+config = parse_config({
+    "version": "0.1",
+    "source": {"type": "rest", "base_url": "https://jsonplaceholder.typicode.com"},
+    "stream": {"path": "/posts", "params": {"_limit": 20}, "infer_schema": True},
+})
+```
+
+- `token` — a bearer token to attach when `source.auth.type == "bearer"`.
+  Kept out of the returned config's serialized form; only used to populate
+  `RestSourceConfig.auth.token` in memory.
+- `options` — a dict of reader-option values used to resolve
+  `{{ options.<name> }}` references and `{placeholder}` path segments at
+  generation time (see
+  [Reader options](config.md#reader-options)).
+
+`parse_config` does not require `pyspark` to be installed — schema DDL is
+validated with a small pyspark-free grammar checker, not by constructing
+real Spark types. That keeps `pip install polymo` (without the `builder`
+extra) enough to call `parse_config`/`generate`.
+
+## `generate(config: RestSourceConfig) -> str`
+
+Renders a `RestSourceConfig` into the full standalone Python source of a
+Lakeflow Declarative Pipelines script — the exact same string the Builder's
+**Generated Code** tab and download button show. Raises `CodegenError` if
+the config can't be expressed as a script — for example, `streaming=True`
+without a compatible schema/pagination combination, or an XML
+`response_format` combined with a JSON-path feature.
+
+```python
+from polymo import generate
+
+script = generate(config)
+with open("posts.py", "w") as f:
+    f.write(script)
+```
+
+The returned script has no `polymo` import in it. It only needs `requests`,
+the standard library, and `pyspark` (for the `@dp.table` wiring) to run.
+
+## `config_to_dict(config: RestSourceConfig) -> dict`
+
+The inverse direction: turns a `RestSourceConfig` back into the canonical
+plain-dict shape, with secrets stripped (a bearer/oauth2 auth block keeps
+only its `type` and non-secret fields, never the token or client secret).
+Used by the Builder to round-trip a config it just validated back into JSON
+for the frontend, and by anything that wants to inspect or persist a config
+without holding onto the secret values.
+
+## `RestSourceConfig` / `CodegenError`
+
+`RestSourceConfig` (from `polymo.config`) is the frozen dataclass everything
+above passes around — `version`, `base_url`, `auth`, `stream`, `options`.
+Import it for type hints if you're wiring `parse_config`/`generate` into
+your own tooling. `CodegenError` (from `polymo.codegen`) is the exception
+`generate()` raises for configs it can't turn into a script; `ConfigError`
+(from `polymo.config`, not re-exported at the top level) is what
+`parse_config` raises for structurally invalid input.

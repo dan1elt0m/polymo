@@ -6,9 +6,11 @@ interface CodePaneProps {
 	stream: string;
 	error: string | null;
 	loading: boolean;
+	/** Overrides the placeholder shown when there is no script yet (e.g. no base URL configured). */
+	emptyMessage?: string;
 }
 
-export const CodePane: React.FC<CodePaneProps> = ({ script, stream, error, loading }) => {
+export const CodePane: React.FC<CodePaneProps> = ({ script, stream, error, loading, emptyMessage }) => {
 	const [copyLabel, setCopyLabel] = React.useState<string>("Copy");
 	const copyResetRef = React.useRef<number | undefined>(undefined);
 
@@ -88,7 +90,13 @@ export const CodePane: React.FC<CodePaneProps> = ({ script, stream, error, loadi
 				aria-label="Generated PySpark script"
 				aria-busy={loading}
 			>
-				<code>{hasScript ? script : loading ? "" : "// Configure a stream to see the generated script."}</code>
+				<code>
+					{hasScript
+						? script
+						: loading
+							? ""
+							: emptyMessage ?? "// Configure a stream to see the generated script."}
+				</code>
 			</pre>
 			{error && (
 				<div

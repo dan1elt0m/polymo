@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import re
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -52,7 +53,20 @@ def run_generated(
 ) -> SimpleNamespace:
     code = generate_core(config)
     assert_hygiene(code)
+    overrides = override_globals or {}
+    # Some placeholder constants (API_TOKEN, CLIENT_SECRET, OPT_*) are baked
+    # into a module-level literal (e.g. `HEADERS: dict = {...OPT_X...}`)
+    # that's evaluated once, at exec time — a plain `namespace.update(...)`
+    # *after* exec can't retroactively change what that literal already
+    # captured. Substituting the constant's default `"REPLACE_ME"` value in
+    # the source text before exec mimics what a user actually does (editing
+    # the file), so overrides reach eagerly-baked literals too. Constants
+    # only ever read lazily inside a function body (like the bearer/oauth2
+    # ones) don't need this, but it's harmless for them either way.
+    for name, value in overrides.items():
+        pattern = re.compile(rf'^{re.escape(name)} = "REPLACE_ME"$', re.MULTILINE)
+        code = pattern.sub(f"{name} = {value!r}", code, count=1)
     namespace: dict[str, Any] = {}
     exec(compile(code, "<generated>", "exec"), namespace)  # noqa: S102
-    namespace.update(override_globals or {})
+    namespace.update(overrides)
     return SimpleNamespace(**namespace)

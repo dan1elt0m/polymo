@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-    <em>Single pyspark API connector for all REST API's. 
+    <em>Turn any REST API into a standalone pyspark connector script — no runtime, just generated code.
 </em>
 </p>
 
@@ -15,11 +15,9 @@
 
 # Welcome to Polymo
 
-Declarative API ingestion with Pyspark. Uses the new Pyspark 4 custom data sources under the hood.
+Polymo turns a REST API into a standalone [Lakeflow Declarative Pipelines](https://docs.databricks.com/aws/en/dlt/) script. Fill out the [Builder UI](docs/builder-ui.md) form, preview real responses, and export — zero polymo runtime dependency, no config to load, nothing to import from `polymo` at all. The script only needs `requests`, the standard library, and `pyspark`.
 
 ## The builder generates standalone scripts
-
-Polymo is pivoting from a runtime connector to a dev-time code generator. Fill out the [Builder UI](docs/builder-ui.md) form and it exports a standalone [Lakeflow Declarative Pipelines](https://docs.databricks.com/aws/en/dlt/) script with zero polymo runtime dependency — no config to load, nothing to import from `polymo` at all. The script only needs `requests`, the standard library, and `pyspark`.
 
 For example, pointing the builder at `https://jsonplaceholder.typicode.com/posts` generates the following (elided below for brevity — the real file also includes retry/backoff and response-normalization helpers):
 
@@ -42,7 +40,7 @@ def posts():
     return spark.createDataFrame(rows)
 ```
 
-As part of this pivot, YAML configs and the Spark custom data source described below are being phased out — they still work today but are considered legacy 0.x interfaces. See [docs/superpowers/specs/2026-08-28-codegen-pivot-design.md](docs/superpowers/specs/2026-08-28-codegen-pivot-design.md) for the full design.
+See [docs/superpowers/specs/2026-08-28-codegen-pivot-design.md](docs/superpowers/specs/2026-08-28-codegen-pivot-design.md) for the full design behind this pivot.
 
 <!-- Centered clickable screenshot -->
 <p align="center">
@@ -53,51 +51,24 @@ As part of this pivot, YAML configs and the Spark custom data source described b
 
 ## How does it work?
 
-Define a config file manually or use the recommended, lightweight builder UI. 
-Once you are happy with your config, all you need to do is register the Polymo reader and tell Spark where to find the config:
+Open the Builder UI, describe your API (base URL, path, pagination, auth,
+schema — all optional except the URL and path), and preview it against the
+real API. When you're happy, switch to the **Generated Code** tab and
+download the script. Every field you fill in is baked into that script as a
+plain Python constant or a small block of generated code — there is nothing
+left to configure at runtime, and no polymo import anywhere in the output.
 
-```python
-from pyspark.sql import SparkSession
-from polymo import ApiReader
+See the [Connector options reference](docs/config.md) for what every Builder
+field generates, and the [Builder UI walkthrough](docs/builder-ui.md) for a
+guided tour of the form.
 
-spark = SparkSession.builder.getOrCreate()
-spark.dataSource.register(ApiReader)
+## Migrating from polymo 0.x?
 
-df = (
-    spark.read.format("polymo")
-    .option("config_path", "./config.yml")  # YAML you saved from the Builder
-    .option("token", "YOUR_TOKEN")  # Only if the API needs one
-    .load()
-)
-
-df.show()
-```
-Streaming works too:
-```python
-spark.readStream.format("polymo")
-```
-
-Prefer everything in Python? Use the PolymoConfig model.
-```python
-from pyspark.sql import SparkSession
-from polymo import ApiReader, PolymoConfig
-
-spark = SparkSession.builder.getOrCreate()
-spark.dataSource.register(ApiReader)
-
-jp_posts = PolymoConfig(
-    base_url="https://jsonplaceholder.typicode.com",
-    path="/posts",
-)
-
-df = (
-    spark.read.format("polymo")
-    .option("config_json", jp_posts.config_json())
-    .load()
-)
-df.show()
-```
-Polymo reads in batches and can read pages in parallel. Therefore Polymo can be much faster than row based solutions like UDFs.
+The YAML runtime (`spark.read.format("polymo")`, `PolymoConfig`,
+`polymo smoke`) is gone in 1.0. See
+[docs/migration-1.0.md](docs/migration-1.0.md) for what changed, and pin
+`polymo<1.0` (0.11.0 is the last release with the old runtime) if you're not
+ready to move yet.
 
 ## How to start?
 Locally you probably want to install polymo along with the Builder UI: 
@@ -106,13 +77,19 @@ Locally you probably want to install polymo along with the Builder UI:
 pip install "polymo[builder]"
 ```
 
-This comes with all UI deps such as pyspark
+This comes with all UI deps such as pyspark.
 
-Running Polymo on a spark cluster usually doesn't require these UI deps.
-In that case, just install the bare minimum deps with
+Scripting connector generation directly in Python (calling `generate()` /
+`parse_config()` without the UI — see the [API reference](docs/api.md))
+doesn't need pyspark at all. In that case, just install the bare minimum
+deps with:
 ```bash
 pip install polymo
 ```
+
+Note that `pip install polymo` alone does not install the Builder UI, and
+`polymo` is never a dependency of the scripts it generates — nothing you
+export needs polymo installed to run.
 
 ## Launch the builder UI 
 
@@ -132,7 +109,7 @@ docker compose up --build builder
 Read the docs [here](https://dan1elt0m.github.io/polymo/)
 
 Other material:
-- Step by step example: [medium blogpost](https://medium.com/@d.e.tom89/turn-any-rest-api-into-spark-dataframes-in-minutes-with-polymo-028a48113eb1)
+- Step by step example: [medium blogpost](https://medium.com/@d.e.tom89/turn-any-rest-api-into-spark-dataframes-in-minutes-with-polymo-028a48113eb1) (written for the 0.x YAML runtime — see the [migration guide](docs/migration-1.0.md) for what changed)
 
 
 ## Contributing

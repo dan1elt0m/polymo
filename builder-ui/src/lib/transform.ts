@@ -298,9 +298,6 @@ export function formStateToConfig(formState: ConfigFormState): RestSourceConfig 
           if (limitParam) {
             pagination.limit_param = limitParam;
           }
-          if (!formState.paginationStopOnEmptyResponse) { // simplified
-            pagination.stop_on_empty_response = false;
-          }
           const totalPagesPath = parsePathInput(formState.paginationTotalPagesPath);
           if (totalPagesPath) {
             (pagination as any).total_pages_path = totalPagesPath;
@@ -374,6 +371,9 @@ export function formStateToConfig(formState: ConfigFormState): RestSourceConfig 
       infer_schema: formState.inferSchema,
       schema: formState.schema || null,
       streaming: formState.streaming,
+      response_format: formState.responseFormat || 'json',
+      xml_record_path:
+        formState.responseFormat === 'xml' ? (formState.xmlRecordPath?.trim() || null) : null,
       record_selector: {
         field_path: fieldPathSegments,
         record_filter: recordFilter ? recordFilter : null,
@@ -506,6 +506,8 @@ export function configToFormState(config: RestSourceConfig): ConfigFormState {
     authExtraParams,
     streamPath,
     streaming: Boolean(config.stream.streaming),
+    responseFormat: config.stream.response_format === 'xml' ? 'xml' : 'json',
+    xmlRecordPath: config.stream.xml_record_path || '',
     params: stringParams,
     headers: stringHeaders,
     paginationType: config.stream.pagination?.type || 'none',
@@ -538,7 +540,6 @@ export function configToFormState(config: RestSourceConfig): ConfigFormState {
         : '',
     paginationCursorHeader: config.stream.pagination?.cursor_header || '',
     paginationInitialCursor: config.stream.pagination?.initial_cursor || '',
-    paginationStopOnEmptyResponse: (config.stream.pagination as any)?.stop_on_empty_response !== false,
     paginationTotalPagesPath:
       (config.stream.pagination as any)?.total_pages_path && (config.stream.pagination as any).total_pages_path.length > 0
         ? (config.stream.pagination as any).total_pages_path.join('.')
@@ -634,6 +635,10 @@ export function validateFormState(formState: ConfigFormState): string[] {
 
   if (!formState.inferSchema && !formState.schema.trim()) {
     errors.push('Either schema inference must be enabled or a schema must be provided');
+  }
+
+  if (formState.responseFormat === 'xml' && !formState.xmlRecordPath?.trim()) {
+    errors.push('XML record path is required when response format is XML');
   }
 
   return errors;

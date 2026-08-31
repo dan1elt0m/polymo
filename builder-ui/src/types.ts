@@ -78,6 +78,8 @@ export interface StreamConfig {
   error_handler?: ErrorHandlerConfig;
   partition?: PartitionConfig;
   streaming?: boolean;
+  response_format?: 'json' | 'xml';
+  xml_record_path?: string | null;
 }
 
 export interface SourceConfig {
@@ -123,11 +125,8 @@ export interface SamplePayload {
 }
 
 export interface RawPagePayload {
-  page: number;
   url: string;
   status_code: number;
-  headers?: Record<string, string>;
-  records: Record<string, any>[];
   payload: unknown;
 }
 
@@ -145,6 +144,8 @@ export interface ConfigFormState {
   authExtraParams?: string;
   streamPath: string;
   streaming: boolean;
+  responseFormat: 'json' | 'xml';
+  xmlRecordPath?: string;
   params: Record<string, string>;
   paginationType: 'none' | 'link_header' | 'offset' | 'cursor' | 'page';
   // Added pagination input fields used by the Builder UI (not yet serialized to backend config)
@@ -159,7 +160,6 @@ export interface ConfigFormState {
   paginationNextUrlPath?: string;
   paginationCursorHeader?: string;
   paginationInitialCursor?: string;
-  paginationStopOnEmptyResponse: boolean;
   paginationTotalPagesPath?: string;
   paginationTotalPagesHeader?: string;
   paginationTotalRecordsPath?: string;

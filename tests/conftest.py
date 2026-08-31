@@ -32,10 +32,17 @@ def http_server():
             body_len = int(self.headers.get("Content-Length") or 0)
             body = self.rfile.read(body_len) if body_len else b""
             status, payload, headers = route(query, dict(self.headers), body)
-            data = json.dumps(payload).encode()
+            if isinstance(payload, (str, bytes)):
+                data = payload.encode() if isinstance(payload, str) else payload
+                content_type = headers.get("Content-Type", "application/xml")
+            else:
+                data = json.dumps(payload).encode()
+                content_type = "application/json"
             self.send_response(status)
-            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Type", content_type)
             for key, value in headers.items():
+                if key.lower() == "content-type":
+                    continue
                 self.send_header(key, value)
             self.end_headers()
             self.wfile.write(data)

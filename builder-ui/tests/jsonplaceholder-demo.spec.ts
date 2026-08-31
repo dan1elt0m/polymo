@@ -2,8 +2,8 @@ import { expect, Locator, Page, test } from "@playwright/test";
 import { readFileSync } from "fs";
 import { resolve } from "path";
 
-const EXAMPLE_YAML = readFileSync(
-  resolve(process.cwd(), "src/polymo/builder/static/examples/jsonplaceholder.yml"),
+const EXAMPLE_CONFIG = readFileSync(
+  resolve(process.cwd(), "src/polymo/builder/static/examples/jsonplaceholder.polymo.json"),
   "utf8",
 );
 
@@ -51,13 +51,8 @@ const SAMPLE_RESPONSE = {
   ],
   raw_pages: [
     {
-      page: 1,
       url: "https://jsonplaceholder.typicode.com/posts?_limit=5",
       status_code: 200,
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      records: SAMPLE_RECORDS,
       payload: SAMPLE_RECORDS,
     },
   ],
@@ -113,7 +108,7 @@ test.describe("JSON Placeholder builder demo", () => {
     await humanClick(page, exportButton);
 
     const exportFileInput = page.getByTestId("export-file-name-input");
-    await humanFill(page, exportFileInput, "jsonplaceholder-demo.yml");
+    await humanFill(page, exportFileInput, "jsonplaceholder-demo.polymo.json");
 
     const downloadPromise = page.waitForEvent("download");
     const confirmExport = page.getByTestId("confirm-export");
@@ -121,7 +116,7 @@ test.describe("JSON Placeholder builder demo", () => {
 
     const download = await downloadPromise;
     const suggested = await download.suggestedFilename();
-    expect(suggested).toMatch(/jsonplaceholder-demo\.yml$/);
+    expect(suggested).toMatch(/jsonplaceholder-demo\.polymo\.json$/);
     await download.delete();
 
     await expect(exportFileInput).not.toBeVisible();
@@ -144,11 +139,11 @@ async function setupDemoRoutes(page: Page): Promise<void> {
     });
   });
 
-  await page.route("**/static/examples/jsonplaceholder.yml", async (route) => {
+  await page.route("**/static/examples/jsonplaceholder.polymo.json", async (route) => {
     await route.fulfill({
       status: 200,
-      contentType: "text/yaml",
-      body: EXAMPLE_YAML,
+      contentType: "application/json",
+      body: EXAMPLE_CONFIG,
     });
   });
 

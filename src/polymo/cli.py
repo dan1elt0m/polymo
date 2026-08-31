@@ -24,53 +24,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Enable auto-reload (useful during development)",
     )
 
-    from polymo.scripts.smoke import _default_config_path  # avoid circular imports
-
-    smoke_parser = subparsers.add_parser("smoke", help="Launch the smoke test")
-    smoke_parser.add_argument(
-        "--config",
-        default=str(_default_config_path()),
-        help="Path to the YAML config file (default: %(default)s)",
-    )
-    smoke_parser.add_argument(
-        "--stream",
-        default=None,
-        help="Optional stream name to load (default: first stream in config)",
-    )
-    smoke_parser.add_argument(
-        "--format",
-        default="polymo",
-        help="Registered DataSource name to use (default: %(default)s)",
-    )
-    smoke_parser.add_argument(
-        "--limit",
-        type=int,
-        default=5,
-        help="Number of rows to show from the resulting DataFrame",
-    )
-    smoke_parser.add_argument(
-        "--streaming",
-        action="store_true",
-        help="Run the smoke test using spark.readStream",
-    )
-    smoke_parser.add_argument(
-        "--stream-batch-size",
-        type=int,
-        default=100,
-        help="Rows per micro-batch when --streaming is enabled (default: %(default)s)",
-    )
-
     args = parser.parse_args(argv)
 
-    # Check Spark Version
-    import pyspark
-
-    if not pyspark.__version__.startswith("4."):
-        raise ImportError(
-            "pyspark>=4.0.0 is required: run pip install 'polymo[builder]'"
-        )
-
     if args.command == "builder":
+        if not _require_builder_deps():
+            return 1
+
         import uvicorn
 
         uvicorn.run(
@@ -81,14 +40,30 @@ def main(argv: Sequence[str] | None = None) -> int:
             factory=True,
         )
         return 0
-    elif args.command == "smoke":
-        from polymo.scripts.smoke import main as smoke_main
-
-        smoke_main(args)
-        return 0
 
     parser.print_help()
     return 1
+
+
+def _require_builder_deps() -> bool:
+    """Verify the ``builder`` extra (pyspark) is installed and compatible.
+
+    Returns True when the environment is ready to launch the builder.
+    On a missing pyspark install, prints a friendly hint and returns False
+    so the caller can exit cleanly instead of tracebacking.
+    """
+    try:
+        import pyspark
+    except ModuleNotFoundError:
+        print("The builder needs extras: pip install 'polymo[builder]'")
+        return False
+
+    if not pyspark.__version__.startswith("4."):
+        raise ImportError(
+            "pyspark>=4.0.0 is required: run pip install 'polymo[builder]'"
+        )
+
+    return True
 
 
 if __name__ == "__main__":  # pragma: no cover
