@@ -68,7 +68,8 @@ def test_stream_name_with_quote_is_escaped_everywhere():
     )
     script = generate(config)
     assert_hygiene(script)
-    assert '@dp.table(name="po\\"sts")' in script
+    # dp table names are sanitized to valid SQL identifiers, not escaped.
+    assert '@dp.table(name="po_sts")' in script
     assert 'STATE_PATH = "po\\"sts_state.json"' in script
 
 

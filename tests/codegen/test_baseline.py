@@ -35,3 +35,14 @@ def test_generate_exported_from_package():
     from polymo.codegen import generate
 
     assert top_level_generate is generate
+
+
+def test_dp_table_name_is_valid_sql_identifier():
+    # Derived stream names can contain hyphens (e.g. from /resource/m9d7-ebf2.json);
+    # Databricks requires @dp.table names to be valid unquoted SQL identifiers.
+    config = make_config(
+        base_url="https://opendata.rdw.nl", name="resource_m9d7-ebf2_json"
+    )
+    script = generate(config)
+    assert '@dp.table(name="resource_m9d7_ebf2_json")' in script
+    assert "m9d7-ebf2" not in script.split("@dp.table", 1)[1]

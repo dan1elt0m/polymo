@@ -50,12 +50,12 @@ class RestStreamSource(DataSource):
 spark.dataSource.register(RestStreamSource)
 
 
-@dp.table(name={{ stream_name_repr }})
+@dp.table(name={{ table_name_repr }})
 def {{ func_name }}():
     return spark.readStream.format("{{ func_name }}_stream").load()
 {% else %}
 {% if windows_repr %}
-@dp.table(name={{ stream_name_repr }})
+@dp.table(name={{ table_name_repr }})
 def {{ func_name }}():
     sc = spark.sparkContext
     rows = sc.parallelize(WINDOWS, len(WINDOWS)).flatMap(
@@ -82,7 +82,7 @@ def {{ func_name }}():
 {% if partition_strategy == "pagination" %}
 # partition strategy "pagination" runs sequentially in generated scripts
 {% endif %}
-@dp.table(name={{ stream_name_repr }})
+@dp.table(name={{ table_name_repr }})
 def {{ func_name }}():
     rows = list(fetch_records())
 {% if incremental_mode %}

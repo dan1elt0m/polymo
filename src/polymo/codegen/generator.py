@@ -469,6 +469,8 @@ def _context(config: RestSourceConfig) -> Dict[str, Any]:
         "stream_name_comment": _comment_escape(stream.name),
         "state_path_repr": _py_literal(f"{stream.name}_state.json"),
         "func_name": _identifier(stream.name),
+        # Databricks requires unquoted SQL identifiers for dp table names.
+        "table_name_repr": _py_literal(_identifier(stream.name)),
         "field_path": list(stream.record_selector.field_path) or None,
         "record_filter_expr": _filter_expression(stream.record_selector.record_filter),
         "max_retries": eh.max_retries,
