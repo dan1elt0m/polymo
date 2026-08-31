@@ -149,6 +149,25 @@ the preview UI overrides the relevant auth slot (bearer/api_key/oauth2)
 with that token, the same way it does for a plain placeholder. `OPT_*`
 secret refs have no override in preview and always get the dummy.
 
+**Setting a `secret` reference in the Builder** happens through the
+**Secret source** toggle on each auth field (Bearer/API Key/OAuth2 Client
+Secret) — switch it from "enter for preview / placeholder in export" to
+"Databricks secret scope" and pick a scope + key from the dropdowns (backed
+by `databricks secrets list-scopes`/`list-secrets` for the profile chosen on
+the [Deploy tab](builder-ui.md#deploy-to-databricks)). See
+[Deploy to Databricks → Secrets](builder-ui.md#secrets) for the UI walkthrough.
+
+**At deploy time**, this reference travels unchanged into a bundle project:
+`src/<pkg>/client.py` — the file the [Deploy tab](builder-ui.md#deploy-to-databricks)
+bootstraps under a project's `src/` directory — is exactly the same
+`generate_core()` output described above, `_dbx_secret` call included. Since
+that call resolves the secret from `dbutils` on the driver, it only works
+once the pipeline actually runs on a Databricks cluster
+(`databricks bundle run`); nothing about deploying the bundle itself
+(`databricks bundle deploy`) touches secret values — deploy only uploads
+source files and cluster/pipeline definitions, it does not execute the
+pipeline or evaluate `_dbx_secret`.
+
 ## Query parameters & headers
 
 - **Params** (`stream.params`) → the `PARAMS` constant in the generated

@@ -67,6 +67,65 @@ Switch to the **Generated Code** tab at any time to see the actual Python script
 - **Download** saves it as a `.py` file named after the stream, ready to drop into a Lakeflow Declarative Pipelines project.
 - If the current configuration doesn't validate yet, an error explaining what's missing appears below the pane instead of a script.
 
+## Deploy to Databricks
+
+The **Deploy** tab (next to UI Builder and Generated Code) turns your connector into a full [Databricks Asset Bundle](https://docs.databricks.com/dev-tools/bundles/index.html) project and drives `databricks bundle deploy`/`run` for you, without leaving the Builder.
+
+**Trust model:** the Builder is a localhost, single-user tool. Everything on this tab works by shelling out to the `databricks` CLI already installed on your machine, using whichever profile/auth you picked — the Builder itself never talks to the Databricks REST API directly, never stores a workspace URL or token, and every call is stateless (nothing survives between requests except what you see in the Output log). If you close the tab, nothing about your Databricks account is remembered anywhere.
+
+### CLI requirement
+
+Deploying needs the [Databricks CLI](https://docs.databricks.com/dev-tools/cli/) installed and at least one profile configured in `~/.databrickscfg` (`databricks configure`, or a profile added by hand). If the CLI isn't on your `PATH`, every Databricks-backed control on this tab (and the secret-scope pickers in Authentication) shows an inline message with the install link instead of failing silently — export and preview keep working either way, since they never touch the CLI.
+
+### Profile → catalog → schema
+
+1. **Profile** — populated from your `~/.databrickscfg` section names. Picking a profile here is shared with the secret-scope pickers in the Authentication section (see [Secrets](#secrets) below), so you only choose it once.
+2. **Catalog** — Unity Catalog catalogs visible to that profile (`databricks catalogs list`), loaded once a profile is picked.
+3. **Schema** — schemas within the chosen catalog (`databricks schemas list`), loaded once a catalog is picked.
+
+Each dropdown resets and reloads whenever the one before it changes, since a catalog/schema list only makes sense for its parent profile/catalog. An empty profile list means no `~/.databrickscfg` profile was found — a **retry** link is offered.
+
+### Project bootstrap
+
+Fill in a **Project name** (defaults to the connector's table name) and a **Project directory** (defaults to `~/polymo-projects`), then click **Bootstrap**. This writes a full bundle project to `<project directory>/<project name>`:
+
+```
+<project>/
+  databricks.yml            # bundle + one Lakeflow Declarative Pipeline resource,
+                             # wired to the catalog/schema/profile you picked
+  src/<pkg>/__init__.py
+  src/<pkg>/client.py        # the fetch/pagination/schema code — byte-identical to
+                             # the first half of the Generated Code pane's script
+  pipelines/<stream>.py      # the rest of that script (the RestSource data source
+                             # and @dp.table wiring), rewritten to import from
+                             # <pkg>.client instead of sharing one module with it
+  README.md                  # what this project is, how to deploy/run it, where the
+                              # table lands
+  .polymo-bundle.json         # small manifest the Run button reads back (pipeline
+                               # resource key) — not meant to be edited by hand
+```
+
+`src/<pkg>/client.py` is never a re-derived or hand-simplified copy of the exported script — it *is* the same `generate_core()` output, so the bundle project can never drift from what the Generated Code pane and the Preview panel show you.
+
+**Overwrite semantics are file-scoped, not directory-scoped.** Bootstrapping into a non-empty directory is refused by default; checking **Overwrite bundle files in existing folder** lets it proceed, but it only overwrites the six bundle files listed above — anything else you've added to that project directory (a `.git` folder, notes, other pipelines, local CLI state) is left untouched.
+
+### Deploy and Run
+
+Once bootstrapped, **Deploy** runs `databricks bundle deploy -t dev` with the project directory as its working directory and your chosen profile, and **Run** runs `databricks bundle run <pipeline> -t dev` — enabled only after a successful deploy. Both can legitimately take a while (cluster startup, pipeline updates), so they're allowed to run for several minutes before timing out. Every command's combined output (or error) is appended to the **Output** log at the bottom of the tab, most recent last.
+
+Changing the project name or directory after a successful bootstrap clears the remembered project path, so Deploy/Run re-disable until you bootstrap again at the new location — this avoids accidentally deploying a stale bundle.
+
+The `-t dev`/`-t prod` **target** in `databricks.yml` controls Lakeflow's development-vs-production pipeline mode; the Deploy tab always deploys/runs the `dev` target, and `-t prod` is available by running the CLI yourself against the bootstrapped project directory once you're ready to promote it.
+
+### Secrets
+
+Every secret-bearing auth field (Bearer token, API key, OAuth2 client secret) has a **Secret source** toggle right below it:
+
+- **Enter for preview / placeholder in export** (default) — the value you type is used only for previews in this browser session; it is never saved to disk, and the exported script/bundle gets a `REPLACE_ME` placeholder constant for you to fill in (or wire up to a secret store) after the fact.
+- **Databricks secret scope** — pick a **Secret scope** and **Secret key** instead of typing a value. The scope/key dropdowns are populated from `databricks secrets list-scopes` / `list-secrets` for whichever profile you picked in the Deploy tab (pick a profile there first if you haven't). Scopes backed by an external store — Azure Key Vault-backed scopes, for example — show up automatically too, since the CLI lists them the same way as Databricks-backed scopes. Only the reference (`{scope, key}`) is written into the config and the generated code; the exported/bundled script resolves the actual value on the driver via a generated `_dbx_secret(scope, key)` helper at pipeline run time — see [Databricks secret-scope references](config.md#databricks-secret-scope-references) for the full mechanics. You can still type a value in the field above the toggle while in this mode; it's used only for previewing, same as the inline mode.
+
+Whichever mode you pick, a session token you *do* type for previewing can still be echoed back by a chatty API — see the redaction note at the end of [Previewing your connector](#previewing-your-connector) below for how the preview masks that.
+
 ## Previewing your connector
 The right-hand panel is where you test your work — this runs the same fetch/pagination/record-selection logic as the generated script, so what you see in the preview is what the exported pipeline will produce.
 
@@ -81,7 +140,7 @@ The right-hand panel is where you test your work — this runs the same fetch/pa
 
 If something goes wrong — wrong URL, missing token, network issue — the error appears in the status pill and the Raw API view so you can fix it quickly.
 
-If the target API echoes your session token back in its response (an echo/debug endpoint, or a query-placed `api_key`), the preview masks it as `***REDACTED***` wherever it appears — in Records, DataFrame, and Raw API (payloads and URLs alike). This masking is best-effort: it only matches the exact token substring, so a base64-encoded or otherwise transformed copy of it in the response won't be caught.
+If the target API echoes your session token back in its response (an echo/debug endpoint, or a query-placed `api_key`), the preview masks it as `***REDACTED***` wherever it appears — in Records, DataFrame, and Raw API (payloads and URLs alike). This masking is best-effort: it matches the exact token substring plus the two URL-encoded forms `requests` itself would produce (so a token echoed back inside a query string, e.g. `raw_pages[*].url`, is still caught even if it contains characters like `+`, `/`, or `%`). A base64-encoded, hashed, or otherwise transformed copy of the token in the response won't be caught.
 
 ## Saving your work
 Saving in the Builder is about preserving your work-in-progress *configuration*, not the generated script — download the script separately from the Generated Code pane once you're happy with it.

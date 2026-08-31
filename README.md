@@ -64,6 +64,17 @@ download the script. Every field you fill in is baked into that script as a
 plain Python constant or a small block of generated code — there is nothing
 left to configure at runtime, and no polymo import anywhere in the output.
 
+Ready to run it on Databricks? Switch to the **Deploy** tab instead: pick a
+CLI profile → catalog → schema, click **Bootstrap** to write a full
+Databricks Asset Bundle project (same generated code, laid out under
+`src/`), then **Deploy** and **Run** to drive `databricks bundle deploy`/`run`
+without leaving the Builder. Requires the
+[Databricks CLI](https://docs.databricks.com/dev-tools/cli/) and a
+`~/.databrickscfg` profile — see
+[Deploy to Databricks](docs/builder-ui.md#deploy-to-databricks) for the full
+walkthrough, including how auth secrets can reference a Databricks secret
+scope instead of a placeholder.
+
 See the [Connector options reference](docs/config.md) for what every Builder
 field generates, and the [Builder UI walkthrough](docs/builder-ui.md) for a
 guided tour of the form.
