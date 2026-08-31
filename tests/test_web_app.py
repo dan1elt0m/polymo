@@ -442,6 +442,48 @@ def test_sample_endpoint_redacts_secret_in_raw_page_url(http_server) -> None:
     assert "***REDACTED***" in payload["raw_pages"][0]["url"]
 
 
+def test_sample_endpoint_redacts_secret_in_502_error_detail(http_server) -> None:
+    """Regression pin: when the mock API echoes the session secret into a
+    field that an explicit schema then fails to coerce (e.g. `k INT` given
+    a string value), `_collect_records` raises and the endpoint used to
+    surface `str(exc)` verbatim as the 502 `detail` — leaking the secret
+    through a Spark type-conversion error message instead of the
+    already-redacted `records`/`raw_pages` paths. The `detail` must be
+    redacted the same way."""
+
+    token = "supersecrettoken123"
+
+    def route(query, headers, body):
+        return 200, [{"k": headers.get("Authorization")}], {}
+
+    http_server.routes["/posts"] = route
+    app = create_app()
+    client = TestClient(app)
+
+    config_dict = {
+        "version": "0.1",
+        "source": {
+            "type": "rest",
+            "base_url": http_server.url,
+            "auth": {"type": "bearer"},
+        },
+        "stream": {"name": "posts", "path": "/posts", "schema": "k INT"},
+    }
+
+    response = client.post(
+        "/api/sample",
+        json={"config_dict": config_dict, "token": token, "limit": 5},
+    )
+    payload = response.json()
+    body_text = json.dumps(payload)
+
+    assert response.status_code == 502
+    assert "***REDACTED***" in body_text
+    assert token not in body_text
+    assert quote(token, safe="") not in body_text
+    assert quote_plus(token) not in body_text
+
+
 def test_sample_endpoint_redacts_url_encoded_secret_variants(http_server) -> None:
     """A secret containing URL-reserved characters (space, +, /, =) is
     percent-encoded by `requests` before it ever reaches the wire for

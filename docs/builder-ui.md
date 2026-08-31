@@ -92,7 +92,8 @@ Fill in a **Project name** (defaults to the connector's table name) and a **Proj
 ```
 <project>/
   databricks.yml            # bundle + one Lakeflow Declarative Pipeline resource,
-                             # wired to the catalog/schema/profile you picked
+                             # wired to the catalog/schema you picked (profile is
+                             # passed separately, at deploy time)
   src/<pkg>/__init__.py
   src/<pkg>/client.py        # the fetch/pagination/schema code — byte-identical to
                              # the first half of the Generated Code pane's script

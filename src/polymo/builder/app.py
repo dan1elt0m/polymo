@@ -216,7 +216,10 @@ def create_app() -> FastAPI:
                 partial(_collect_records, config, payload.token, payload.limit)
             )
         except Exception as exc:  # pragma: no cover - surfaced to UI
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            detail = str(exc)
+            if needles:
+                detail = _redact_secret(detail, needles)
+            raise HTTPException(status_code=502, detail=detail) from exc
 
         if needles:
             records = _redact_secret(records, needles)
