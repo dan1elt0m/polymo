@@ -31,3 +31,13 @@ Source: SDD run of 2026-08-28-codegen-phase1.md (final review: mergeable; detail
 - SAMPLE_CONFIG_DICT literal mirrors raw YAML shape; __polymo_INITIAL_CONFIG__ is unread — re-derive or drop in Phase 3
 - static/examples/*.yml legacy YAML examples unreferenced by the UI — delete in Phase 3
 - New empty connector paints a 400 in the code pane until base_url is filled — cosmetic UX polish
+
+## Post-1.0 backlog (from Phase 3 final review)
+
+- config.py dead redaction locals in _parse_auth_config (harmless)
+- npm run lint broken (ESLint flat-config vs --ext; missing eslint-plugin-react)
+- streaming+XML execution test missing (verified manually)
+- OPT_ placeholder name collisions (a-b vs a_b) silently share a variable - add CodegenError on collision
+- streaming COLUMNS split breaks on decimal(p,s) schemas - guard or top-level-aware split
+- nested STRUCT/ARRAY/MAP + backtick DDL unsupported by validator (documented as such)
+- /api/sample double-fetch optimization
