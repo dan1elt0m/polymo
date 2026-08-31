@@ -160,7 +160,6 @@ export interface ConfigFormState {
   paginationNextUrlPath?: string;
   paginationCursorHeader?: string;
   paginationInitialCursor?: string;
-  paginationStopOnEmptyResponse: boolean;
   paginationTotalPagesPath?: string;
   paginationTotalPagesHeader?: string;
   paginationTotalRecordsPath?: string;

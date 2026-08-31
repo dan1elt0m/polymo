@@ -290,16 +290,6 @@ export const PaginationSection: React.FC<PaginationSectionProps> = ({ state, onU
               </div>
             )}
           </div>
-
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              className="h-4 w-4 rounded border-border text-blue-7 focus:ring-blue-5"
-              checked={state.paginationStopOnEmptyResponse}
-              onChange={(event) => onUpdateState({ paginationStopOnEmptyResponse: event.target.checked })}
-            />
-            <span className="text-sm text-slate-11 dark:text-drac-foreground/90">Stop when the API returns no records</span>
-          </div>
         </div>
       )}
     </div>

@@ -76,7 +76,6 @@ export const INITIAL_FORM_STATE: ConfigFormState = {
   paginationNextUrlPath: '',
   paginationCursorHeader: '',
   paginationInitialCursor: '',
-  paginationStopOnEmptyResponse: true,
   paginationTotalPagesPath: '',
   paginationTotalPagesHeader: '',
   paginationTotalRecordsPath: '',

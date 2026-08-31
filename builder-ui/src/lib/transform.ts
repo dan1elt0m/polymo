@@ -298,9 +298,6 @@ export function formStateToConfig(formState: ConfigFormState): RestSourceConfig 
           if (limitParam) {
             pagination.limit_param = limitParam;
           }
-          if (!formState.paginationStopOnEmptyResponse) { // simplified
-            pagination.stop_on_empty_response = false;
-          }
           const totalPagesPath = parsePathInput(formState.paginationTotalPagesPath);
           if (totalPagesPath) {
             (pagination as any).total_pages_path = totalPagesPath;
@@ -543,7 +540,6 @@ export function configToFormState(config: RestSourceConfig): ConfigFormState {
         : '',
     paginationCursorHeader: config.stream.pagination?.cursor_header || '',
     paginationInitialCursor: config.stream.pagination?.initial_cursor || '',
-    paginationStopOnEmptyResponse: (config.stream.pagination as any)?.stop_on_empty_response !== false,
     paginationTotalPagesPath:
       (config.stream.pagination as any)?.total_pages_path && (config.stream.pagination as any).total_pages_path.length > 0
         ? (config.stream.pagination as any).total_pages_path.join('.')

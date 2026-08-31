@@ -218,7 +218,7 @@ selector** panel (`stream.record_selector`) configures how the generated
 - `field_path` — a list of keys/`*` wildcards, e.g. `["data", "items"]`
   walks `payload["data"]["items"]`.
 - `record_filter` — a boolean Python expression evaluated per record, e.g.
-  `record.status == 'open'`.
+  `record.get('status') == 'open'`.
 - `cast_to_schema_types` — coerce values to match your declared `schema`
   (below) instead of leaving them as raw JSON types.
 
