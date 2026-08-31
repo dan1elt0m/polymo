@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Mapping, Optional
 from jinja2 import Environment, PackageLoader, StrictUndefined
 
 from ..config import PartitionConfig, RestSourceConfig
-from ..rest_client import _PathFormatter, _render_template
+from .templating import _PathFormatter, _render_template
 
 
 class CodegenError(Exception):
