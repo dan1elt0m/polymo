@@ -25,6 +25,5 @@ The compiled assets are emitted to `src/polymo/builder/static` as `main.js` and 
 
 ## Testing
 
-- `npm run lint` – ESLint
 - `npm run format` – Biome formatter
 - `npm run test:e2e` – Playwright E2E tests

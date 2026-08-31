@@ -28,3 +28,21 @@ jobs:
         if: always() # always run even if the previous step fails
         with:
           report_paths: "junit/report.xml"
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Type-check
+        run: npx tsc -b --noEmit
+      - name: Build frontend
+        run: npm run build
+      - name: Verify built bundle matches source (bundle parity gate)
+        run: git diff --exit-code src/polymo/builder/static/
