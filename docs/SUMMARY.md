@@ -2,7 +2,7 @@
 
 - [Home](index.md)
 - [Builder UI](builder-ui.md)
-- [Configuration](config.md)
-- [Configuration Reference](polymo_config_reference.md)
+- [Connector Options Reference](config.md)
+- [Migration from 0.x](migration-1.0.md)
 - [CLI](cli.md)
 - [API Reference](api.md)

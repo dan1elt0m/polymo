@@ -1,348 +1,290 @@
-# Configuration Guide
+# Connector Options Reference
 
-> **Legacy interface.** YAML configs and the Spark custom data source they feed (`spark.read.format("polymo")`) are the 0.x runtime interface and are slated for removal in Polymo 1.0, which pivots to a dev-time code generator instead. New connectors should use the [Builder UI](builder-ui.md), which exports a standalone Lakeflow Declarative Pipelines script with no polymo runtime dependency. Everything below still works today but will not carry forward.
+Polymo has no config file and no runtime. You describe a connector once in
+the [Builder UI](builder-ui.md), and every field you fill in changes what
+the exported Python script looks like. This page documents each option, the
+JSON key it maps to (the same shape `generate()` and `parse_config()` accept
+in Python, and what the Builder's saved `*.polymo.json` files use
+internally), and what it generates.
 
-Polymo stores connector settings in a short YAML file. Think of it as a recipe that explains where to fetch data, which knobs to turn on the API, and how to treat the results. You can create the file by hand or export it from the Builder UI—both formats are identical.
+You will only write this JSON by hand if you are calling `polymo.generate()`
+directly instead of using the form — see the [API reference](api.md). Most
+people never touch it.
 
-## What a minimal config looks like
+## Shape of a connector
 
-```yaml
-version: 0.1
-source:
-  type: rest
-  base_url: https://api.example.com
-stream:
-  path: /v1/items
-  infer_schema: true
-```
-
-That is enough to call `https://api.example.com/v1/items` once and let Polymo guess the columns from the response.
-
-Prefer code over YAML? The same structure can be built with Pydantic helpers and converted back to the canonical shape when needed:
-
-```python
-from pathlib import Path
-
-from polymo import PolymoConfig
-
-config = PolymoConfig(
-    base_url="https://api.example.com",
-    path="/v1/items",
-    params={"limit": 50},
-)
-
-# Pass to Spark without touching disk
-spark.read.format("polymo").option("config_json", json.dumps(config.reader_config())).load()
-
-# Or write the YAML whenever you need it
-Path("config.yml").write_text(config.dump_yaml())
-```
-
-`PolymoConfig` accepts any stream keyword that the YAML supports, such as ``headers``, ``pagination``, or ``record_selector``.
-
-## Anatomy of the file
-
-| Section | Plain-language meaning |
-|---------|------------------------|
-| `version` | Format version. Use `0.1` for now. |
-| `source`  | Where the API lives. |
-| `stream`  | What to request and how to shape the results. |
-
-Everything else is optional and only appears when you need it.
-
-## Source block
-
-```yaml
-source:
-  type: rest
-  base_url: https://api.example.com
-```
-
-- `type` is always `rest` at the moment.
-- `base_url` is the front part of every request. Leave off the trailing slash; Polymo tidies it for you.
-- Authentication details (like tokens) are **never** written here. They are supplied later when you run the connector.
-
-### TLS certificates
-
-Polymo verifies HTTPS connections against your operating system's trust
-store (via [truststore](https://truststore.readthedocs.io/)). Corporate
-proxy or self-signed CAs installed on the machine therefore work out of
-the box. To point at a specific CA bundle instead, set the standard
-`SSL_CERT_FILE` (or `SSL_CERT_DIR`) environment variable before starting
-Spark or the builder — an explicit override always wins.
-
-## Stream block
-
-### Path
-
-```yaml
-stream:
-  path: /v1/items
-```
-
-- Must start with a `/`.
-- You can use placeholders like `/repos/{owner}/{repo}`. At runtime, passing `owner=dan1elt0m` fills in the braces.
-
-### Query parameters
-
-```yaml
-params:
-  limit: 100
-  status: active
-```
-
-- Sent on every request.
-- Values can reference runtime options with `{{ options.limit }}` or read environment variables with `${env:API_KEY}`. If the environment variable is missing, Polymo raises a clear error when you preview or run the job.
-
-### Headers
-
-```yaml
-headers:
-  Accept: application/json
-  X-Correlation-ID: "polymo-sample"
-```
-
-- Optional. Handy for APIs that expect versioning or custom IDs.
-- Supports the same templating and environment shortcuts as parameters.
-
-### Authentication
-
-Add an `auth` block under `source` when the API requires credentials:
-
-```yaml
-source:
-  type: rest
-  base_url: https://api.example.com
-  auth:
-    type: oauth2
-    token_url: https://auth.example.com/oauth/token
-    client_id: my-client-id
-    scope:
-      - read
-      - write
-```
-
-Supported methods:
-
-- **none** – default; no auth added to requests.
-- **bearer** – each request carries an `Authorization: Bearer <token>` header. Supply the token at runtime with `.option("token", "...")`; the Builder keeps the token in memory only. Running on Databricks? To fetch secrets/scope
-- use `.option("token_scope", "my-scope").option("token_key", "api-token")` instead and Polymo will fetch the secret from the Databricks scope on the driver.
-- **api_key** – Polymo injects the API key as a query parameter. Set `authType` to `api_key`, choose the parameter name, and supply the value at runtime (the Builder uses `.option("<param>", "...")` behind the scenes).
-- **oauth2** – Implements the client-credentials flow. Provide `token_url`, `client_id`, optional `scope`, `audience`, and `extra_params` (a JSON object merged into the token request). The client secret should be passed at runtime via the Spark option `.option("oauth_client_secret", "...")`; exported YAML references it as `{{ options.oauth_client_secret }}` so secrets remain out of the file. On Databricks you can supply secrets without copying them into the notebook by pointing Polymo at scopes: `.option("oauth_client_id_scope", "my-scope").option("oauth_client_id_key", "client-id")` and `.option("oauth_client_secret_scope", "my-scope").option("oauth_client_secret_key", "client-secret")` pull both values from Databricks Secrets before the request starts.
-
-The Builder mirrors these options and stores secrets only for the current browser session. When you re-open a saved connector, re-enter the secret before previewing or exporting.
-
-### Pagination
-
-```yaml
-pagination:
-  type: offset
-  page_size: 100
-  limit_param: limit
-  offset_param: offset
-```
-
-Pick one of the supported behaviours:
-- `none` – only one page is requested.
-- `offset` – Polymo increments an offset query parameter (default `offset`) by the configured `page_size` (defaulting to the number of records returned) until an empty page is received. Override the parameter name or starting point with `offset_param` and `start_offset`.
-- `page` – Polymo increments a page counter (default `page`) on every request and enforces an optional `page_size` via `limit_param` (default `per_page`). Adjust the behaviour with `page_param` and `start_page`.
-- `cursor` – Polymo reads the next cursor value from the response payload or headers and sends it back via `cursor_param` (defaults to `cursor`). Combine with `cursor_path` (a list or dotted path such as `meta.next_cursor`) or `cursor_header` to tell Polymo where to find the cursor. Alternatively provide `next_url_path` when the API returns a fully qualified "next" link.
-- `link_header` – legacy support that follows `Link: <...>; rel="next"` headers until there are no more pages.
-
-Every pagination strategy stops when the API returns an empty list of records. Override that default by setting `stop_on_empty_response: false`.
-
-#### Partition-aware pagination
-
-When you provide either `total_pages_path`/`total_pages_header` or `total_records_path`/`total_records_header`, Polymo can estimate how many requests are required in advance. The Spark DataSource will use that information to create one input partition per page (for `page` pagination) or per offset step (for `offset` pagination), allowing Spark to read pages in parallel. For example:
-
-```yaml
-pagination:
-  type: page
-  page_size: 100
-  page_param: page
-  limit_param: per_page
-  total_pages_path: [meta, total_pages]
-```
-
-or
-
-```yaml
-pagination:
-  type: offset
-  page_size: 500
-  offset_param: offset
-  total_records_header: X-Total-Count
-```
-
-If the total count hints are missing, Polymo falls back to a single Spark partition.
-
-### Partition block
-
-Define a `partition` block under `stream` to split the workload explicitly:
-
-```yaml
-partition:
-  strategy: endpoints
-  endpoints:
-    - posts:/posts
-    - comments:/comments
-    - users:/users
-```
-
-Supported strategies:
-
-- **pagination** – mirrors the pagination hints in the YAML. Including total counts (as shown above) lets Spark plan one partition per page; without the hints Polymo still works, but Spark keeps the job single-partition.
-- **param_range** – generates a partition per value. Supply either `values: 1,2,3` or range fields (`range_start`, `range_end`, `range_step`, and optional `range_kind: date`). `value_template` and `extra_template` let you shape request parameters.
-- **endpoints** – fans out over multiple paths. Each item can be `/path` or `name:/path`; the name shows up as `endpoint_name` in previews and Spark rows.
-
-The Builder writes this block for you, and it exports cleanly in the YAML download. You can declare it by hand too—see `examples/jsonplaceholder_endpoints.yml` for full sample.
-
-#### Overriding via runtime options
-
-Any `.option("partition_strategy", ...)` call overrides the YAML block. The auxiliary options (`partition_param`, `partition_values`, `partition_endpoints`, and so on) are unchanged.
-
-### Incremental fields
-
-```yaml
-incremental:
-  mode: updated_at
-  cursor_param: since
-  cursor_field: updated_at
-```
-
-When `cursor_param` and `cursor_field` are populated Polymo performs an incremental sync:
-
-- On the first request Polymo seeds the query with the last cursor value it knows about. The value is read from a JSON state file that you point to with `.option("incremental_state_path", "./polymo-state.json")`.
-- The path may be local or remote (for example `s3://team-bucket/polymo/state.json`). 
-- If the state file does not exist yet, provide a fallback with `.option("incremental_start_value", "2024-01-01T00:00:00Z")`.
-- After every successful run the JSON file is updated with the newest cursor value observed in the stream. By default the entry key is `<stream name>@<base URL>`, but you can override it via `.option("incremental_state_key", "orders-prod")` when you want to share a state file between connectors.
-- The stored cursor is only used when the query parameter is not already supplied in the config (so custom templates or overrides still win).
-- If you skip `incremental_state_path`, Polymo keeps the last cursor in memory for as long as the Spark driver stays alive. This is handy for notebooks or iterative development. Disable that behaviour with `.option("incremental_memory_state", "false")` when you want each run to start fresh.
-
-The JSON file uses a straightforward structure:
+A connector is one `RestSourceConfig`: a base URL, optional auth, and a
+single stream (path + how to page through it, select records, and shape the
+schema). In JSON form:
 
 ```json
 {
-  "streams": {
-    "issues@https://api.github.com": {
-      "cursor_param": "since",
-      "cursor_field": "updated_at",
-      "cursor_value": "2024-03-22T18:15:00Z",
-      "mode": "updated_at",
-      "updated_at": "2024-03-22T18:16:05Z"
-    }
+  "version": "0.1",
+  "source": {
+    "type": "rest",
+    "base_url": "https://api.example.com"
+  },
+  "stream": {
+    "path": "/v1/items",
+    "infer_schema": true
   }
 }
 ```
 
-You can keep one state file per connector or share it—Polymo creates directories as needed and overwrites the entry atomically.
+That is enough for `generate()` to produce a script that fetches
+`https://api.example.com/v1/items` once and infers columns from the
+response — the same as filling in just **Base URL** and **Stream Path** in
+the Builder and leaving everything else at its default.
 
-The repository includes `examples/incremental-state.json` as a ready-to-copy template.
+## Base configuration
 
-## Benchmarks
+- **Base URL** (`source.base_url`) — the root of every request. The
+  generated script stores it as the `BASE_URL` constant. Leave off the
+  trailing slash.
+- **Stream Path** (`stream.path`) — appended to `BASE_URL` and stored as
+  `PATH`. Must start with `/`. You can use placeholders like
+  `/repos/{owner}/{repo}`; the Builder's reader options are wired to fill
+  these in — see [Reader options](#reader-options) below.
+- **Streaming table** (`stream.streaming`) — when on, the generated script
+  registers a small Spark `DataSource` inline and builds the `@dp.table`
+  with `spark.readStream.format(...)` instead of a plain batch read.
+  Requires an explicit schema and `offset` or `page` pagination; not
+  compatible with incremental sync or a partition strategy.
+- **Response format** (`stream.response_format`, `stream.xml_record_path`)
+  — see [XML responses](#xml-responses) below.
 
-Curious how Polymo compares to hand-rolled solutions? Check out `notebooks/polymo_vs_udf_benchmark.ipynb`. It spins up a local FastAPI service with simulated latency and contrasts Polymo’s paginated reader with both a Python UDTF (fetching 200 rows at a time) and a per-row Spark UDF. With the default 100 ms delay and 5,000 records, Polymo finishes roughly 9× faster than the per-row UDF and still leads the UDTF path. Tune `PAGE_DELAY`, page size, and dataset length to match your API.
+## Authentication
 
-### Schema vs. infer_schema
+Set an **Auth Type** in the Builder's Authentication section. It is not
+persisted in a saved config — you re-enter secrets each time you reopen a
+connector.
 
-```yaml
-infer_schema: true
-schema: null
+- **None** (default) — no auth added to requests.
+- **Bearer Token** — the generated script gets an `API_TOKEN = "REPLACE_ME"`
+  constant near the top; edit it in place (or swap it for a secret-store
+  lookup — the generated comment shows a Databricks example) before
+  running the script. Maps to `source.auth.type = "bearer"`.
+- **API Key** — adds your chosen parameter name to the request's query
+  parameters. This one is a Builder convenience rather than a first-class
+  auth type: it does not set `source.auth` at all, it just injects
+  `{"<param>": "{{ options.<param> }}"}` into `stream.params`. That
+  template resolves during **Preview** (which supplies the secret
+  separately), but the exported script has no runtime options to resolve it
+  against — generation fails with a template error until you either type
+  the literal key value straight into a Query Parameter (Params section)
+  instead of using the secret field, or edit the generated `PARAMS` constant
+  by hand after export.
+- **OAuth 2.0 (Client Credentials)** — maps to
+  `source.auth = {"type": "oauth2", "token_url": ..., "client_id": ..., "scope": [...], "audience": ..., "extra_params": {...}}`.
+  The generated script gets a `CLIENT_SECRET = "REPLACE_ME"` constant and a
+  `get_token()` helper that performs the client-credentials POST before
+  every request. `scope` is space-joined free text in the form; `extra_params`
+  is a JSON object merged into the token request body.
+
+## Query parameters & headers
+
+- **Params** (`stream.params`) → the `PARAMS` constant in the generated
+  script, sent on every request.
+- **Headers** (`stream.headers`) → the `HEADERS` constant.
+- Values may reference `{{ options.<name> }}` (see
+  [Reader options](#reader-options)) — these are resolved once, at
+  generation time, into literal values baked into the script. There is no
+  templating left at runtime.
+
+## Reader options
+
+The **Spark reader options** panel supplies values used to resolve path
+placeholders (`{user_id}` in `/users/{user_id}/posts`) and any
+`{{ options.* }}` references in params/headers/auth fields, all at
+generation time. Fill in `owner=dan1elt0m` here and the generated script's
+`PATH`/`PARAMS` constants already have `dan1elt0m` baked in — there is
+nothing left to pass at runtime.
+
+## Pagination
+
+Pick a strategy in the **Pagination & incremental settings** panel
+(`stream.pagination.type`):
+
+- `none` — one page only.
+- `offset` — increments an offset parameter (`offset_param`, default
+  `offset`) by `page_size` on each request until an empty page comes back.
+  `start_offset` sets the initial value.
+- `page` — increments a page counter (`page_param`, default `page`),
+  optionally capping page size via `limit_param` (default `per_page`).
+  `start_page` sets the initial value.
+- `cursor` — reads the next cursor from the response body
+  (`cursor_path`, a dotted path such as `meta.next_cursor`) or a response
+  header (`cursor_header`), and sends it back via `cursor_param` (default
+  `cursor`). `next_url_path` is an alternative for APIs that return a fully
+  qualified "next" link instead of a bare cursor value.
+- `link_header` — follows `Link: <...>; rel="next"` response headers.
+
+Every strategy stops once the API returns an empty page; uncheck
+**Stop on empty response** (`stop_on_empty_response: false`) to disable
+that.
+
+`total_pages_path` / `total_pages_header` (under **Partition-aware
+pagination hints**) let the generated script know when to stop without
+waiting for an empty page — it's an extra stop condition, evaluated inside
+the same sequential fetch loop.
+
+!!! note "No more Spark-side partition planning"
+    In the old runtime, these hints (plus `total_records_path` /
+    `total_records_header`) let the Spark data source estimate the page
+    count up front and fan reads out across executors — one partition per
+    page. Codegen has no such planner: a `pagination`-strategy connector
+    always runs as a single sequential loop in the generated script.
+    `total_pages_*` still trims the loop early; `total_records_*` is
+    accepted for config compatibility but has no effect on generated code.
+    If you need real parallelism, use `param_range` or `endpoints`
+    partitioning instead (below) — those *do* generate a parallel
+    `sc.parallelize(...)` fan-out.
+
+## Partitioning
+
+Set a **Partition strategy** (`stream.partition.strategy`) to change how
+the generated `@dp.table` function fetches data:
+
+- **none** (default) — plain sequential fetch, as above.
+- **pagination** — same sequential fetch; this strategy exists for
+  compatibility but does not change codegen (see the note above).
+- **param_range** — generates one static request "window" per value at
+  generation time, then fans them out with
+  `sc.parallelize(WINDOWS, len(WINDOWS)).flatMap(...)`. Supply either
+  explicit `values` (comma-separated) or a range (`range_start`,
+  `range_end`, `range_step`, and `range_kind: date` for date ranges).
+  `value_template` / `extra_template` shape how each value is injected into
+  request parameters.
+- **endpoints** — one window per path. Each entry is `/path` or
+  `name:/path`. Also parallelized via `sc.parallelize`.
+
+Only `param_range` and `endpoints` produce this parallel fan-out, because
+only they can be fully expanded into a literal list of windows at generation
+time — see [Endpoints partitioning changed](migration-1.0.md#behavioral-differences-to-check-for)
+if you're migrating a 0.x `endpoints` connector: **generated records are
+flat, with no `endpoint_name` field or `data` wrapper.**
+
+## Incremental sync
+
+Fill in **Mode**, **Cursor param**, and **Cursor field**
+(`stream.incremental.mode` / `cursor_param` / `cursor_field`) to make the
+generated script track a cursor between runs:
+
+- Before each request, the script reads the last cursor value from a local
+  `<stream-name>_state.json` file next to itself (created automatically) and
+  sends it via `cursor_param`.
+- After the run, the newest value of `cursor_field` seen across the fetched
+  records is written back to that file.
+- For `param_range` / `endpoints` connectors (which run in parallel via
+  `sc.parallelize`), the cursor is computed back on the driver from the
+  collected rows, since worker processes don't share the driver's memory.
+
+The Incremental panel also has **State path**, **Start value**, **State
+key**, and **Keep in memory** fields. These only affect what the **Preview**
+panel does when test-fetching incrementally — they are not part of the
+generated script, which always uses the fixed `<stream-name>_state.json`
+path described above. Edit the generated `STATE_PATH` constant by hand if
+you need it to point elsewhere (the generated comment shows a Databricks
+Volume path as an example).
+
+## Error handling & retries
+
+The **Error handling** panel (`stream.error_handler`) controls the
+generated script's retry loop:
+
+- `max_retries` — attempts before giving up (default 5).
+- `retry_statuses` — HTTP statuses to retry, e.g. `5XX`, `429`.
+- `retry_on_timeout` / `retry_on_connection_errors` — retry on
+  `requests` timeout/connection exceptions too.
+- `backoff.initial_delay_seconds`, `backoff.max_delay_seconds`,
+  `backoff.multiplier` — exponential backoff between attempts.
+
+Leave the panel untouched to keep the defaults.
+
+## Record selector
+
+For APIs that nest the record list inside the response body, the **Record
+selector** panel (`stream.record_selector`) configures how the generated
+`_records()` function digs it out:
+
+- `field_path` — a list of keys/`*` wildcards, e.g. `["data", "items"]`
+  walks `payload["data"]["items"]`.
+- `record_filter` — a boolean Python expression evaluated per record, e.g.
+  `record.status == 'open'`.
+- `cast_to_schema_types` — coerce values to match your declared `schema`
+  (below) instead of leaving them as raw JSON types.
+
+This section is JSON-only; it has no effect on XML responses (see below).
+
+## Schema
+
+Toggle **Infer schema** (`stream.infer_schema`) to let the generated script
+sample the API and infer a Spark schema at read time — good for getting
+started, but the shape can shift if the API's response shape changes.
+
+Turn it off and fill in **Schema** (`stream.schema`) to pin an explicit
+Spark SQL DDL string, comma-separated `name TYPE` pairs:
+
+```
+id INT, title STRING, price DECIMAL(10,2), created_at TIMESTAMP
 ```
 
-- Leave `infer_schema` set to `true` to let Polymo look at sample data and pick reasonable column types.
-- Set `infer_schema: false` and provide a `schema` if you prefer to define the columns yourself.
-- The schema string uses the same style as Spark: `id INT, title STRING, updated_at TIMESTAMP`. If you copy a schema from the Builder or preview, it is already formatted correctly.
+Supported types: `string` / `varchar` / `char` / `text`, `boolean` / `bool`,
+`double` / `float64`, `float` / `real`, `tinyint`, `smallint`, `int` /
+`integer`, `bigint` / `long`, `timestamp`, `date`, `variant`, and
+`decimal(precision, scale)` (or bare `decimal` / `numeric` for
+`decimal(38, 18)`).
 
-### Record selector (for nested responses)
+**Nested types are not supported.** `STRUCT<...>`, `ARRAY<...>`, `MAP<...>`,
+and backtick-quoted field names are all rejected by validation — every
+field must be a flat, scalar column. If an API response has a nested
+object you want as a typed column today, either flatten it with a
+`record_filter`/custom post-processing after fetching, leave `infer_schema`
+on, or edit the generated script's `SCHEMA` constant by hand after export
+(the generator's DDL validator only runs at generation time, not on a
+script you've already exported and modified).
 
-```yaml
-record_selector:
-  field_path: [data, items]
-  record_filter: "{{ record.status == 'open' }}"
-  cast_to_schema_types: true
-```
+## XML responses
 
-- `field_path` points to the part of the JSON payload that holds the list of records. In the example above, Polymo follows `data → items`.
-- `record_filter` lets you keep or drop rows using a simple expression. The word `record` refers to the current item.
-- `cast_to_schema_types` tells Polymo to convert values to the column types you set in `schema` (handy when you want timestamps or numbers instead of plain strings).
+Set **Response format** to `XML` and fill in an **XML record path**
+(`stream.xml_record_path`) — an `ElementTree.findall()`-style path selecting
+each record element, e.g. `.//contact` or `contacts/contact`. The generated
+script parses the response with `xml.etree.ElementTree` and, for each
+matched element, builds a record dict from its attributes (prefixed `@`) and
+its direct children (`{child.tag: child.text}`).
 
-### Runtime options
+Keep these gotchas in mind:
 
-You will not see this block in YAML, but it is worth mentioning: options passed at runtime are available inside templates. For example:
+- **Nested containers flatten to empty/whitespace text, not a value.**
+  `child.text` only captures the text immediately inside `<child>` before
+  its first sub-element — if `<child>` itself has children, `child.text` is
+  usually `None` or pure whitespace, not the nested content. There is no
+  automatic nested-XML flattening. If the data you need is one level deeper
+  than a record, point `xml_record_path` at that deeper element instead of
+  trying to pull it out through the parent.
+- **Duplicate sibling tags: last one wins.** Each child becomes a plain dict
+  key, so `<item><tag>a</tag><tag>b</tag></item>` produces `{"tag": "b"}` —
+  `"a"` is silently overwritten. Rename or restructure the XML upstream if
+  you need every occurrence.
+- **Namespaced documents need Clark notation.** For
+  `<ns:contact xmlns:ns="...">`, `xml_record_path` must use
+  `{http://the/actual/namespace/uri}contact`, not the `ns:contact` prefix
+  form — `ElementTree.findall()` doesn't resolve XML namespace prefixes on
+  its own.
+- XML responses are incompatible with `cursor_path`, `next_url_path`,
+  `total_pages_path`, `total_records_path`, and the record selector's
+  `field_path` — all of those dig through a decoded JSON payload, which
+  doesn't exist for an XML response. Generation fails with a clear error if
+  you combine them.
 
-```python
-spark.read.format("polymo")
-  .option("config_path", "./github.yml")
-  .option("owner", "dan1elt0m")
-  .option("token", os.environ["GITHUB_TOKEN"])            # or .option("token_scope", "creds").option("token_key", "github") on Databricks
-  .load()
-```
+## Runtime options in generated scripts
 
-Prefer keeping everything in memory? Replace `config_path` with `.option("config_json", json.dumps(config_dict))` when you already have the config as a Python dictionary. Only one of `config_path` or `config_json` can be supplied at a time.
+There are none. Every option above is resolved once, at generation time,
+into literal constants in the exported script (`BASE_URL`, `PATH`, `PARAMS`,
+`HEADERS`, `SCHEMA`, ...). Editing the connector after export means editing
+the script directly, or changing the Builder form and re-exporting.
 
-Inside your config you can reference `{{ options.owner }}` or `{{ options.token }}`. Keep tokens out of the YAML—pass them through `.option("token", ...)` instead.
-
-For OAuth2, supply the client secret the same way: `.option("oauth_client_secret", os.environ["CLIENT_SECRET"])`. The exported YAML references it as `{{ options.oauth_client_secret }}` so the value never touches disk. When you run on Databricks, swap the environment variable for secret scopes by adding `.option("oauth_client_id_scope", "creds")`, `.option("oauth_client_id_key", "client-id")`, `.option("oauth_client_secret_scope", "creds")`, and `.option("oauth_client_secret_key", "client-secret")`.
-
-## Putting it all together
-
-### Structured Streaming
-
-Polymo can also act as a streaming source. Point `spark.readStream` at the same YAML file and supply any runtime options you would normally pass to `read`:
-
-```python
-spark.readStream.format("polymo") \
-  .option("config_path", "./jsonplaceholder_endpoints.yml") \
-  .option("oauth_client_secret", os.environ["CLIENT_SECRET"]) \
-  .option("stream_batch_size", 100) \
-  .option("stream_progress_path", "/tmp/polymo-progress.json") \
-  .load()
-```
-
-- `stream_batch_size` controls how many records are fetched per micro-batch (defaults to 100).
-- `stream_progress_path` stores a tiny JSON file with the last processed offset so the next query run resumes where it left off.
-- Incremental options such as `incremental_state_path` still apply and are the recommended way to avoid re-processing old records.
-
-All of the authentication rules above still apply—use `.option("token", ...)` for bearer tokens and `.option("oauth_client_secret", ...)` for OAuth2.
-
-Here is a fuller example, annotated with comments:
-
-```yaml
-version: 0.1
-source:
-  type: rest
-  base_url: https://api.github.com
-stream:
-  path: /repos/{owner}/{repo}/issues
-  params:
-    state: open
-    per_page: 50
-    labels: "{{ options.label | default('bug') }}"  # uses runtime option with a fallback
-  headers:
-    Accept: application/vnd.github+json
-  pagination:
-    type: page
-    page_size: 50
-    limit_param: per_page
-  incremental:
-    mode: updated_at
-    cursor_param: since
-    cursor_field: updated_at
-  infer_schema: false
-  schema: |
-    number INT,
-    title STRING,
-    state STRING,
-    created_at TIMESTAMP,
-    updated_at TIMESTAMP,
-    user STRUCT<login: STRING>
-  record_selector:
-    field_path: [*]
-    record_filter: "{{ record.pull_request is none }}"
-    cast_to_schema_types: true
-```
-
-When you preview or run this connector, remember to pass `owner`, `repo`, and `token` as options. Templates fill them in, pagination walks through every issue, and the schema shapes the output into predictable columns.
-
-If you ever feel unsure about a field, open the Builder UI—the form labels and tooltips mirror everything explained here.
+If you're coming from the 0.x YAML runtime, see the
+[migration guide](migration-1.0.md) for the full list of what moved or
+disappeared, plus a checklist for rebuilding an old connector in the
+Builder.

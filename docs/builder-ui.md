@@ -29,6 +29,7 @@ The left-hand panel has two tabs: **UI Builder** and **Generated Code**. Stay on
 - **Base URL** – the root of your API, for example `https://api.example.com`. The builder checks that it looks like a valid URL.
 - **Stream Path** – the specific endpoint, such as `/v1/orders`. Enter it exactly how you would type it in a browser.
 - **Streaming table** – toggle this on if the generated pipeline should read the stream as a Spark Structured Streaming source (`dp.table` backed by `spark.readStream`) instead of a batch read. Streaming requires an explicit schema and offset- or page-based pagination, and is not compatible with incremental state or partition strategies.
+- **Response format** – choose **JSON** (default) or **XML**. XML responses are flattened by matching an **XML record path** (an `ElementTree.findall()`-style path, e.g. `.//contact`) and cannot be combined with pagination/record-selector features that dig through a JSON payload (cursor path, next-URL path, total-pages path, or a record selector field path). See the [Connector options reference](config.md#xml-responses) for the flattening rules and gotchas.
 
 ### 2. Authentication (optional)
 - Choose **None** if the API is public.
