@@ -12,7 +12,7 @@ def test_api_key_header_placeholder_and_comment_present():
     )
     core = generate_core(config)
     assert_hygiene(core)
-    assert 'API_KEY = "REPLACE_ME"' in core
+    assert 'API_KEY: str = "REPLACE_ME"' in core
     assert "dbutils.secrets.get" in core  # recommendation comment
     assert 'session.headers["X-API-Key"] = API_KEY' in core
 
@@ -24,7 +24,7 @@ def test_api_key_query_placeholder_and_comment_present():
     )
     core = generate_core(config)
     assert_hygiene(core)
-    assert 'API_KEY = "REPLACE_ME"' in core
+    assert 'API_KEY: str = "REPLACE_ME"' in core
     assert "dbutils.secrets.get" in core
     assert 'params["api_key"] = API_KEY' in core
     # header form must not be emitted for query placement

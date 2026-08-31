@@ -173,7 +173,7 @@ def test_generate_endpoint_no_longer_crashes_on_unresolved_option() -> None:
     payload = response.json()
 
     assert response.status_code == 200
-    assert 'OPT_API_KEY_B64 = "REPLACE_ME"' in payload["script"]
+    assert 'OPT_API_KEY_B64: str = "REPLACE_ME"' in payload["script"]
     assert 'f"Basic {OPT_API_KEY_B64}"' in payload["script"]
 
 
@@ -285,7 +285,7 @@ def test_generate_returns_200_for_api_key_header_config() -> None:
     payload = response.json()
 
     assert response.status_code == 200
-    assert 'API_KEY = "REPLACE_ME"' in payload["script"]
+    assert 'API_KEY: str = "REPLACE_ME"' in payload["script"]
     assert 'session.headers["X-API-Key"] = API_KEY' in payload["script"]
 
 
@@ -307,5 +307,5 @@ def test_generate_returns_200_for_api_key_query_config() -> None:
     payload = response.json()
 
     assert response.status_code == 200
-    assert 'API_KEY = "REPLACE_ME"' in payload["script"]
+    assert 'API_KEY: str = "REPLACE_ME"' in payload["script"]
     assert 'params["api_key"] = API_KEY' in payload["script"]

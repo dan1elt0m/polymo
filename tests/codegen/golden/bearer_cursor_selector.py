@@ -5,34 +5,35 @@ at runtime; edit this file freely.
 """
 
 import time
+from typing import Any, Iterator
 
 import requests
 
-BASE_URL = "https://api.example.com"
-PATH = "/posts"
-PARAMS: dict = {}
-HEADERS: dict = {}
-TIMEOUT = 30.0
+BASE_URL: str = "https://api.example.com"
+PATH: str = "/posts"
+PARAMS: dict[str, Any] = {}
+HEADERS: dict[str, str] = {}
+TIMEOUT: float = 30.0
 
 # Fill in your token. For anything beyond local testing, fetch it from a
 # secret store instead of keeping it in this file, e.g.:
 #   API_TOKEN = dbutils.secrets.get("my-scope", "my-key")
 # or an Azure Key Vault / AWS Secrets Manager client.
-API_TOKEN = "REPLACE_ME"
+API_TOKEN: str = "REPLACE_ME"
 
 # Behind a corporate TLS-intercepting proxy? `pip install truststore`
 # and uncomment the next two lines:
 # import truststore
 # truststore.inject_into_ssl()
 
-MAX_RETRIES = 5
+MAX_RETRIES: int = 5
 
 
-def _should_retry(status):
+def _should_retry(status: int) -> bool:
     return 500 <= status <= 599 or status == 429
 
 
-def _request(session, url, params):
+def _request(session: requests.Session, url: str, params: dict[str, Any] | None) -> requests.Response:
     """GET with retries: statuses (500 <= status <= 599 or status == 429), backoff x2.0."""
     delay = 1.0
     for attempt in range(MAX_RETRIES + 1):
@@ -53,7 +54,7 @@ def _request(session, url, params):
     raise RuntimeError("unreachable")
 
 
-def _dig(payload, path):
+def _dig(payload: Any, path: list[str]) -> Any:
     """Follow a key path into a JSON payload; None if any hop is missing."""
     current = payload
     for key in path:
@@ -64,7 +65,7 @@ def _dig(payload, path):
     return current
 
 
-def _records(payload):
+def _records(payload: Any) -> list[dict[str, Any]]:
     """Normalise a response payload to a list of dicts."""
     current = [payload]
     for segment in ['data']:
@@ -85,7 +86,7 @@ def _records(payload):
     return records
 
 
-def fetch_records(extra_params=None, path=None):
+def fetch_records(extra_params: dict[str, Any] | None = None, path: str | None = None) -> Iterator[dict[str, Any]]:
     """Yield records, following the response cursor."""
     url_path = path or PATH
     session = requests.Session()
@@ -108,7 +109,7 @@ def fetch_records(extra_params=None, path=None):
             return
 
 
-def _infer_schema():
+def _infer_schema() -> str:
     """Sample records to derive a DDL schema (explicit SCHEMA recommended)."""
     from itertools import islice
 
@@ -117,7 +118,7 @@ def _infer_schema():
         raise RuntimeError(
             "cannot infer a schema from an empty response; set an explicit schema"
         )
-    fields = {}
+    fields: dict[str, str] = {}
     for record in sample:
         for key, value in record.items():
             if value is None:
@@ -158,28 +159,36 @@ from pyspark.sql.datasource import DataSource, DataSourceReader  # noqa: E402
 
 class RestSource(DataSource):
     @classmethod
-    def name(cls):
+    def name(cls) -> str:
         return "posts_source"
 
-    def schema(self):
+    def schema(self) -> str:
         return _infer_schema()
 
-    def reader(self, schema):
+    def reader(self, schema: Any) -> "_Reader":
         return _Reader(schema)
 
 
 class _Reader(DataSourceReader):
-    def __init__(self, schema):
-        self._columns = [field.name for field in schema.fields]
+    def __init__(self, schema: Any) -> None:
+        self._columns: list[str] = [field.name for field in schema.fields]
 
-    def read(self, partition):
+    def read(self, partition) -> Iterator[tuple]:
         records = fetch_records()
         for record in records:
             yield tuple(_cell(record.get(column)) for column in self._columns)
 
 
-def _cell(value):
-    """Nested structures become JSON strings; scalars pass through."""
+def _cell(value: Any) -> Any:
+    """Nested structures become JSON strings; scalars pass through.
+
+    Only used with an inferred schema — inference never produces a
+    STRUCT/ARRAY/MAP column, so a dict/list value here would otherwise
+    crash the read; JSON-encoding it into a STRING is the safe fallback.
+    An explicit schema skips this: a STRUCT/ARRAY/MAP column needs the
+    real structure, not a JSON string, so those values pass through as-is
+    (see the schema-mode branch above).
+    """
     if isinstance(value, (dict, list)):
         import json
 

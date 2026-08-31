@@ -19,7 +19,7 @@ def test_schema_ddl_emitted_in_dp_wiring():
     config = make_config(base_url="https://x", schema="id BIGINT, name STRING")
     script = generate(config)
     assert_hygiene(script)
-    assert 'SCHEMA = "id BIGINT, name STRING"' in script
+    assert 'SCHEMA: str = "id BIGINT, name STRING"' in script
     # the inline DataSource's schema() returns the explicit DDL directly,
     # no runtime inference needed
     assert "return SCHEMA" in script
@@ -34,7 +34,7 @@ def test_no_schema_falls_back_to_inference():
     config = make_config(base_url="https://x")
     script = generate(config)
     assert "SCHEMA =" not in script
-    assert "def _infer_schema():" in script
+    assert "def _infer_schema() -> str:" in script
     assert "return _infer_schema()" in script
 
 
@@ -45,8 +45,8 @@ def test_curly_brace_path_placeholder_resolved_at_generation_time():
         params={"user_id": "42", "limit": "5"},
     )
     core = generate_core(config)
-    assert 'PATH = "/users/{user_id}/posts"' not in core
-    assert 'PATH = "/users/42/posts"' in core
+    assert 'PATH: str = "/users/{user_id}/posts"' not in core
+    assert 'PATH: str = "/users/42/posts"' in core
     assert '"limit": "5"' in core
     assert '"user_id"' not in core
 

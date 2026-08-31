@@ -19,7 +19,7 @@ def test_batch_with_schema_uses_explicit_schema_no_inference():
     assert_hygiene(script)
     assert "class RestSource(DataSource):" in script
     assert "class _Reader(DataSourceReader):" in script
-    assert "def schema(self):" in script
+    assert "def schema(self) -> str:" in script
     assert "return SCHEMA" in script
     assert "_infer_schema" not in script
     assert "spark.dataSource.register(RestSource)" in script
@@ -31,7 +31,7 @@ def test_batch_without_schema_infers_schema_by_sampling():
     script = generate(config)
     ast.parse(script)
     assert_hygiene(script)
-    assert "def _infer_schema():" in script
+    assert "def _infer_schema() -> str:" in script
     assert "return _infer_schema()" in script
     # sampling, not the full stream — an explicit schema is recommended
     # precisely to avoid paying this cost / risk on every run
@@ -49,7 +49,7 @@ def test_windowed_batch_partitions_over_windows():
     assert_hygiene(script)
     assert "from pyspark.sql.datasource import" in script
     assert "InputPartition" in script
-    assert "def partitions(self):" in script
+    assert "def partitions(self) -> list[InputPartition]:" in script
     assert "InputPartition(index) for index in range(len(WINDOWS))" in script
     assert "fetch_records(**WINDOWS[partition.value])" in script
 
@@ -59,9 +59,9 @@ def test_non_windowed_batch_has_no_partitions_override():
     script = generate(config)
     ast.parse(script)
     assert_hygiene(script)
-    assert "def partitions(self):" not in script
+    assert "def partitions(self) -> list[InputPartition]:" not in script
     assert "InputPartition" not in script
-    assert "def read(self, partition):" in script
+    assert "def read(self, partition) -> Iterator[tuple]:" in script
     assert "fetch_records()" in script
 
 
@@ -77,8 +77,8 @@ def test_incremental_state_written_inside_read():
     assert_hygiene(script)
 
     reader_section = script.split("class _Reader(DataSourceReader):", 1)[1]
-    read_body, _, rest = reader_section.partition("\n\ndef _cell(value):")
-    assert "def read(self, partition):" in read_body
+    read_body, _, rest = reader_section.partition("\n\ndef _cell(value: Any) -> Any:")
+    assert "def read(self, partition) -> Iterator[tuple]:" in read_body
     assert 'record.get("updated")' in read_body
     assert "_write_state(cursor)" in read_body
     # the write must be inside read()/the class body, not left dangling in
@@ -100,8 +100,8 @@ def test_incremental_windowed_state_written_inside_read():
     assert_hygiene(script)
 
     reader_section = script.split("class _Reader(DataSourceReader):", 1)[1]
-    assert "def partitions(self):" in reader_section
-    assert "def read(self, partition):" in reader_section
+    assert "def partitions(self) -> list[InputPartition]:" in reader_section
+    assert "def read(self, partition) -> Iterator[tuple]:" in reader_section
     assert "_write_state(cursor)" in reader_section
 
 

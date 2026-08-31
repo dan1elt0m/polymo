@@ -64,7 +64,11 @@ def run_generated(
     # only ever read lazily inside a function body (like the bearer/oauth2
     # ones) don't need this, but it's harmless for them either way.
     for name, value in overrides.items():
-        pattern = re.compile(rf'^{re.escape(name)} = "REPLACE_ME"$', re.MULTILINE)
+        # `(?:: \S+)?` skips the optional `: str` type annotation the
+        # generator now emits on these constants.
+        pattern = re.compile(
+            rf'^{re.escape(name)}(?:: \S+)? = "REPLACE_ME"$', re.MULTILINE
+        )
         code = pattern.sub(f"{name} = {value!r}", code, count=1)
     namespace: dict[str, Any] = {}
     exec(compile(code, "<generated>", "exec"), namespace)  # noqa: S102

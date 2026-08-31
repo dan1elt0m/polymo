@@ -5,6 +5,7 @@ at runtime; edit this file freely.
 """
 
 import time
+from typing import Any, Iterator
 
 import requests
 {% if incremental_mode %}
@@ -21,15 +22,15 @@ import xml.etree.ElementTree as ET
 # secret store instead of keeping them in this file, e.g.:
 #   OPT_API_KEY_B64 = dbutils.secrets.get("my-scope", "my-key")
 {% for var in option_placeholders %}
-{{ var }} = "REPLACE_ME"
+{{ var }}: str = "REPLACE_ME"
 {% endfor %}
 
 {% endif %}
-BASE_URL = {{ base_url_repr }}
-PATH = {{ path_repr }}
-PARAMS: dict = {{ params_repr }}
-HEADERS: dict = {{ headers_repr }}
-TIMEOUT = 30.0
+BASE_URL: str = {{ base_url_repr }}
+PATH: str = {{ path_repr }}
+PARAMS: dict[str, Any] = {{ params_repr }}
+HEADERS: dict[str, str] = {{ headers_repr }}
+TIMEOUT: float = 30.0
 {% if windows_repr %}
 
 # One entry per partition; each is fetched independently (parallelized
@@ -37,27 +38,27 @@ TIMEOUT = 30.0
 {% if partition_strategy == "endpoints" %}
 # records are not tagged with their source endpoint
 {% endif %}
-WINDOWS = {{ windows_repr }}
+WINDOWS: list[dict[str, Any]] = {{ windows_repr }}
 {% endif %}
 {% if incremental_mode %}
 
 # Where the incremental cursor is stored between runs. Point this at a
 # durable path (e.g. a Databricks Volume: /Volumes/cat/schema/vol/{{ stream_name_comment }}.json).
-STATE_PATH = {{ state_path_repr }}
+STATE_PATH: str = {{ state_path_repr }}
 {% if not has_windows %}
 # used by the builder preview; the dp table below tracks its own cursor
-LAST_CURSOR = {"value": None}
+LAST_CURSOR: dict[str, Any] = {"value": None}
 {% endif %}
 
 
-def _read_state():
+def _read_state() -> dict[str, Any]:
     if not os.path.exists(STATE_PATH):
         return {}
     with open(STATE_PATH) as fh:
         return json.load(fh)
 
 
-def _write_state(cursor):
+def _write_state(cursor: Any) -> None:
     if cursor is None:
         return
     with open(STATE_PATH, "w") as fh:
@@ -69,25 +70,25 @@ def _write_state(cursor):
 # secret store instead of keeping it in this file, e.g.:
 #   API_TOKEN = dbutils.secrets.get("my-scope", "my-key")
 # or an Azure Key Vault / AWS Secrets Manager client.
-API_TOKEN = "REPLACE_ME"
+API_TOKEN: str = "REPLACE_ME"
 {% endif %}
 {% if auth_type == "api_key" %}
 
 # Fill in your API key. For anything beyond local testing, fetch it from a
 # secret store instead of keeping it in this file, e.g.:
 #   API_KEY = dbutils.secrets.get("my-scope", "my-key")
-API_KEY = "REPLACE_ME"
+API_KEY: str = "REPLACE_ME"
 {% endif %}
 {% if auth_type == "oauth2" %}
 
 # Fill in your client secret. For anything beyond local testing, fetch it
 # from a secret store instead of keeping it in this file, e.g.:
 #   CLIENT_SECRET = dbutils.secrets.get("my-scope", "my-key")
-CLIENT_SECRET = "REPLACE_ME"
-TOKEN_URL = {{ token_url_repr }}
+CLIENT_SECRET: str = "REPLACE_ME"
+TOKEN_URL: str = {{ token_url_repr }}
 
 
-def get_token():
+def get_token() -> str:
     """Fetch an OAuth2 access token (client credentials grant)."""
     payload = {
         "grant_type": "client_credentials",
@@ -113,14 +114,14 @@ def get_token():
 # import truststore
 # truststore.inject_into_ssl()
 
-MAX_RETRIES = {{ max_retries }}
+MAX_RETRIES: int = {{ max_retries }}
 
 
-def _should_retry(status):
+def _should_retry(status: int) -> bool:
     return {{ retry_condition }}
 
 
-def _request(session, url, params):
+def _request(session: requests.Session, url: str, params: dict[str, Any] | None) -> requests.Response:
     """GET with retries: statuses ({{ retry_condition }}), backoff x{{ multiplier }}."""
     delay = {{ initial_delay }}
     for attempt in range(MAX_RETRIES + 1):
@@ -142,7 +143,7 @@ def _request(session, url, params):
 
 
 {% if total_pages_path or cursor_path or next_url_path %}
-def _dig(payload, path):
+def _dig(payload: Any, path: list[str]) -> Any:
     """Follow a key path into a JSON payload; None if any hop is missing."""
     current = payload
     for key in path:
@@ -155,10 +156,10 @@ def _dig(payload, path):
 
 {% endif %}
 {% if response_format == "xml" %}
-XML_RECORD_PATH = {{ xml_record_path_repr }}
+XML_RECORD_PATH: str = {{ xml_record_path_repr }}
 
 
-def _records(root):
+def _records(root: ET.Element) -> list[dict[str, Any]]:
     """Flatten each matched XML element into a record dict."""
     records = []
     for element in root.findall(XML_RECORD_PATH):
@@ -171,7 +172,7 @@ def _records(root):
 {% endif %}
     return records
 {% else %}
-def _records(payload):
+def _records(payload: Any) -> list[dict[str, Any]]:
     """Normalise a response payload to a list of dicts."""
 {% if field_path %}
     current = [payload]
@@ -214,7 +215,7 @@ def _records(payload):
 # kept for ad-hoc/batch runs and the builder preview.
 {% endif %}
 {% if pagination_type == "offset" %}
-def fetch_records(extra_params=None, path=None):
+def fetch_records(extra_params: dict[str, Any] | None = None, path: str | None = None) -> Iterator[dict[str, Any]]:
 {% if limit_param and page_size %}
     """Yield records, paginating with {{ offset_param_doc }}/{{ limit_param_doc }}."""
 {% else %}
@@ -262,7 +263,7 @@ def fetch_records(extra_params=None, path=None):
 {% endif %}
         offset += {{ page_size if page_size else "len(records)" }}
 {% elif pagination_type == "page" %}
-def fetch_records(extra_params=None, path=None):
+def fetch_records(extra_params: dict[str, Any] | None = None, path: str | None = None) -> Iterator[dict[str, Any]]:
     """Yield records, paginating with {{ page_param_doc }}."""
     url_path = path or PATH
     session = requests.Session()
@@ -320,7 +321,7 @@ def fetch_records(extra_params=None, path=None):
 {% endif %}
         page += 1
 {% elif pagination_type == "cursor" %}
-def fetch_records(extra_params=None, path=None):
+def fetch_records(extra_params: dict[str, Any] | None = None, path: str | None = None) -> Iterator[dict[str, Any]]:
     """Yield records, following the response cursor."""
     url_path = path or PATH
     session = requests.Session()
@@ -413,7 +414,7 @@ def fetch_records(extra_params=None, path=None):
             return
 {% endif %}
 {% elif pagination_type == "link_header" %}
-def fetch_records(extra_params=None, path=None):
+def fetch_records(extra_params: dict[str, Any] | None = None, path: str | None = None) -> Iterator[dict[str, Any]]:
     """Yield records, following RFC 5988 Link headers (rel=next)."""
     url_path = path or PATH
     session = requests.Session()
@@ -451,7 +452,7 @@ def fetch_records(extra_params=None, path=None):
 {% endif %}
         url, params = response.links.get("next", {}).get("url"), None
 {% elif pagination_type == "none" %}
-def fetch_records(extra_params=None, path=None):
+def fetch_records(extra_params: dict[str, Any] | None = None, path: str | None = None) -> Iterator[dict[str, Any]]:
     """Yield records from the API (single page)."""
     url_path = path or PATH
     session = requests.Session()
@@ -487,7 +488,7 @@ def fetch_records(extra_params=None, path=None):
 {% if not schema_ddl %}
 
 
-def _infer_schema():
+def _infer_schema() -> str:
     """Sample records to derive a DDL schema (explicit SCHEMA recommended)."""
     from itertools import islice
 
@@ -502,7 +503,7 @@ def _infer_schema():
         raise RuntimeError(
             "cannot infer a schema from an empty response; set an explicit schema"
         )
-    fields = {}
+    fields: dict[str, str] = {}
     for record in sample:
         for key, value in record.items():
             if value is None:
@@ -534,7 +535,7 @@ def _infer_schema():
 {% if streaming %}
 
 
-def fetch_page(page_index):
+def fetch_page(page_index: int) -> list[dict[str, Any]]:
     """Fetch one page by index; returns a list of records."""
     session = requests.Session()
     session.headers.update(HEADERS)

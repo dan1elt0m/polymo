@@ -5,35 +5,36 @@ at runtime; edit this file freely.
 """
 
 import time
+from typing import Any, Iterator
 
 import requests
 import json
 import os
 
-BASE_URL = "https://api.example.com"
-PATH = "/posts"
-PARAMS: dict = {}
-HEADERS: dict = {}
-TIMEOUT = 30.0
+BASE_URL: str = "https://api.example.com"
+PATH: str = "/posts"
+PARAMS: dict[str, Any] = {}
+HEADERS: dict[str, str] = {}
+TIMEOUT: float = 30.0
 
 # One entry per partition; each is fetched independently (parallelized
 # across executors in the dp table below).
 # records are not tagged with their source endpoint
-WINDOWS = [{"path": "/a"}, {"path": "/b"}]
+WINDOWS: list[dict[str, Any]] = [{"path": "/a"}, {"path": "/b"}]
 
 # Where the incremental cursor is stored between runs. Point this at a
 # durable path (e.g. a Databricks Volume: /Volumes/cat/schema/vol/posts.json).
-STATE_PATH = "posts_state.json"
+STATE_PATH: str = "posts_state.json"
 
 
-def _read_state():
+def _read_state() -> dict[str, Any]:
     if not os.path.exists(STATE_PATH):
         return {}
     with open(STATE_PATH) as fh:
         return json.load(fh)
 
 
-def _write_state(cursor):
+def _write_state(cursor: Any) -> None:
     if cursor is None:
         return
     with open(STATE_PATH, "w") as fh:
@@ -42,11 +43,11 @@ def _write_state(cursor):
 # Fill in your client secret. For anything beyond local testing, fetch it
 # from a secret store instead of keeping it in this file, e.g.:
 #   CLIENT_SECRET = dbutils.secrets.get("my-scope", "my-key")
-CLIENT_SECRET = "REPLACE_ME"
-TOKEN_URL = "https://api.example.com/token"
+CLIENT_SECRET: str = "REPLACE_ME"
+TOKEN_URL: str = "https://api.example.com/token"
 
 
-def get_token():
+def get_token() -> str:
     """Fetch an OAuth2 access token (client credentials grant)."""
     payload = {
         "grant_type": "client_credentials",
@@ -62,14 +63,14 @@ def get_token():
 # import truststore
 # truststore.inject_into_ssl()
 
-MAX_RETRIES = 5
+MAX_RETRIES: int = 5
 
 
-def _should_retry(status):
+def _should_retry(status: int) -> bool:
     return 500 <= status <= 599 or status == 429
 
 
-def _request(session, url, params):
+def _request(session: requests.Session, url: str, params: dict[str, Any] | None) -> requests.Response:
     """GET with retries: statuses (500 <= status <= 599 or status == 429), backoff x2.0."""
     delay = 1.0
     for attempt in range(MAX_RETRIES + 1):
@@ -90,7 +91,7 @@ def _request(session, url, params):
     raise RuntimeError("unreachable")
 
 
-def _records(payload):
+def _records(payload: Any) -> list[dict[str, Any]]:
     """Normalise a response payload to a list of dicts."""
     if isinstance(payload, list):
         records = payload
@@ -106,7 +107,7 @@ def _records(payload):
     return records
 
 
-def fetch_records(extra_params=None, path=None):
+def fetch_records(extra_params: dict[str, Any] | None = None, path: str | None = None) -> Iterator[dict[str, Any]]:
     """Yield records from the API (single page)."""
     url_path = path or PATH
     session = requests.Session()
@@ -128,7 +129,7 @@ from pyspark.sql import SparkSession  # noqa: E402
 
 spark = SparkSession.getActiveSession()
 
-SCHEMA = "id BIGINT, updated STRING"
+SCHEMA: str = "id BIGINT, updated STRING"
 
 
 from pyspark.sql.datasource import DataSource, DataSourceReader, InputPartition  # noqa: E402
@@ -136,31 +137,31 @@ from pyspark.sql.datasource import DataSource, DataSourceReader, InputPartition 
 
 class RestSource(DataSource):
     @classmethod
-    def name(cls):
+    def name(cls) -> str:
         return "posts_source"
 
-    def schema(self):
+    def schema(self) -> str:
         return SCHEMA
 
-    def reader(self, schema):
+    def reader(self, schema: Any) -> "_Reader":
         return _Reader(schema)
 
 
 class _Reader(DataSourceReader):
-    def __init__(self, schema):
-        self._columns = [field.name for field in schema.fields]
+    def __init__(self, schema: Any) -> None:
+        self._columns: list[str] = [field.name for field in schema.fields]
 
-    def partitions(self):
+    def partitions(self) -> list[InputPartition]:
         return [InputPartition(index) for index in range(len(WINDOWS))]
 
-    def read(self, partition):
+    def read(self, partition) -> Iterator[tuple]:
         records = fetch_records(**WINDOWS[partition.value])
         cursor = None
         for record in records:
             value = record.get("updated")
             if value is not None and (cursor is None or value > cursor):
                 cursor = value
-            yield tuple(_cell(record.get(column)) for column in self._columns)
+            yield tuple(record.get(column) for column in self._columns)
         # read() runs per partition on the executor that owns it, so each
         # partition writes its own max cursor independently; whichever
         # partition finishes last wins. Batch tables re-fetch fully each
@@ -169,15 +170,6 @@ class _Reader(DataSourceReader):
         # (e.g. a Databricks Volume, per the comment on it above) for this
         # to work at all.
         _write_state(cursor)
-
-
-def _cell(value):
-    """Nested structures become JSON strings; scalars pass through."""
-    if isinstance(value, (dict, list)):
-        import json
-
-        return json.dumps(value)
-    return value
 
 
 spark.dataSource.register(RestSource)

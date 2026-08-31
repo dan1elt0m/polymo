@@ -68,7 +68,7 @@ def test_endpoints_windows_incremental_schema_tracks_cursor_per_partition():
     assert_hygiene(script)
 
     dp_section = script.split("class RestSource(DataSource):", 1)[1]
-    assert "def partitions(self):" in dp_section
+    assert "def partitions(self) -> list[InputPartition]:" in dp_section
     assert "InputPartition(index) for index in range(len(WINDOWS))" in dp_section
     assert "fetch_records(**WINDOWS[partition.value])" in dp_section
     assert 'record.get("updated")' in dp_section

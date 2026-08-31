@@ -16,8 +16,11 @@ def test_missing_option_becomes_placeholder_variable():
     )
     core = generate_core(config)
     assert_hygiene(core)
-    assert 'OPT_API_KEY_B64 = "REPLACE_ME"' in core
-    assert 'HEADERS: dict = {"Authorization": f"Basic {OPT_API_KEY_B64}"}' in core
+    assert 'OPT_API_KEY_B64: str = "REPLACE_ME"' in core
+    assert (
+        'HEADERS: dict[str, str] = {"Authorization": f"Basic {OPT_API_KEY_B64}"}'
+        in core
+    )
 
 
 def test_missing_option_placeholder_present_in_dbutils_comment():
@@ -66,7 +69,9 @@ def test_option_present_still_inlines_directly_no_placeholder():
     )
     core = generate_core(config)
     assert_hygiene(core)
-    assert 'HEADERS: dict = {"Authorization": "Basic c3VwZXJzZWNyZXQ="}' in core
+    assert (
+        'HEADERS: dict[str, str] = {"Authorization": "Basic c3VwZXJzZWNyZXQ="}' in core
+    )
     assert "OPT_" not in core
     assert "{{" not in core
 
@@ -78,8 +83,8 @@ def test_missing_option_in_path_becomes_fstring_path():
     )
     core = generate_core(config)
     assert_hygiene(core)
-    assert 'OPT_ACCOUNT_ID = "REPLACE_ME"' in core
-    assert 'PATH = f"/accounts/{OPT_ACCOUNT_ID}/contacts"' in core
+    assert 'OPT_ACCOUNT_ID: str = "REPLACE_ME"' in core
+    assert 'PATH: str = f"/accounts/{OPT_ACCOUNT_ID}/contacts"' in core
 
 
 def test_missing_option_dict_key_style_reference():
@@ -89,7 +94,7 @@ def test_missing_option_dict_key_style_reference():
     )
     core = generate_core(config)
     assert_hygiene(core)
-    assert 'OPT_API_KEY_B64 = "REPLACE_ME"' in core
+    assert 'OPT_API_KEY_B64: str = "REPLACE_ME"' in core
 
 
 def test_multiple_missing_options_each_get_a_placeholder():
@@ -102,8 +107,8 @@ def test_multiple_missing_options_each_get_a_placeholder():
     )
     core = generate_core(config)
     assert_hygiene(core)
-    assert 'OPT_API_KEY_B64 = "REPLACE_ME"' in core
-    assert 'OPT_TENANT_ID = "REPLACE_ME"' in core
+    assert 'OPT_API_KEY_B64: str = "REPLACE_ME"' in core
+    assert 'OPT_TENANT_ID: str = "REPLACE_ME"' in core
 
 
 def test_no_placeholders_emitted_when_no_option_refs():
@@ -120,7 +125,7 @@ def test_brace_and_option_marker_mixed_renders_valid_fstring():
     )
     core = generate_core(config)
     assert_hygiene(core)
-    assert 'PARAMS: dict = {"q": f"{{literal}}-{OPT_SUFFIX}"}' in core
+    assert 'PARAMS: dict[str, Any] = {"q": f"{{literal}}-{OPT_SUFFIX}"}' in core
 
 
 def test_option_value_with_quotes_and_braces_escapes_safely_in_fstring(http_server):

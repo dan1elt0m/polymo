@@ -28,9 +28,9 @@ Standalone Lakeflow Declarative Pipelines source. polymo is NOT needed
 at runtime; edit this file freely.
 """
 
-BASE_URL = "https://jsonplaceholder.typicode.com"
-PATH = "/posts"
-PARAMS: dict = {"_limit": 20}
+BASE_URL: str = "https://jsonplaceholder.typicode.com"
+PATH: str = "/posts"
+PARAMS: dict[str, Any] = {"_limit": 20}
 
 # … fetch/retry helpers elided …
 

@@ -5,28 +5,29 @@ at runtime; edit this file freely.
 """
 
 import time
+from typing import Any, Iterator
 
 import requests
 
-BASE_URL = "https://api.example.com"
-PATH = "/posts"
-PARAMS: dict = {}
-HEADERS: dict = {}
-TIMEOUT = 30.0
+BASE_URL: str = "https://api.example.com"
+PATH: str = "/posts"
+PARAMS: dict[str, Any] = {}
+HEADERS: dict[str, str] = {}
+TIMEOUT: float = 30.0
 
 # Behind a corporate TLS-intercepting proxy? `pip install truststore`
 # and uncomment the next two lines:
 # import truststore
 # truststore.inject_into_ssl()
 
-MAX_RETRIES = 5
+MAX_RETRIES: int = 5
 
 
-def _should_retry(status):
+def _should_retry(status: int) -> bool:
     return 500 <= status <= 599 or status == 429
 
 
-def _request(session, url, params):
+def _request(session: requests.Session, url: str, params: dict[str, Any] | None) -> requests.Response:
     """GET with retries: statuses (500 <= status <= 599 or status == 429), backoff x2.0."""
     delay = 1.0
     for attempt in range(MAX_RETRIES + 1):
@@ -47,7 +48,7 @@ def _request(session, url, params):
     raise RuntimeError("unreachable")
 
 
-def _records(payload):
+def _records(payload: Any) -> list[dict[str, Any]]:
     """Normalise a response payload to a list of dicts."""
     if isinstance(payload, list):
         records = payload
@@ -65,7 +66,7 @@ def _records(payload):
 
 # Not used by the streaming reader below (which calls fetch_page directly);
 # kept for ad-hoc/batch runs and the builder preview.
-def fetch_records(extra_params=None, path=None):
+def fetch_records(extra_params: dict[str, Any] | None = None, path: str | None = None) -> Iterator[dict[str, Any]]:
     """Yield records, paginating with page."""
     url_path = path or PATH
     session = requests.Session()
@@ -85,7 +86,7 @@ def fetch_records(extra_params=None, path=None):
         page += 1
 
 
-def fetch_page(page_index):
+def fetch_page(page_index: int) -> list[dict[str, Any]]:
     """Fetch one page by index; returns a list of records."""
     session = requests.Session()
     session.headers.update(HEADERS)
@@ -100,28 +101,28 @@ from pyspark.sql import SparkSession  # noqa: E402
 
 spark = SparkSession.getActiveSession()
 
-SCHEMA = "id BIGINT"
+SCHEMA: str = "id BIGINT"
 
 
 from pyspark.sql.datasource import DataSource, SimpleDataSourceStreamReader  # noqa: E402
 
 # Assumes SCHEMA is a comma-separated "name TYPE" DDL string (as emitted
 # above); column names are taken as the first whitespace-separated token.
-COLUMNS = [f.split()[0] for f in SCHEMA.split(",")]
+COLUMNS: list[str] = [f.split()[0] for f in SCHEMA.split(",")]
 
 
 class _Reader(SimpleDataSourceStreamReader):
-    def initialOffset(self):
+    def initialOffset(self) -> dict[str, Any]:
         return {"page": 0}
 
-    def read(self, start):
+    def read(self, start: dict[str, Any]) -> tuple[Iterator[tuple], dict[str, Any]]:
         page = start["page"]
         records = fetch_page(page)
         rows = [tuple(r.get(c) for c in COLUMNS) for r in records]
         next_page = page + 1 if records else page
         return iter(rows), {"page": next_page}
 
-    def readBetweenOffsets(self, start, end):
+    def readBetweenOffsets(self, start: dict[str, Any], end: dict[str, Any]) -> Iterator[tuple]:
         rows = []
         for page in range(start["page"], end["page"]):
             for r in fetch_page(page):
@@ -131,13 +132,13 @@ class _Reader(SimpleDataSourceStreamReader):
 
 class RestStreamSource(DataSource):
     @classmethod
-    def name(cls):
+    def name(cls) -> str:
         return "posts_stream"
 
-    def schema(self):
+    def schema(self) -> str:
         return SCHEMA
 
-    def simpleStreamReader(self, schema):
+    def simpleStreamReader(self, schema: Any) -> "_Reader":
         return _Reader()
 
 

@@ -5,29 +5,30 @@ at runtime; edit this file freely.
 """
 
 import time
+from typing import Any, Iterator
 
 import requests
 import xml.etree.ElementTree as ET
 
-BASE_URL = "https://api.maileon.com/1.0"
-PATH = "/contacts"
-PARAMS: dict = {}
-HEADERS: dict = {"Authorization": "Basic REPLACE_ME_BASE64", "Accept": "application/vnd.maileon.api+xml"}
-TIMEOUT = 30.0
+BASE_URL: str = "https://api.maileon.com/1.0"
+PATH: str = "/contacts"
+PARAMS: dict[str, Any] = {}
+HEADERS: dict[str, str] = {"Authorization": "Basic REPLACE_ME_BASE64", "Accept": "application/vnd.maileon.api+xml"}
+TIMEOUT: float = 30.0
 
 # Behind a corporate TLS-intercepting proxy? `pip install truststore`
 # and uncomment the next two lines:
 # import truststore
 # truststore.inject_into_ssl()
 
-MAX_RETRIES = 5
+MAX_RETRIES: int = 5
 
 
-def _should_retry(status):
+def _should_retry(status: int) -> bool:
     return 500 <= status <= 599 or status == 429
 
 
-def _request(session, url, params):
+def _request(session: requests.Session, url: str, params: dict[str, Any] | None) -> requests.Response:
     """GET with retries: statuses (500 <= status <= 599 or status == 429), backoff x2.0."""
     delay = 1.0
     for attempt in range(MAX_RETRIES + 1):
@@ -48,10 +49,10 @@ def _request(session, url, params):
     raise RuntimeError("unreachable")
 
 
-XML_RECORD_PATH = ".//contact"
+XML_RECORD_PATH: str = ".//contact"
 
 
-def _records(root):
+def _records(root: ET.Element) -> list[dict[str, Any]]:
     """Flatten each matched XML element into a record dict."""
     records = []
     for element in root.findall(XML_RECORD_PATH):
@@ -62,7 +63,7 @@ def _records(root):
     return records
 
 
-def fetch_records(extra_params=None, path=None):
+def fetch_records(extra_params: dict[str, Any] | None = None, path: str | None = None) -> Iterator[dict[str, Any]]:
     """Yield records, paginating with page_index."""
     url_path = path or PATH
     session = requests.Session()
@@ -86,7 +87,7 @@ def fetch_records(extra_params=None, path=None):
         page += 1
 
 
-def _infer_schema():
+def _infer_schema() -> str:
     """Sample records to derive a DDL schema (explicit SCHEMA recommended)."""
     from itertools import islice
 
@@ -95,7 +96,7 @@ def _infer_schema():
         raise RuntimeError(
             "cannot infer a schema from an empty response; set an explicit schema"
         )
-    fields = {}
+    fields: dict[str, str] = {}
     for record in sample:
         for key, value in record.items():
             if value is None:
@@ -136,28 +137,36 @@ from pyspark.sql.datasource import DataSource, DataSourceReader  # noqa: E402
 
 class RestSource(DataSource):
     @classmethod
-    def name(cls):
+    def name(cls) -> str:
         return "contacts_source"
 
-    def schema(self):
+    def schema(self) -> str:
         return _infer_schema()
 
-    def reader(self, schema):
+    def reader(self, schema: Any) -> "_Reader":
         return _Reader(schema)
 
 
 class _Reader(DataSourceReader):
-    def __init__(self, schema):
-        self._columns = [field.name for field in schema.fields]
+    def __init__(self, schema: Any) -> None:
+        self._columns: list[str] = [field.name for field in schema.fields]
 
-    def read(self, partition):
+    def read(self, partition) -> Iterator[tuple]:
         records = fetch_records()
         for record in records:
             yield tuple(_cell(record.get(column)) for column in self._columns)
 
 
-def _cell(value):
-    """Nested structures become JSON strings; scalars pass through."""
+def _cell(value: Any) -> Any:
+    """Nested structures become JSON strings; scalars pass through.
+
+    Only used with an inferred schema — inference never produces a
+    STRUCT/ARRAY/MAP column, so a dict/list value here would otherwise
+    crash the read; JSON-encoding it into a STRING is the safe fallback.
+    An explicit schema skips this: a STRUCT/ARRAY/MAP column needs the
+    real structure, not a JSON string, so those values pass through as-is
+    (see the schema-mode branch above).
+    """
     if isinstance(value, (dict, list)):
         import json
 

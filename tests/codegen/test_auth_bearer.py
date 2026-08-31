@@ -10,7 +10,7 @@ def test_bearer_placeholder_and_comment_present():
         base_url="https://x", auth=AuthConfig(type="bearer", token="s3cret")
     )
     core = generate_core(config)
-    assert 'API_TOKEN = "REPLACE_ME"' in core
+    assert 'API_TOKEN: str = "REPLACE_ME"' in core
     assert "s3cret" not in core
     assert "dbutils.secrets.get" in core  # recommendation comment
 

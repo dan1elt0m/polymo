@@ -96,5 +96,8 @@ def test_streaming_reader_supports_checkpoint_recovery_replay():
     )
     script = generate(config)
     ast.parse(script)
-    assert "def readBetweenOffsets(self, start, end):" in script
+    assert (
+        "def readBetweenOffsets(self, start: dict[str, Any], end: dict[str, Any]) -> Iterator[tuple]:"
+        in script
+    )
     assert_hygiene(script)

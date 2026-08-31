@@ -70,7 +70,7 @@ def test_stream_name_with_quote_is_escaped_everywhere():
     assert_hygiene(script)
     # dp table names are sanitized to valid SQL identifiers, not escaped.
     assert '@dp.table(name="po_sts")' in script
-    assert 'STATE_PATH = "po\\"sts_state.json"' in script
+    assert 'STATE_PATH: str = "po\\"sts_state.json"' in script
 
 
 def test_stream_name_with_newline_does_not_break_out_of_comment():
