@@ -25,6 +25,13 @@ _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 _STDERR_TAIL_CHARS = 800
 _DEFAULT_TIMEOUT = 30.0
 
+# `bundle deploy`/`bundle run` output is human-readable CLI text (not `-o
+# json`), can be long, and the deploy/run flows themselves can legitimately
+# take minutes (pipeline updates, cluster startup) — hence the much longer
+# timeout and larger output cap than the read-only `run_cli` path above.
+_TEXT_TIMEOUT = 600.0
+_TEXT_OUTPUT_CHARS = 8000
+
 Runner = Callable[..., "subprocess.CompletedProcess[str]"]
 
 
@@ -52,8 +59,21 @@ def _stderr_tail(stderr: str) -> str:
     return cleaned
 
 
+def _combined_output_tail(result: "subprocess.CompletedProcess[str]") -> str:
+    """ANSI-stripped stdout+stderr, capped to the last `_TEXT_OUTPUT_CHARS`.
+
+    Used by `run_cli_text` for `bundle deploy`/`bundle run`, whose useful
+    progress output can land on either stream depending on CLI version.
+    """
+    parts = [part for part in (result.stdout, result.stderr) if part]
+    cleaned = _strip_ansi("\n".join(parts)).strip()
+    if len(cleaned) > _TEXT_OUTPUT_CHARS:
+        return cleaned[-_TEXT_OUTPUT_CHARS:]
+    return cleaned
+
+
 def _run_subprocess(
-    argv: Sequence[str], *, timeout: float
+    argv: Sequence[str], *, timeout: float, cwd: Optional[Path] = None
 ) -> "subprocess.CompletedProcess[str]":
     """Default runner: the real `databricks` CLI via subprocess.
 
@@ -62,7 +82,12 @@ def _run_subprocess(
     take effect for callers that don't pass their own `runner`.
     """
     return subprocess.run(
-        list(argv), capture_output=True, text=True, timeout=timeout, check=False
+        list(argv),
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+        cwd=cwd,
     )
 
 
@@ -122,6 +147,65 @@ def run_cli(
         raise DatabricksCliError(
             f"databricks CLI returned invalid JSON: {stdout[:200]!r}"
         ) from exc
+
+
+def run_cli_text(
+    args: List[str],
+    *,
+    profile: Optional[str] = None,
+    cwd: Optional[Path] = None,
+    timeout: float = _TEXT_TIMEOUT,
+    runner: Optional[Runner] = None,
+) -> str:
+    """Run `databricks <args...> [--profile <profile>]` in `cwd`, returning text.
+
+    Sibling to `run_cli` for commands whose output is human-readable CLI
+    text rather than JSON (`bundle deploy`, `bundle run`) — no `-o json`
+    flag is appended and stdout isn't parsed. The combined stdout+stderr is
+    ANSI-stripped and capped to the last `_TEXT_OUTPUT_CHARS` characters,
+    both on success and on failure.
+
+    Args:
+        args: CLI subcommand + positional/flag arguments, e.g.
+            ``["bundle", "deploy", "-t", "dev"]``.
+        profile: `~/.databrickscfg` profile name; omitted flag falls back to
+            the CLI's own default-profile resolution.
+        cwd: working directory for the subprocess (the bundle project root).
+        timeout: seconds before the subprocess is killed.
+        runner: injectable subprocess runner for tests; defaults to the
+            module-level `_run_subprocess` (looked up at call time).
+
+    Returns:
+        The combined, sanitized stdout+stderr text.
+
+    Raises:
+        FileNotFoundError: the `databricks` executable isn't on PATH.
+        DatabricksCliError: the CLI exited non-zero or timed out. `.stderr`
+            carries the sanitized output text (or, for a timeout, is empty
+            — the timeout message itself is the detail).
+    """
+    active_runner = runner or _run_subprocess
+
+    argv: List[str] = ["databricks", *args]
+    if profile:
+        argv += ["--profile", profile]
+
+    try:
+        result = active_runner(argv, timeout=timeout, cwd=cwd)
+    except subprocess.TimeoutExpired as exc:
+        raise DatabricksCliError(
+            f"databricks CLI timed out after {timeout:.0f}s"
+        ) from exc
+    # FileNotFoundError intentionally propagates uncaught: callers (the
+    # endpoint layer) translate it into a distinct "install the CLI" error.
+
+    output = _combined_output_tail(result)
+    if result.returncode != 0:
+        raise DatabricksCliError(
+            f"databricks CLI exited with status {result.returncode}",
+            stderr=output,
+        )
+    return output
 
 
 def list_profiles(path: Optional[Path] = None) -> List[str]:

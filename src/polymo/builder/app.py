@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from functools import partial
 from importlib import metadata, resources
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -13,7 +15,8 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
-from ..codegen import CodegenError, generate
+from ..codegen import CodegenError, generate, generate_bundle
+from ..codegen.generator import _identifier
 from ..config import ConfigError, RestSourceConfig, config_to_dict, parse_config
 from . import databricks
 from .preview import run_preview
@@ -79,6 +82,43 @@ class GenerateRequest(BaseModel):
 class GenerateResponse(BaseModel):
     script: str
     stream: str
+
+
+class BootstrapRequest(BaseModel):
+    config_dict: Dict[str, Any]
+    project_dir: str
+    project_name: str
+    catalog: str
+    schema_: str = Field(alias="schema")
+    overwrite: bool = False
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+
+class BootstrapResponse(BaseModel):
+    project_path: str
+    files: List[str]
+
+
+class DeployRequest(BaseModel):
+    project_path: str
+    profile: Optional[str] = None
+    target: str = "dev"
+
+    model_config = ConfigDict(extra="ignore")
+
+
+class RunRequest(BaseModel):
+    project_path: str
+    profile: Optional[str] = None
+    target: str = "dev"
+
+    model_config = ConfigDict(extra="ignore")
+
+
+class CommandResponse(BaseModel):
+    ok: bool
+    output: str
 
 
 def _polymo_version() -> str:
@@ -242,7 +282,170 @@ def create_app() -> FastAPI:
             )
         }
 
+    @app.post("/api/databricks/bootstrap", response_model=BootstrapResponse)
+    async def bootstrap_databricks_project(
+        payload: BootstrapRequest,
+    ) -> BootstrapResponse:
+        target = _resolve_bootstrap_path(payload.project_dir, payload.project_name)
+
+        try:
+            config = parse_config(payload.config_dict)
+            bundle_files = generate_bundle(
+                config,
+                project_name=payload.project_name,
+                catalog=payload.catalog,
+                schema=payload.schema_,
+            )
+        except (ConfigError, CodegenError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        if target.exists() and any(target.iterdir()) and not payload.overwrite:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"{target} already exists and is not empty; "
+                    "pass overwrite=true to replace its contents"
+                ),
+            )
+
+        written = await run_in_threadpool(_write_bundle_files, target, bundle_files)
+        return BootstrapResponse(project_path=str(target), files=written)
+
+    @app.post("/api/databricks/deploy", response_model=CommandResponse)
+    async def deploy_databricks_bundle(payload: DeployRequest) -> CommandResponse:
+        project_path = _require_bundle_project(payload.project_path)
+        return await run_in_threadpool(
+            _run_databricks_cli_text,
+            ["bundle", "deploy", "-t", payload.target],
+            payload.profile,
+            project_path,
+        )
+
+    @app.post("/api/databricks/run", response_model=CommandResponse)
+    async def run_databricks_pipeline(payload: RunRequest) -> CommandResponse:
+        project_path = _require_bundle_project(payload.project_path)
+        pipeline_key = _read_pipeline_key(project_path)
+        return await run_in_threadpool(
+            _run_databricks_cli_text,
+            ["bundle", "run", pipeline_key, "-t", payload.target],
+            payload.profile,
+            project_path,
+        )
+
     return app
+
+
+def _polymo_package_dir() -> Path:
+    """Resolved install directory of the `polymo` package.
+
+    Looked up as a plain module-level function (not a constant computed at
+    import time) so tests can monkeypatch it to exercise the bootstrap
+    path-safety check without depending on where `polymo` actually happens
+    to be installed in the test environment.
+    """
+    return Path(str(resources.files("polymo"))).resolve()
+
+
+def _resolve_bootstrap_path(project_dir: str, project_name: str) -> Path:
+    """Compute (and safety-check) the bootstrap target directory.
+
+    Target is `<project_dir>/<sanitized project_name>`, using the same
+    `_identifier()` sanitization `generate_bundle` applies to the package
+    name, so the directory name matches `src/<pkg>` inside it. Refuses to
+    resolve to the user's home directory, the filesystem root, or anywhere
+    inside the installed `polymo` package itself.
+    """
+    base_dir = Path(project_dir).expanduser().resolve()
+    target = base_dir / _identifier(project_name)
+
+    home = Path.home().resolve()
+    if target == home or target == Path(target.anchor):
+        raise HTTPException(
+            status_code=400,
+            detail=f"refusing to bootstrap a project into {target}",
+        )
+
+    package_dir = _polymo_package_dir()
+    if target == package_dir or package_dir in target.parents:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "refusing to bootstrap a project inside the polymo package "
+                f"directory ({package_dir})"
+            ),
+        )
+
+    return target
+
+
+def _write_bundle_files(target: Path, files: Dict[str, str]) -> List[str]:
+    """Write `generate_bundle`'s output under `target`, returning relpaths written."""
+    target.mkdir(parents=True, exist_ok=True)
+    written: List[str] = []
+    for relpath, content in files.items():
+        path = target / relpath
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+        written.append(relpath)
+    return sorted(written)
+
+
+def _require_bundle_project(project_path: str) -> Path:
+    """Resolve `project_path` and confirm it looks like a bootstrapped bundle.
+
+    Deploy/run both need `databricks.yml` (for `bundle deploy`/`bundle run`
+    to work at all) and `.polymo-bundle.json` (run needs its `pipeline_key`)
+    — checking both up front gives a clear 400 instead of a confusing CLI
+    failure or manifest-read error deeper in the flow.
+    """
+    path = Path(project_path).expanduser().resolve()
+    if (
+        not (path / "databricks.yml").is_file()
+        or not (path / ".polymo-bundle.json").is_file()
+    ):
+        raise HTTPException(
+            status_code=400, detail=f"{path} is not a polymo bundle project"
+        )
+    return path
+
+
+def _read_pipeline_key(project_path: Path) -> str:
+    manifest_path = project_path / ".polymo-bundle.json"
+    try:
+        manifest = json.loads(manifest_path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(
+            status_code=400, detail=f"could not read {manifest_path}: {exc}"
+        ) from exc
+
+    pipeline_key = manifest.get("pipeline_key") if isinstance(manifest, dict) else None
+    if not pipeline_key:
+        raise HTTPException(
+            status_code=400, detail=f"{manifest_path} is missing 'pipeline_key'"
+        )
+    return str(pipeline_key)
+
+
+def _run_databricks_cli_text(
+    args: List[str], profile: Optional[str], cwd: Path
+) -> CommandResponse:
+    """Run a `databricks` CLI text command (`bundle deploy`/`bundle run`).
+
+    - Missing CLI executable -> 501, matching `_run_databricks_cli`'s
+      "install the CLI" signal for the read endpoints.
+    - Non-zero exit / timeout -> NOT an HTTP error: the UI treats deploy/run
+      failures as a command result to display, so this returns
+      `CommandResponse(ok=False, output=<detail>)` with a 200 status.
+    """
+    try:
+        output = databricks.run_cli_text(args, profile=profile, cwd=cwd)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=501, detail=databricks.CLI_NOT_FOUND_DETAIL
+        ) from exc
+    except databricks.DatabricksCliError as exc:
+        return CommandResponse(ok=False, output=exc.stderr or str(exc))
+    return CommandResponse(ok=True, output=output)
 
 
 def _run_databricks_cli(args: List[str], profile: Optional[str]) -> Any:
