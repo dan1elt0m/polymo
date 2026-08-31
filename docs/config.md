@@ -126,9 +126,10 @@ Pick a strategy in the **Pagination & incremental settings** panel
   qualified "next" link instead of a bare cursor value.
 - `link_header` — follows `Link: <...>; rel="next"` response headers.
 
-Every strategy stops once the API returns an empty page; uncheck
-**Stop on empty response** (`stop_on_empty_response: false`) to disable
-that.
+Every strategy stops once the API returns an empty page. This is not
+configurable: the generated script's fetch loop always breaks on an empty
+page. `stop_on_empty_response` is accepted for config compatibility but has
+no effect on generated code.
 
 `total_pages_path` / `total_pages_header` (under **Partition-aware
 pagination hints**) let the generated script know when to stop without

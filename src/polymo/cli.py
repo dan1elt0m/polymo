@@ -26,15 +26,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
 
-    # Check Spark Version
-    import pyspark
-
-    if not pyspark.__version__.startswith("4."):
-        raise ImportError(
-            "pyspark>=4.0.0 is required: run pip install 'polymo[builder]'"
-        )
-
     if args.command == "builder":
+        if not _require_builder_deps():
+            return 1
+
         import uvicorn
 
         uvicorn.run(
@@ -48,6 +43,27 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser.print_help()
     return 1
+
+
+def _require_builder_deps() -> bool:
+    """Verify the ``builder`` extra (pyspark) is installed and compatible.
+
+    Returns True when the environment is ready to launch the builder.
+    On a missing pyspark install, prints a friendly hint and returns False
+    so the caller can exit cleanly instead of tracebacking.
+    """
+    try:
+        import pyspark
+    except ModuleNotFoundError:
+        print("The builder needs extras: pip install 'polymo[builder]'")
+        return False
+
+    if not pyspark.__version__.startswith("4."):
+        raise ImportError(
+            "pyspark>=4.0.0 is required: run pip install 'polymo[builder]'"
+        )
+
+    return True
 
 
 if __name__ == "__main__":  # pragma: no cover
