@@ -24,6 +24,7 @@ interface SamplePreviewProps {
 	rawPages: RawPagePayload[];
 	restError: string | null;
 	onCopySchema: () => void; // new
+	placeholderNotice?: string | null;
 }
 
 export const SamplePreview: React.FC<SamplePreviewProps> = ({
@@ -45,6 +46,7 @@ export const SamplePreview: React.FC<SamplePreviewProps> = ({
 	rawPages,
 	restError,
 	onCopySchema,
+	placeholderNotice,
 }) => {
 	const hasTableData = data.length > 0;
 	const hasRawData = rawPages.length > 0 || Boolean(restError);
@@ -103,6 +105,17 @@ export const SamplePreview: React.FC<SamplePreviewProps> = ({
 					</div>
 				</div>
 			</header>
+
+			{placeholderNotice && (
+				<div
+					className="flex items-start gap-2 rounded-md border border-blue-7/40 bg-blue-3/40 dark:bg-drac-accent/15 dark:border-drac-accent/40 px-3 py-2 text-xs text-blue-11 dark:text-drac-accent shadow-sm"
+					data-status="info"
+					data-testid="option-placeholder-notice"
+				>
+					<span className="mt-0.5 inline-block h-2 w-2 flex-shrink-0 rounded-full bg-blue-9 dark:bg-drac-accent" />
+					<p className="leading-snug">{placeholderNotice}</p>
+				</div>
+			)}
 
 			<div className="flex flex-col gap-3 min-w-0 w-full">
 				<div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-background px-3 py-2 min-w-0">

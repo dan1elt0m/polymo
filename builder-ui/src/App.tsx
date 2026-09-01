@@ -19,7 +19,7 @@ import {
 	activeConnectorIdAtom,
 	DEFAULT_SAMPLE_STATE,
 } from "./atoms";
-import { configToFormState, formStateToConfig } from "./lib/transform";
+import { configToFormState, formStateToConfig, validateFormState, findUnresolvedOptionPlaceholders } from "./lib/transform";
 import { validateConfigRequest, sampleRequest, generateScript } from "./lib/api";
 import { BuilderPanel } from "./components/BuilderPanel";
 import { CodePane } from "./components/CodePane";
@@ -436,6 +436,14 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 
 	const runValidation = React.useCallback(
 		async ({ applyResponse = true }: { applyResponse?: boolean } = {}) => {
+			// Gate on the same client-side validation the Deploy tab's Bootstrap
+			// button uses before hitting the backend. Without this, an invalid
+			// config (e.g. API Key auth with an empty header/query name) would
+			// silently drop its auth block and fire an unauthenticated request.
+			const formErrors = validateFormState(configFormState);
+			if (formErrors.length > 0) {
+				throw new Error(formErrors.join('; '));
+			}
 			setIsValidating(true);
 			try {
 				const shouldSendToken = configFormState.authType === 'bearer' || configFormState.authType === 'oauth2' || configFormState.authType === 'api_key';
@@ -455,7 +463,7 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 				setIsValidating(false);
 			}
 		},
-		[applyValidationPayload, configFormState.authType, configPayload, setIsValidating, bearerToken, runtimeOptions]
+		[applyValidationPayload, configFormState, configPayload, setIsValidating, bearerToken, runtimeOptions]
 	);
 
 	const handleValidate = React.useCallback(async () => {
@@ -680,6 +688,18 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 		}
 	}, [configFormState.schema, sample.dtypes, setStatus]);
 
+	// After a successful sample run, flag any OPT_<NAME> placeholders left
+	// unresolved in the generated script (unresolved {{ options.* }}
+	// references). Preview requests send the literal "REPLACE_ME" for these,
+	// which otherwise looks like real data with no explanation.
+	const placeholderNotice = React.useMemo(() => {
+		if (sample.loading) return null;
+		if (!sample.data.length && !sample.rawPages.length) return null;
+		const names = findUnresolvedOptionPlaceholders(generatedCode.script);
+		if (!names.length) return null;
+		return `This config references runtime options (${names.join(', ')}) that preview sends as "REPLACE_ME" — remove leftover {{ options.* }} params or fill them at deploy time.`;
+	}, [sample.loading, sample.data.length, sample.rawPages.length, generatedCode.script]);
+
 	return (
 		<div key={effectiveTheme} className="min-h-screen flex flex-col bg-background text-background-foreground dark:bg-slate-1 dark:text-slate-12 transition-colors theme-fade">
 			<header className="sticky top-0 z-20 border-b border-border bg-surface/95 backdrop-blur dark:bg-[#1d2026] dark:border-[#2c313a] transition-colors">
@@ -879,6 +899,7 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 												rawPages={sample.rawPages}
 												restError={sample.restError}
 												onCopySchema={handleCopySchema}
+												placeholderNotice={placeholderNotice}
 											/>
 						</section>
 					</>

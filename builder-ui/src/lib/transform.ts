@@ -686,6 +686,24 @@ export function validateFormState(formState: ConfigFormState): string[] {
 }
 
 /**
+ * Scan a generated core script for `OPT_<NAME>` placeholders that still carry
+ * the literal "REPLACE_ME" preview stand-in — i.e. an unresolved
+ * `{{ options.* }}` reference the builder hasn't filled in. Preview requests
+ * send that literal string as the value, which is easy to miss, so callers
+ * use this to surface a hint near the preview output.
+ */
+export function findUnresolvedOptionPlaceholders(script: string): string[] {
+  if (!script) return [];
+  const seen = new Set<string>();
+  const pattern = /(OPT_[A-Za-z0-9_]+)\s*:[^=\n]*=\s*"REPLACE_ME"/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(script)) !== null) {
+    seen.add(match[1]);
+  }
+  return Array.from(seen);
+}
+
+/**
  * Check if a string is a valid URL
  */
 function isValidUrl(str: string): boolean {
