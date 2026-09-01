@@ -573,3 +573,125 @@ def test_generate_returns_200_for_api_key_query_config() -> None:
     assert response.status_code == 200
     assert 'API_KEY: str = "REPLACE_ME"' in payload["script"]
     assert 'params["api_key"] = API_KEY' in payload["script"]
+
+
+def _dtype(payload: dict, column: str) -> str:
+    for entry in payload["dtypes"]:
+        if entry["column"] == column:
+            return entry["type"]
+    raise AssertionError(f"no dtype entry for column {column!r} in {payload['dtypes']}")
+
+
+def test_sample_endpoint_all_none_column_defaults_to_string(http_server) -> None:
+    """Regression pin: with no explicit schema, a column that is `None` in
+    every sampled record (typical for XML APIs — an always-empty element
+    decodes to `None`, e.g. Maileon) used to make `/api/sample` blow up with
+    PySpark's `[CANNOT_DETERMINE_TYPE]` once it tried to build a dtypes
+    DataFrame via unqualified `spark.createDataFrame(records)`. It must now
+    infer a schema from the records itself and default the all-`None`
+    column to STRING instead of crashing."""
+
+    http_server.routes["/posts"] = lambda q, h, b: (
+        200,
+        [{"id": 1, "empty_field": None}, {"id": 2, "empty_field": None}],
+        {},
+    )
+    app = create_app()
+    client = TestClient(app)
+
+    config_dict = {
+        "version": "0.1",
+        "source": {"type": "rest", "base_url": http_server.url},
+        "stream": {"name": "posts", "path": "/posts"},
+    }
+
+    response = client.post("/api/sample", json={"config_dict": config_dict, "limit": 5})
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert _dtype(payload, "empty_field") == "string"
+
+
+def test_sample_endpoint_mixed_int_float_column_becomes_double(http_server) -> None:
+    """With no explicit schema, a column that is an int in one sampled
+    record and a float in another must merge to DOUBLE, matching the
+    generated script's `_infer_schema` merge rule."""
+
+    http_server.routes["/posts"] = lambda q, h, b: (
+        200,
+        [{"id": 1, "value": 1}, {"id": 2, "value": 2.5}],
+        {},
+    )
+    app = create_app()
+    client = TestClient(app)
+
+    config_dict = {
+        "version": "0.1",
+        "source": {"type": "rest", "base_url": http_server.url},
+        "stream": {"name": "posts", "path": "/posts"},
+    }
+
+    response = client.post("/api/sample", json={"config_dict": config_dict, "limit": 5})
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert _dtype(payload, "value") == "double"
+
+
+def test_sample_endpoint_bool_column_becomes_boolean_not_bigint(http_server) -> None:
+    """`bool` is a subclass of `int` in Python, so the type-inference voting
+    must check `isinstance(value, bool)` before `isinstance(value, int)` —
+    otherwise a boolean column would be misinferred as BIGINT."""
+
+    http_server.routes["/posts"] = lambda q, h, b: (
+        200,
+        [{"id": 1, "flag": True}, {"id": 2, "flag": False}],
+        {},
+    )
+    app = create_app()
+    client = TestClient(app)
+
+    config_dict = {
+        "version": "0.1",
+        "source": {"type": "rest", "base_url": http_server.url},
+        "stream": {"name": "posts", "path": "/posts"},
+    }
+
+    response = client.post("/api/sample", json={"config_dict": config_dict, "limit": 5})
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert _dtype(payload, "flag") == "boolean"
+
+
+def test_sample_endpoint_nested_value_with_inferred_schema_becomes_json_string(
+    http_server,
+) -> None:
+    """With no explicit schema, a nested dict/list value (typical for JSON
+    APIs) must be JSON-encoded before Spark sees it — an inferred STRING
+    column can't hold a raw dict, and it would otherwise crash the dtypes
+    DataFrame build. Mirrors the generated batch reader's `_cell` helper."""
+
+    http_server.routes["/posts"] = lambda q, h, b: (
+        200,
+        [{"id": 1, "meta": {"a": 1}}],
+        {},
+    )
+    app = create_app()
+    client = TestClient(app)
+
+    config_dict = {
+        "version": "0.1",
+        "source": {"type": "rest", "base_url": http_server.url},
+        "stream": {"name": "posts", "path": "/posts"},
+    }
+
+    response = client.post("/api/sample", json={"config_dict": config_dict, "limit": 5})
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert _dtype(payload, "meta") == "string"
+    # The raw `records` returned to the UI are untouched (still a real
+    # nested dict, not the JSON-encoded string used only for the dtypes
+    # DataFrame).
+    assert payload["records"][0]["meta"] == {"a": 1}

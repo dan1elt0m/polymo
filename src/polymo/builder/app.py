@@ -20,7 +20,7 @@ from ..codegen import CodegenError, generate, generate_bundle
 from ..codegen.generator import _identifier
 from ..config import ConfigError, RestSourceConfig, config_to_dict, parse_config
 from . import databricks
-from .preview import run_preview
+from .preview import _infer_field_types, infer_ddl_from_records, run_preview
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from pyspark.sql import SparkSession
@@ -634,7 +634,50 @@ def _get_preview_df(
     """
     if schema_ddl:
         return spark.createDataFrame(records, schema=schema_ddl)
-    return spark.createDataFrame(records)
+
+    # No explicit schema: don't hand `records` to Spark's own type
+    # inference. It can't cope with a column that is `None` in every
+    # sampled record (`[CANNOT_DETERMINE_TYPE]`) — common for XML APIs,
+    # where an always-empty element decodes to `None`. Instead derive a DDL
+    # ourselves with the same voting rules the generated script's
+    # `_infer_schema` uses (see `infer_ddl_from_records`), which always
+    # produces a type for every column seen (defaulting to STRING).
+    #
+    # A DDL-typed `createDataFrame` also requires every value to match its
+    # declared column type, so a dict/list value under an inferred STRING
+    # column would crash Spark's row conversion. Mirror the generated batch
+    # reader's `_cell` helper (`codegen/templates/dp.py.jinja`) and
+    # JSON-encode nested values first — only in this inferred-schema path;
+    # `records` itself (returned to the API response) is left untouched.
+    field_types = _infer_field_types(records)
+    if not field_types:
+        # Records exist but carry no fields at all (e.g. all `{}`) — no
+        # columns to declare a DDL for; fall back to letting Spark infer.
+        return spark.createDataFrame(records)
+
+    # Unlike Spark's own type inference, `createDataFrame(data, schema=...)`
+    # verifies each value strictly against its declared column type instead
+    # of upcasting — a plain Python `int` under a merged DOUBLE column (int
+    # in one sampled record, float in another) raises
+    # `[FIELD_DATA_TYPE_UNACCEPTABLE_WITH_NAME]` unless it's coerced to
+    # `float` first.
+    double_columns = {name for name, type_ in field_types.items() if type_ == "DOUBLE"}
+    safe_records = [
+        {
+            key: (
+                json.dumps(value)
+                if isinstance(value, (dict, list))
+                else float(value)
+                if key in double_columns
+                and isinstance(value, int)
+                and not isinstance(value, bool)
+                else value
+            )
+            for key, value in record.items()
+        }
+        for record in records
+    ]
+    return spark.createDataFrame(safe_records, schema=infer_ddl_from_records(records))
 
 
 def _get_or_create_spark() -> Any:

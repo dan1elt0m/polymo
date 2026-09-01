@@ -116,3 +116,61 @@ def run_preview(
         error = str(exc)
 
     return records, raw_pages, error
+
+
+def _infer_field_types(records: List[Dict[str, Any]]) -> Dict[str, str]:
+    """Vote a Spark type per column across `records`; the shared core of
+    `infer_ddl_from_records` (also used by `_get_preview_df` in `app.py` to
+    know which columns need numeric coercion before `createDataFrame`).
+
+    Mirrors `_infer_schema` in `codegen/templates/core.py.jinja` — keep the
+    two in sync. That template function is baked into every *generated*
+    script (so it can re-sample the live API at run time), while this one
+    runs against the preview records the builder UI already fetched.
+
+    One deliberate difference from the template: a column whose value is
+    `None` in every sampled record casts no type vote there, so the
+    template's `_infer_schema` just omits it from the DDL entirely (dropping
+    the column). That's fine for a generated script, which raises loudly if
+    sampling ever comes up completely empty. For the builder preview it
+    means the column silently vanishes from `dtypes` instead of showing up
+    as unknown/empty — worse, unqualified `spark.createDataFrame(records)`
+    (no schema at all) actually *crashes* with `[CANNOT_DETERMINE_TYPE]` in
+    this situation, which is the bug this function exists to fix (typical
+    for XML APIs, where an always-empty element decodes to `None` on every
+    record). So here, a no-vote column defaults to STRING instead of being
+    dropped.
+    """
+    columns: Dict[str, Optional[str]] = {}
+    for record in records:
+        for key, value in record.items():
+            columns.setdefault(key, None)
+            if value is None:
+                continue
+            if isinstance(value, bool):
+                candidate = "BOOLEAN"
+            elif isinstance(value, int):
+                candidate = "BIGINT"
+            elif isinstance(value, float):
+                candidate = "DOUBLE"
+            else:
+                candidate = "STRING"
+            current = columns[key]
+            if current is None:
+                columns[key] = candidate
+            elif current == candidate:
+                pass
+            elif {current, candidate} == {"BIGINT", "DOUBLE"}:
+                columns[key] = "DOUBLE"
+            else:
+                columns[key] = "STRING"
+    return {name: type_ or "STRING" for name, type_ in columns.items()}
+
+
+def infer_ddl_from_records(records: List[Dict[str, Any]]) -> str:
+    """Infer a Spark DDL schema string from already-collected preview records.
+
+    See `_infer_field_types` for the voting rules this applies.
+    """
+    fields = _infer_field_types(records)
+    return ", ".join(f"`{name}` {type_}" for name, type_ in fields.items())
