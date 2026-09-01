@@ -14,6 +14,11 @@ import { validateFormState } from "../lib/transform";
 import { InfoTooltip } from "./InfoTooltip";
 
 const DEFAULT_PROJECT_DIR = "~/polymo-projects";
+// Sentinel <option> value that swaps the schema field from a select (list of
+// existing schemas) to a free-text input — pipelines can create a schema
+// that doesn't exist yet, so the user needs a way to name one, unlike
+// catalog, which must already exist.
+const CUSTOM_SCHEMA_VALUE = "__custom__";
 
 function describeError(error: unknown): string {
 	if (error instanceof ApiError && error.status === 501) {
@@ -49,6 +54,7 @@ export const DeployPanel: React.FC = () => {
 	const [schemasLoading, setSchemasLoading] = React.useState(false);
 	const [schemasError, setSchemasError] = React.useState<string | null>(null);
 	const [schema, setSchema] = React.useState("");
+	const [schemaMode, setSchemaMode] = React.useState<"select" | "custom">("select");
 
 	const defaultProjectName = (configFormState.streamName?.trim() || streamOptions[0] || "").trim();
 	const [projectName, setProjectName] = React.useState(defaultProjectName);
@@ -130,6 +136,7 @@ export const DeployPanel: React.FC = () => {
 		setSchema("");
 		setSchemas([]);
 		setSchemasError(null);
+		setSchemaMode("select");
 		if (!profile) return;
 		let cancelled = false;
 		setCatalogsLoading(true);
@@ -152,6 +159,7 @@ export const DeployPanel: React.FC = () => {
 		setSchema("");
 		setSchemas([]);
 		setSchemasError(null);
+		setSchemaMode("select");
 		if (!profile || !catalog) return;
 		let cancelled = false;
 		setSchemasLoading(true);
@@ -308,21 +316,58 @@ export const DeployPanel: React.FC = () => {
 				<label className="flex flex-col gap-2">
 					<div className="flex items-center gap-1">
 						<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Schema</span>
-						<InfoTooltip text="Unity Catalog schema (within the selected catalog) the bundled pipeline writes to." />
+						<InfoTooltip text="Unity Catalog schema (within the selected catalog) the bundled pipeline writes to. Pipelines can create a schema that doesn't exist yet — pick 'Custom schema…' to name a new one." />
 					</div>
-					<select
-						className={SELECT_CLASS}
-						value={schema}
-						disabled={!catalog || schemasLoading}
-						onChange={(event) => setSchema(event.target.value)}
-					>
-						<option value="">{schemasLoading ? "Loading…" : "Select schema"}</option>
-						{schemas.map((name) => (
-							<option key={name} value={name}>
-								{name}
-							</option>
-						))}
-					</select>
+					{schemaMode === "custom" ? (
+						<div className="flex items-center gap-2">
+							<input
+								type="text"
+								className={`${INPUT_CLASS} flex-1`}
+								placeholder="new-schema-name"
+								value={schema}
+								autoFocus
+								disabled={!catalog}
+								onChange={(event) => setSchema(event.target.value)}
+							/>
+							<button
+								type="button"
+								className="whitespace-nowrap text-xs text-muted underline dark:text-drac-muted"
+								onClick={() => {
+									setSchemaMode("select");
+									setSchema("");
+								}}
+							>
+								Back to list
+							</button>
+						</div>
+					) : (
+						<select
+							className={SELECT_CLASS}
+							value={schema}
+							disabled={!catalog || schemasLoading}
+							onChange={(event) => {
+								if (event.target.value === CUSTOM_SCHEMA_VALUE) {
+									setSchemaMode("custom");
+									setSchema("");
+								} else {
+									setSchema(event.target.value);
+								}
+							}}
+						>
+							<option value="">{schemasLoading ? "Loading…" : "Select schema"}</option>
+							{schemas.map((name) => (
+								<option key={name} value={name}>
+									{name}
+								</option>
+							))}
+							<option value={CUSTOM_SCHEMA_VALUE}>Custom schema… (create new)</option>
+						</select>
+					)}
+					{schemaMode === "custom" && (
+						<span className="text-xs text-muted dark:text-drac-muted">
+							This schema will be created on deploy if it doesn't already exist.
+						</span>
+					)}
 					{schemasError && <span className="text-xs text-error">{schemasError}</span>}
 				</label>
 

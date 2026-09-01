@@ -85,6 +85,8 @@ Deploying needs the [Databricks CLI](https://docs.databricks.com/dev-tools/cli/)
 
 Each dropdown resets and reloads whenever the one before it changes, since a catalog/schema list only makes sense for its parent profile/catalog. An empty profile list means no `~/.databrickscfg` profile was found — a **retry** link is offered.
 
+Unlike catalog, the schema doesn't have to exist yet — a pipeline can create its target schema on deploy. Picking **Custom schema… (create new)** at the bottom of the Schema dropdown swaps it for a text field where you type the new schema's name; **Back to list** returns to picking an existing one.
+
 ### Project bootstrap
 
 Fill in a **Project name** (defaults to the connector's table name) and a **Project directory** (defaults to `~/polymo-projects`), then click **Bootstrap**. This writes a full bundle project to `<project directory>/<project name>`:
