@@ -11,8 +11,9 @@ resources:
       schema: {{ schema_repr }}
       serverless: true
       # `root_path` is added to `sys.path` when Databricks runs this
-      # pipeline's Python sources, which is what makes `from {{ bundle_pkg }}.client
-      # import ...` in pipelines/{{ stream }}.py resolve.
+      # pipeline's Python sources, which is what makes the `from {{ bundle_pkg }}
+      # import client, source` in pipelines/{{ stream }}.py resolve — on the
+      # driver only, hence the by-value pickle registration in that file.
       root_path: src
       libraries:
         - glob:

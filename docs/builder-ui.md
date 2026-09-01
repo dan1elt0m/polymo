@@ -99,9 +99,11 @@ Fill in a **Project name** (defaults to the connector's table name) and a **Proj
   src/<pkg>/__init__.py
   src/<pkg>/client.py        # the fetch/pagination/schema code — byte-identical to
                              # the first half of the Generated Code pane's script
-  pipelines/<stream>.py      # the rest of that script (the RestSource data source
-                             # and @dp.table wiring), rewritten to import from
-                             # <pkg>.client instead of sharing one module with it
+  src/<pkg>/source.py        # the <PascalCase(pkg)>Source data source and reader
+                             # (e.g. maileon_contacts -> MaileonContactsSource),
+                             # built on <pkg>.client via a relative import
+  pipelines/<stream>.py      # thin: registers <pkg>.client and <pkg>.source for
+                             # by-value pickling, then the @dp.table wiring
   README.md                  # what this project is, how to deploy/run it, where the
                               # table lands
   .polymo-bundle.json         # small manifest the Run button reads back (pipeline
@@ -110,9 +112,11 @@ Fill in a **Project name** (defaults to the connector's table name) and a **Proj
 
 `src/<pkg>/client.py` is never a re-derived or hand-simplified copy of the exported script — it *is* the same `generate_core()` output, so the bundle project can never drift from what the Generated Code pane and the Preview panel show you.
 
-`pipelines/<stream>.py` also calls `cloudpickle.register_pickle_by_value()` on the imported `<pkg>.client` module right after importing from it: `databricks.yml`'s `root_path` only extends the *driver's* `sys.path`, so without this, an executor unpickling the data source would fail with `ModuleNotFoundError: No module named '<pkg>'`; registering the module ships its code inside the pickle payload instead, so executors never need to import it.
+The DataSource class in `src/<pkg>/source.py` is named after the connector, not a generic `RestSource` — this is what shows up in Spark UI/logs and makes multiple bundled connectors easy to tell apart.
 
-**Overwrite semantics are file-scoped, not directory-scoped.** Bootstrapping into a non-empty directory is refused by default; checking **Overwrite bundle files in existing folder** lets it proceed, but it only overwrites the six bundle files listed above — anything else you've added to that project directory (a `.git` folder, notes, other pipelines, local CLI state) is left untouched.
+`pipelines/<stream>.py` calls `cloudpickle.register_pickle_by_value()` on both the imported `<pkg>.client` and `<pkg>.source` modules right after importing them: `databricks.yml`'s `root_path` only extends the *driver's* `sys.path`, so without this, an executor unpickling the data source would fail with `ModuleNotFoundError: No module named '<pkg>'`. `source` imports from `client` internally, and by-value serialization follows that import — but `source` still needs registering in its own right (it holds the DataSource/reader classes Spark actually pickles), so both modules are registered.
+
+**Overwrite semantics are file-scoped, not directory-scoped.** Bootstrapping into a non-empty directory is refused by default; checking **Overwrite bundle files in existing folder** lets it proceed, but it only overwrites the bundle files listed above — anything else you've added to that project directory (a `.git` folder, notes, other pipelines, local CLI state) is left untouched.
 
 ### Deploy and Run
 

@@ -527,6 +527,7 @@ def test_bootstrap_writes_expected_files(tmp_path):
         "databricks.yml",
         "src/demo/__init__.py",
         "src/demo/client.py",
+        "src/demo/source.py",
         "pipelines/posts.py",
         "README.md",
         ".polymo-bundle.json",

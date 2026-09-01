@@ -1,13 +1,17 @@
-from pyspark import pipelines as dp  # noqa: E402
-from pyspark.sql import SparkSession  # noqa: E402
+"""{{ stream_name_doc }} — Spark DataSource (Databricks Asset Bundle).
 
-spark = SparkSession.getActiveSession()
+Built on the fetch/schema helpers in `{{ bundle_pkg }}.client`; edit this
+file freely — it is not read by polymo again.
+"""
+
+from typing import Any, Iterator
+
+from .client import {{ bundle_imports | join(", ") }}
 
 {% if schema_ddl %}
 SCHEMA: str = {{ schema_ddl | tojson }}
 
 {% endif %}
-
 {% if streaming %}
 from pyspark.sql.datasource import DataSource, SimpleDataSourceStreamReader  # noqa: E402
 
@@ -39,7 +43,7 @@ class _Reader(SimpleDataSourceStreamReader):
         return iter(rows)
 
 
-class RestStreamSource(DataSource):
+class {{ source_class_name }}(DataSource):
     @classmethod
     def name(cls) -> str:
         return "{{ func_name }}_stream"
@@ -49,14 +53,6 @@ class RestStreamSource(DataSource):
 
     def simpleStreamReader(self, schema: Any) -> "_Reader":
         return _Reader(schema)
-
-
-spark.dataSource.register(RestStreamSource)
-
-
-@dp.table(name={{ table_name_repr }})
-def {{ func_name }}():
-    return spark.readStream.format("{{ func_name }}_stream").load()
 {% else %}
 {% if has_windows %}
 from pyspark.sql.datasource import DataSource, DataSourceReader, InputPartition  # noqa: E402
@@ -65,7 +61,7 @@ from pyspark.sql.datasource import DataSource, DataSourceReader  # noqa: E402
 {% endif %}
 
 
-class RestSource(DataSource):
+class {{ source_class_name }}(DataSource):
     @classmethod
     def name(cls) -> str:
         return "{{ func_name }}_source"
@@ -134,16 +130,5 @@ def _cell(value: Any) -> Any:
 
         return json.dumps(value)
     return value
-
-
 {% endif %}
-spark.dataSource.register(RestSource)
-
-
-{% if partition_strategy == "pagination" %}
-# partition strategy "pagination" runs sequentially in generated scripts
-{% endif %}
-@dp.table(name={{ table_name_repr }})
-def {{ func_name }}():
-    return spark.read.format("{{ func_name }}_source").load()
 {% endif %}

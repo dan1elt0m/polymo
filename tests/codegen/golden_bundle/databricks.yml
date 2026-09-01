@@ -11,8 +11,9 @@ resources:
       schema: "raw"
       serverless: true
       # `root_path` is added to `sys.path` when Databricks runs this
-      # pipeline's Python sources, which is what makes `from jsonplaceholder_demo.client
-      # import ...` in pipelines/posts.py resolve.
+      # pipeline's Python sources, which is what makes the `from jsonplaceholder_demo
+      # import client, source` in pipelines/posts.py resolve — on the
+      # driver only, hence the by-value pickle registration in that file.
       root_path: src
       libraries:
         - glob:

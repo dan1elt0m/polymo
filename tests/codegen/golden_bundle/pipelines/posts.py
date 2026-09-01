@@ -1,71 +1,30 @@
 """posts — Lakeflow Declarative Pipeline source (Databricks Asset Bundle).
 
-Imports the generated fetch/schema helpers from `jsonplaceholder_demo.client`;
-edit this file freely — it is not read by polymo again.
+Registers the `JsonplaceholderDemoSource` data source from `jsonplaceholder_demo.source`
+(built on `jsonplaceholder_demo.client`) and wires it to a `@dp.table`; edit this
+file freely — it is not read by polymo again.
 """
-
-from typing import Any, Iterator
 
 from pyspark import pipelines as dp  # noqa: E402
 from pyspark.sql import SparkSession  # noqa: E402
-from jsonplaceholder_demo.client import fetch_records, _infer_schema  # noqa: E402
 from jsonplaceholder_demo import client as _client_module  # noqa: E402
+from jsonplaceholder_demo import source as _source_module  # noqa: E402
 from pyspark import cloudpickle  # noqa: E402
 
-# Spark pickles the DataSource/reader below BY REFERENCE (they are not
-# defined in __main__), so executors would otherwise need `jsonplaceholder_demo`
-# importable on their own sys.path — but databricks.yml's root_path only
-# extends the driver's. Registering the client module for by-value pickling
-# ships its code inside the pickle payload instead, so executors never need
-# to import it.
+# Spark pickles the DataSource/reader below BY REFERENCE (they live in
+# `jsonplaceholder_demo.source`, not `__main__`), so executors would otherwise
+# need `jsonplaceholder_demo` importable on their own sys.path — but
+# databricks.yml's root_path only extends the driver's. Registering both
+# modules for by-value pickling ships their code inside the pickle payload
+# instead, so executors never need to import either of them. `source`
+# imports from `client` internally, and by-value serialization follows
+# that import, so `client` needs registering too even though this file
+# never calls it directly.
 cloudpickle.register_pickle_by_value(_client_module)
+cloudpickle.register_pickle_by_value(_source_module)
 
 spark = SparkSession.getActiveSession()
-
-
-from pyspark.sql.datasource import DataSource, DataSourceReader  # noqa: E402
-
-
-class RestSource(DataSource):
-    @classmethod
-    def name(cls) -> str:
-        return "posts_source"
-
-    def schema(self) -> str:
-        return _infer_schema()
-
-    def reader(self, schema: Any) -> "_Reader":
-        return _Reader(schema)
-
-
-class _Reader(DataSourceReader):
-    def __init__(self, schema: Any) -> None:
-        self._columns: list[str] = [field.name for field in schema.fields]
-
-    def read(self, partition) -> Iterator[tuple]:
-        records = fetch_records()
-        for record in records:
-            yield tuple(_cell(record.get(column)) for column in self._columns)
-
-
-def _cell(value: Any) -> Any:
-    """Nested structures become JSON strings; scalars pass through.
-
-    Only used with an inferred schema — inference never produces a
-    STRUCT/ARRAY/MAP column, so a dict/list value here would otherwise
-    crash the read; JSON-encoding it into a STRING is the safe fallback.
-    An explicit schema skips this: a STRUCT/ARRAY/MAP column needs the
-    real structure, not a JSON string, so those values pass through as-is
-    (see the schema-mode branch above).
-    """
-    if isinstance(value, (dict, list)):
-        import json
-
-        return json.dumps(value)
-    return value
-
-
-spark.dataSource.register(RestSource)
+spark.dataSource.register(_source_module.JsonplaceholderDemoSource)
 
 
 @dp.table(name="posts")

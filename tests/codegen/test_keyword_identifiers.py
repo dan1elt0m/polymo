@@ -41,15 +41,22 @@ def test_generate_bundle_survives_keyword_project_name(name):
 
     pkg = f"{name}_"
     assert f"src/{pkg}/client.py" in files
+    assert f"src/{pkg}/source.py" in files
 
     client = files[f"src/{pkg}/client.py"]
     ast.parse(client)
     assert_hygiene(client)
 
+    source = files[f"src/{pkg}/source.py"]
+    ast.parse(source)
+    assert_hygiene(source)
+    assert "from .client import" in source
+
     pipeline = files["pipelines/posts.py"]
     ast.parse(pipeline)
     assert_hygiene(pipeline)
-    assert f"from {pkg}.client import" in pipeline
+    assert f"from {pkg} import client" in pipeline
+    assert f"from {pkg} import source" in pipeline
 
 
 @pytest.mark.parametrize("name", KEYWORD_NAMES)
