@@ -3,6 +3,19 @@
 bundle:
   name: {{ bundle_name_repr }}
 
+# `databricks bundle deploy` builds this wheel (via `uv build --wheel`,
+# requires `uv` on the deploy machine — see pyproject.toml) and uploads it
+# to the workspace; the pipeline's `environment.dependencies` below then
+# installs it, so `src/{{ bundle_pkg }}` is importable on the driver AND every
+# executor. Requires `serverless: true` on the pipeline resource — a
+# classic-cluster pipeline would need the wheel added as a cluster library
+# instead.
+artifacts:
+  default:
+    type: whl
+    build: uv build --wheel
+    path: .
+
 resources:
   pipelines:
     {{ pipeline_key }}:
@@ -11,13 +24,18 @@ resources:
       schema: {{ schema_repr }}
       serverless: true
       # `root_path` is added to `sys.path` when Databricks runs this
-      # pipeline's Python sources, which is what makes the `from {{ bundle_pkg }}
-      # import client, source` in pipelines/{{ stream }}.py resolve — on the
-      # driver only, hence the by-value pickle registration in that file.
+      # pipeline's Python sources, which is what makes the `pipelines/{{ stream }}.py`
+      # glob below resolve; `src/{{ bundle_pkg }}` itself is NOT under root_path — it
+      # reaches the driver and every executor via the built wheel instead
+      # (see `environment.dependencies` below), so `from {{ bundle_pkg }} import
+      # client, source` in that file just works everywhere.
       root_path: src
       libraries:
         - glob:
             include: pipelines/{{ stream }}.py
+      environment:
+        dependencies:
+          - ${workspace.root_path}/artifacts/.internal/*.whl
 
 targets:
   dev:

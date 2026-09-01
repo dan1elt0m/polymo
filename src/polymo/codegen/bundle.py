@@ -1,14 +1,18 @@
 """Render a Databricks Asset Bundle project from a REST source config.
 
 The project layout mirrors `databricks bundle init default-python`: a
-`databricks.yml` with one Lakeflow Declarative Pipeline resource, the
-generated fetch/schema code under `src/<pkg>/client.py`, the connector's
+`databricks.yml` with one Lakeflow Declarative Pipeline resource declaring a
+`whl` artifact (built via `uv build --wheel` at deploy time), a root
+`pyproject.toml` that packages `src/<pkg>` as that wheel, the generated
+fetch/schema code under `src/<pkg>/client.py`, the connector's
 `DataSource`/reader under `src/<pkg>/source.py`, and a thin pipeline source
-under `pipelines/` that registers both and wires the `@dp.table`. Zero
-polymo imports appear anywhere in the output — `src/<pkg>/client.py` is
-exactly `generate_core(config)`, the same code the builder's
-preview/export use, so a bundle project can never drift from what those
-show.
+under `pipelines/` that imports both and wires the `@dp.table`. Zero polymo
+imports appear anywhere in the output — `src/<pkg>/client.py` is exactly
+`generate_core(config)`, the same code the builder's preview/export use, so
+a bundle project can never drift from what those show. The pipeline
+resource's `environment.dependencies` installs the built wheel, so
+`src/<pkg>` is importable on the driver AND every executor without any
+pickle-by-value trick.
 """
 
 from __future__ import annotations
@@ -91,10 +95,11 @@ def generate_bundle(
     Returns a mapping of project-relative path to file content:
 
         databricks.yml
+        pyproject.toml            # packages src/<pkg> as a wheel (uv_build)
         src/<pkg>/__init__.py
         src/<pkg>/client.py       # == generate_core(config), byte-for-byte
         src/<pkg>/source.py       # the <PascalCase(pkg)>Source DataSource + reader
-        pipelines/<stream>.py     # registers both by value, wires the @dp.table
+        pipelines/<stream>.py     # imports both, wires the @dp.table
         README.md
         .polymo-bundle.json       # read back by the "Run on Databricks" flow
     """
@@ -127,6 +132,8 @@ def generate_bundle(
         stream=stream,
     )
 
+    pyproject_toml = _ENV.get_template("bundle/pyproject.toml.jinja").render(pkg=pkg)
+
     readme = _ENV.get_template("bundle/readme.md.jinja").render(
         project_name=project_name,
         pkg=pkg,
@@ -152,6 +159,7 @@ def generate_bundle(
 
     return {
         "databricks.yml": databricks_yml,
+        "pyproject.toml": pyproject_toml,
         f"src/{pkg}/__init__.py": "",
         f"src/{pkg}/client.py": core,
         f"src/{pkg}/source.py": source_file,

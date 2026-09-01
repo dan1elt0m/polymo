@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import ast
 import json
+import shutil
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -22,6 +24,7 @@ GOLDEN_DIR = Path(__file__).parent / "golden_bundle"
 
 EXPECTED_KEYS = {
     "databricks.yml",
+    "pyproject.toml",
     "src/demo/__init__.py",
     "src/demo/client.py",
     "src/demo/source.py",
@@ -50,6 +53,7 @@ def test_pkg_and_stream_names_are_sanitized_identifiers():
     )
     assert set(files) == {
         "databricks.yml",
+        "pyproject.toml",
         "src/my_project_/__init__.py",
         "src/my_project_/client.py",
         "src/my_project_/source.py",
@@ -142,11 +146,12 @@ def test_source_file_hygiene_and_imports(case):
     for name in expected_names:
         assert f"def {name}(" not in source
 
-    # the pipeline file, in turn, never imports these directly — only the
-    # client/source module objects (see test_pipeline_file_registers_*)
+    # the pipeline file, in turn, never imports the client helpers at all —
+    # only the DataSource class from source.py (see
+    # test_pipeline_file_imports_source_class_directly)
     pipeline = files["pipelines/posts.py"]
     assert "from demo.client import" not in pipeline
-    assert "from demo import client" in pipeline
+    assert "from demo import client" not in pipeline
 
 
 def test_streaming_source_does_not_import_fetch_records():
@@ -162,7 +167,7 @@ def test_streaming_source_does_not_import_fetch_records():
     assert "_write_state" not in import_line
 
 
-# --- pipeline file: registers client + source by value, thin @dp.table wiring -
+# --- pipeline file: plain wheel-backed imports, thin @dp.table wiring --------
 
 PIPELINE_CASES = {
     "plain": CLIENT_EQUALITY_CASES["plain"],
@@ -173,7 +178,7 @@ PIPELINE_CASES = {
 
 
 @pytest.mark.parametrize("case", PIPELINE_CASES)
-def test_pipeline_file_registers_client_and_source_by_value(case):
+def test_pipeline_file_imports_source_class_directly(case):
     config = PIPELINE_CASES[case]
     files = _bundle(config)
     pipeline = files["pipelines/posts.py"]
@@ -181,20 +186,25 @@ def test_pipeline_file_registers_client_and_source_by_value(case):
     ast.parse(pipeline)
     assert_hygiene(pipeline)
 
-    assert "from demo import client as _client_module" in pipeline
-    assert "from demo import source as _source_module" in pipeline
-    assert "from pyspark import cloudpickle" in pipeline
-    assert "cloudpickle.register_pickle_by_value(_client_module)" in pipeline
-    assert "cloudpickle.register_pickle_by_value(_source_module)" in pipeline
-    assert "spark.dataSource.register(_source_module.DemoSource)" in pipeline
+    # No cloudpickle registration dance: databricks.yml builds src/demo into
+    # a wheel and installs it via the pipeline's environment.dependencies,
+    # so demo.source is importable directly, everywhere (driver + executors).
+    assert "from demo.source import DemoSource" in pipeline
+    assert "cloudpickle" not in pipeline
+    assert "register_pickle_by_value" not in pipeline
+    assert "_client_module" not in pipeline
+    assert "_source_module" not in pipeline
+    assert "spark.dataSource.register(DemoSource)" in pipeline
 
     # the pipeline file itself never defines the DataSource/reader classes
     # (they live in source.py) and never calls the fetch/schema helpers
-    # directly (only via the registered modules)
+    # directly (never imports from .client at all)
     assert "class DemoSource" not in pipeline
     assert "class _Reader" not in pipeline
     assert "fetch_records(" not in pipeline
     assert "fetch_page(" not in pipeline
+    assert "from demo.client import" not in pipeline
+    assert "from demo import client" not in pipeline
 
 
 # --- connector-named DataSource class -----------------------------------------
@@ -223,7 +233,8 @@ def test_datasource_class_named_after_connector():
     pipeline = files["pipelines/my_posts_.py"]
 
     assert "class MaileonContactsSource(DataSource):" in source
-    assert "spark.dataSource.register(_source_module.MaileonContactsSource)" in pipeline
+    assert "from maileon_contacts.source import MaileonContactsSource" in pipeline
+    assert "spark.dataSource.register(MaileonContactsSource)" in pipeline
     # generic name is gone entirely, not just renamed in one spot
     assert "RestSource" not in source
     assert "RestSource" not in pipeline
@@ -236,81 +247,42 @@ def test_streaming_datasource_class_also_named_after_connector():
     pipeline = files["pipelines/posts.py"]
 
     assert "class DemoSource(DataSource):" in source
-    assert "spark.dataSource.register(_source_module.DemoSource)" in pipeline
+    assert "from demo.source import DemoSource" in pipeline
+    assert "spark.dataSource.register(DemoSource)" in pipeline
     assert "RestStreamSource" not in source
     assert "RestStreamSource" not in pipeline
 
 
-# --- executor pickle simulation ----------------------------------------------
-# The critical regression this fix closes: a bundle-deployed pipeline is
-# pickled by Spark on the driver and unpickled on an *executor* that never
-# ran `databricks.yml`'s root_path sys.path extension (that only applies to
-# the driver process). Without `cloudpickle.register_pickle_by_value`, the
-# executor's unpickle fails with `ModuleNotFoundError: No module named
-# '<pkg>'` because the DataSource/reader (now living in `<pkg>.source`, which
-# itself imports from `<pkg>.client`) reference those functions BY
-# REFERENCE, not by value — so *both* modules need registering, not just
-# `client`.
+# --- executor wheel simulation ------------------------------------------------
+# The regression this fix closes: a bundle-deployed pipeline's
+# DataSource/reader (living in `<pkg>.source`, which itself imports from
+# `<pkg>.client`) must be importable on the driver AND on every *executor*.
+# `databricks.yml`'s `root_path: src` only extends the driver's sys.path; the
+# old fix shipped the code inside cloudpickle payloads instead. The new fix
+# packages `src/<pkg>` as a wheel (`pyproject.toml` + `uv build --wheel`,
+# exactly what `databricks.yml`'s `artifacts.default.build` runs at deploy
+# time) and has the pipeline's `environment.dependencies` install it — so
+# `<pkg>` is importable from the wheel alone, with nothing else on sys.path.
 #
-# This is simulated with two real subprocesses sharing nothing but pickle
-# files on disk: subprocess A has the generated `src/<pkg>/{client,source}.py`
-# on its sys.path (like the driver) and performs exactly the import +
-# registration dance the generated pipeline file performs (parameterized by
-# `mode`, so the test can register neither/only-client/both), then pickles
-# both `client.fetch_records` and `source._Reader` (the reader class).
-# Subprocess B has NOTHING of `<pkg>` on its sys.path (like an executor) and
-# separately unpickles + calls each artifact against a real mock HTTP
-# server — instantiating `_Reader` with a stub schema object and calling
-# `.read()`, exactly like Spark would after `<pkg>.source.<Class>.reader()`
-# hands one back. Negative-control runs prove the test actually exercises
-# the failure mode this fix prevents, not just a tautology:
-#   - mode="none":         both pickles fail to load (nothing registered)
-#   - mode="client_only":  fetch_records loads fine, but the reader class
-#                          still fails — proving `source` must be
-#                          registered too, not just `client`
-#   - mode="both":         both load and run correctly
+# This is simulated with two real subprocesses sharing nothing but the built
+# wheel file on disk: subprocess A runs `uv build --wheel` against the
+# generated `pyproject.toml` + `src/<pkg>/{__init__,client,source}.py`,
+# exactly like `databricks bundle deploy` does. Subprocess B — with NOTHING
+# on its sys.path except the built `.whl` file itself (wheels are directly
+# zipimportable) — imports `<pkg>.client` + `<pkg>.source`, instantiates the
+# generated DataSource class, and calls `fetch_records()` against a real
+# mock HTTP server, exactly like Spark would after `<pkg>.source.<Class>()`.
+# A negative control (no `.whl` on sys.path at all) proves the test actually
+# exercises the failure mode this fix prevents, not just a tautology.
 
-_BUILD_PICKLES_SCRIPT = """
+_LOAD_FROM_WHEEL_SCRIPT = """
 import importlib
-import sys
-
-pkg, src_root, mode, out_dir = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
-sys.path.insert(0, src_root)
-
-from pyspark import cloudpickle
-
-client_module = importlib.import_module(f"{pkg}.client")
-source_module = importlib.import_module(f"{pkg}.source")
-
-if mode in ("both", "client_only"):
-    cloudpickle.register_pickle_by_value(client_module)
-if mode == "both":
-    cloudpickle.register_pickle_by_value(source_module)
-
-with open(f"{out_dir}/fetch_records.pkl", "wb") as fh:
-    fh.write(cloudpickle.dumps(client_module.fetch_records))
-
-with open(f"{out_dir}/reader_cls.pkl", "wb") as fh:
-    fh.write(cloudpickle.dumps(source_module._Reader))
-"""
-
-_LOAD_FETCH_SCRIPT = """
 import json
 import sys
 
-from pyspark import cloudpickle
-
-with open(sys.argv[1], "rb") as fh:
-    fetch_records = cloudpickle.loads(fh.read())
-
-sys.stdout.write(json.dumps(list(fetch_records())))
-"""
-
-_LOAD_READER_SCRIPT = """
-import json
-import sys
-
-from pyspark import cloudpickle
+whl_path, pkg, source_class_name = sys.argv[1], sys.argv[2], sys.argv[3]
+if whl_path:
+    sys.path.insert(0, whl_path)
 
 
 class _Field:
@@ -323,15 +295,46 @@ class _Schema:
         self.fields = [_Field(name) for name in names]
 
 
-with open(sys.argv[1], "rb") as fh:
-    reader_cls = cloudpickle.loads(fh.read())
+# Both imports below exercise the wheel end to end: `<pkg>.source` imports
+# from `<pkg>.client` internally (a relative `from .client import ...`), so
+# this also proves that intra-package import resolves from inside the
+# wheel, not just the top-level package.
+client_module = importlib.import_module(f"{pkg}.client")
+source_module = importlib.import_module(f"{pkg}.source")
 
-reader = reader_cls(_Schema(["id", "title"]))
-sys.stdout.write(json.dumps(list(reader.read(None))))
+source_cls = getattr(source_module, source_class_name)
+reader = source_cls(options={}).reader(_Schema(["id", "title"]))
+# reader.read() calls client_module.fetch_records() internally, so this one
+# call exercises both modules against the real mock HTTP server.
+records = [dict(zip(["id", "title"], row)) for row in reader.read(None)]
+sys.stdout.write(json.dumps(records))
 """
 
 
-def test_executor_can_unpickle_client_and_source_without_pkg_on_its_path(
+def _build_wheel(project_dir: Path) -> Path:
+    """Run `uv build --wheel` in `project_dir`, returning the built .whl path.
+
+    Mirrors exactly what `databricks bundle deploy` runs at deploy time
+    (`artifacts.default.build` in `databricks.yml`) against the generated
+    `pyproject.toml`.
+    """
+    uv = shutil.which("uv")
+    if uv is None:  # pragma: no cover - exercised only when uv is missing
+        pytest.skip("uv is not installed; required to build the bundle wheel")
+    result = subprocess.run(
+        [uv, "build", "--wheel"],
+        cwd=str(project_dir),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    dist_dir = project_dir / "dist"
+    wheels = list(dist_dir.glob("*.whl"))
+    assert len(wheels) == 1, f"expected exactly one wheel, got {wheels}"
+    return wheels[0]
+
+
+def test_bundle_wheel_installs_client_and_source_for_the_executor(
     tmp_path, http_server
 ):
     http_server.routes["/posts"] = lambda query, headers, body: (
@@ -343,102 +346,57 @@ def test_executor_can_unpickle_client_and_source_without_pkg_on_its_path(
 
     pkg = "execsim_pkg"
     files = generate_bundle(config, project_name=pkg, catalog="main", schema="raw")
-    src_root = tmp_path / "driver_sys_path" / "src"
-    pkg_dir = src_root / pkg
-    pkg_dir.mkdir(parents=True)
-    (pkg_dir / "__init__.py").write_text("")
-    (pkg_dir / "client.py").write_text(files[f"src/{pkg}/client.py"])
-    (pkg_dir / "source.py").write_text(files[f"src/{pkg}/source.py"])
+    source_class_name = f"{_pascal_case(pkg)}Source"
 
-    build_script = tmp_path / "build_pickles.py"
-    build_script.write_text(_BUILD_PICKLES_SCRIPT)
-    load_fetch_script = tmp_path / "load_fetch.py"
-    load_fetch_script.write_text(_LOAD_FETCH_SCRIPT)
-    load_reader_script = tmp_path / "load_reader.py"
-    load_reader_script.write_text(_LOAD_READER_SCRIPT)
+    project_dir = tmp_path / "bundle_project"
+    (project_dir / "src" / pkg).mkdir(parents=True)
+    (project_dir / "pyproject.toml").write_text(files["pyproject.toml"])
+    (project_dir / "src" / pkg / "__init__.py").write_text(
+        files[f"src/{pkg}/__init__.py"]
+    )
+    (project_dir / "src" / pkg / "client.py").write_text(files[f"src/{pkg}/client.py"])
+    (project_dir / "src" / pkg / "source.py").write_text(files[f"src/{pkg}/source.py"])
 
-    # Executor working directory: deliberately NOT src_root, and nothing
-    # about `pkg` is importable from here (unlike the driver, which got
-    # root_path added to its sys.path by databricks.yml).
+    wheel_path = _build_wheel(project_dir)
+
+    # the wheel packages exactly the generated modules, at the package root
+    with zipfile.ZipFile(wheel_path) as zf:
+        names = set(zf.namelist())
+    assert f"{pkg}/__init__.py" in names
+    assert f"{pkg}/client.py" in names
+    assert f"{pkg}/source.py" in names
+
+    load_script = tmp_path / "load_from_wheel.py"
+    load_script.write_text(_LOAD_FROM_WHEEL_SCRIPT)
+
+    # Executor working directory: nothing about `pkg` is importable from
+    # here except whatever sys.path entry the script itself is given.
     executor_cwd = tmp_path / "executor_cwd"
     executor_cwd.mkdir()
 
-    def build(mode: str) -> Path:
-        out_dir = tmp_path / f"pickles_{mode}"
-        out_dir.mkdir()
-        result = subprocess.run(
-            [sys.executable, str(build_script), pkg, str(src_root), mode, str(out_dir)],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0, result.stderr
-        return out_dir
-
-    def load_fetch(out_dir: Path) -> subprocess.CompletedProcess:
+    def load(whl_arg: str) -> subprocess.CompletedProcess:
         return subprocess.run(
-            [
-                sys.executable,
-                str(load_fetch_script),
-                str(out_dir / "fetch_records.pkl"),
-            ],
+            [sys.executable, str(load_script), whl_arg, pkg, source_class_name],
             capture_output=True,
             text=True,
             cwd=str(executor_cwd),
         )
 
-    def load_reader(out_dir: Path) -> subprocess.CompletedProcess:
-        return subprocess.run(
-            [sys.executable, str(load_reader_script), str(out_dir / "reader_cls.pkl")],
-            capture_output=True,
-            text=True,
-            cwd=str(executor_cwd),
-        )
-
-    # --- positive: both client and source registered by value, exactly like
-    # the generated pipeline file does
-    both = build("both")
-
-    fetch_result = load_fetch(both)
-    assert fetch_result.returncode == 0, fetch_result.stderr
-    assert json.loads(fetch_result.stdout) == [
+    # --- positive: only the built .whl on sys.path, like a real executor
+    # with `environment.dependencies` installing it.
+    positive = load(str(wheel_path))
+    assert positive.returncode == 0, positive.stderr
+    assert json.loads(positive.stdout) == [
         {"id": 1, "title": "hello from the executor"}
     ]
 
-    reader_result = load_reader(both)
-    assert reader_result.returncode == 0, reader_result.stderr
-    assert json.loads(reader_result.stdout) == [[1, "hello from the executor"]]
-
-    # --- negative control 1: nothing registered — both artifacts fail on
-    # the executor with the exact ModuleNotFoundError this fix prevents.
-    none = build("none")
-
-    fetch_failure = load_fetch(none)
-    assert fetch_failure.returncode != 0
-    assert "ModuleNotFoundError" in fetch_failure.stderr
-    assert pkg in fetch_failure.stderr
-
-    reader_failure = load_reader(none)
-    assert reader_failure.returncode != 0
-    assert "ModuleNotFoundError" in reader_failure.stderr
-    assert pkg in reader_failure.stderr
-
-    # --- negative control 2: only `client` registered — proves registering
-    # `client` alone (as the pre-restructure fix did) is NOT sufficient now
-    # that the reader class lives in `source`; `source` must be registered
-    # independently even though it only imports from `client`, never the
-    # other way around.
-    client_only = build("client_only")
-
-    fetch_ok = load_fetch(client_only)
-    assert fetch_ok.returncode == 0, fetch_ok.stderr
-    assert json.loads(fetch_ok.stdout) == [
-        {"id": 1, "title": "hello from the executor"}
-    ]
-
-    reader_still_fails = load_reader(client_only)
-    assert reader_still_fails.returncode != 0
-    assert "ModuleNotFoundError" in reader_still_fails.stderr
-    assert pkg in reader_still_fails.stderr
+    # --- negative control: nothing on sys.path at all — proves the import
+    # genuinely depends on the wheel being present, not on some ambient
+    # sys.path entry (e.g. an editable install) making the test a tautology.
+    negative = load("")
+    assert negative.returncode != 0
+    assert "ModuleNotFoundError" in negative.stderr
+    assert pkg in negative.stderr
 
 
 # --- databricks.yml -----------------------------------------------------------
@@ -451,13 +409,22 @@ def test_databricks_yml_parses_with_expected_resource_keys():
 
     assert data["bundle"]["name"] == "demo"
 
+    artifact = data["artifacts"]["default"]
+    assert artifact["type"] == "whl"
+    assert artifact["build"] == "uv build --wheel"
+    assert artifact["path"] == "."
+
     pipelines = data["resources"]["pipelines"]
     assert set(pipelines) == {"demo_pipeline"}
     pipeline = pipelines["demo_pipeline"]
     assert pipeline["catalog"] == "main"
     assert pipeline["schema"] == "raw"
+    assert pipeline["serverless"] is True
     assert pipeline["root_path"] == "src"
     assert pipeline["libraries"] == [{"glob": {"include": "pipelines/posts.py"}}]
+    assert pipeline["environment"]["dependencies"] == [
+        "${workspace.root_path}/artifacts/.internal/*.whl"
+    ]
 
     targets = data["targets"]
     assert targets["dev"]["mode"] == "development"
@@ -473,6 +440,36 @@ def test_databricks_yml_quotes_values_with_special_characters():
     # must still be valid YAML even though project_name contains a colon
     data = yaml.safe_load(files["databricks.yml"])
     assert data["bundle"]["name"]  # sanitized identifier, non-empty
+
+
+# --- pyproject.toml -------------------------------------------------------
+
+
+def _load_toml(text: str) -> dict:
+    try:
+        import tomllib  # Python 3.11+
+    except ModuleNotFoundError:  # pragma: no cover - Python < 3.11
+        import tomli as tomllib  # type: ignore[no-redef]
+
+    return tomllib.loads(text)
+
+
+def test_pyproject_toml_packages_the_pkg_directory():
+    config = make_config(base_url="https://x")
+    files = _bundle(config, project_name="demo", catalog="main", schema="raw")
+    data = _load_toml(files["pyproject.toml"])
+
+    assert data["project"]["name"] == "demo"
+    assert data["project"]["version"] == "0.1.0"
+    assert data["project"]["requires-python"] == ">=3.10"
+    assert "requests>=2.31" in data["project"]["dependencies"]
+    assert data["build-system"]["build-backend"] == "uv_build"
+    assert any(req.startswith("uv_build") for req in data["build-system"]["requires"])
+    # no UC secret in this config -> no azure-keyvault-secrets dependency
+    assert not any(
+        dep.startswith("azure-keyvault-secrets")
+        for dep in data["project"]["dependencies"]
+    )
 
 
 # --- manifest -----------------------------------------------------------------

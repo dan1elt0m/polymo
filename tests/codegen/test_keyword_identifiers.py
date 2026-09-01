@@ -55,8 +55,7 @@ def test_generate_bundle_survives_keyword_project_name(name):
     pipeline = files["pipelines/posts.py"]
     ast.parse(pipeline)
     assert_hygiene(pipeline)
-    assert f"from {pkg} import client" in pipeline
-    assert f"from {pkg} import source" in pipeline
+    assert f"from {pkg}.source import" in pipeline
 
 
 @pytest.mark.parametrize("name", KEYWORD_NAMES)

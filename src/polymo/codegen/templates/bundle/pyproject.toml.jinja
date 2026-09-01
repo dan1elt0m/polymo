@@ -1,0 +1,17 @@
+[project]
+name = "{{ pkg }}"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.31",
+]
+
+# uv_build understands the `src/{{ pkg }}` layout natively (project name ==
+# package name, already a valid identifier — see `_identifier` in
+# polymo.codegen.generator), so no extra [tool.uv.build-backend] config is
+# needed. `databricks.yml`'s `artifacts.default.build` runs `uv build
+# --wheel` against this file at deploy time; the pipeline resource's
+# `environment.dependencies` then installs the built wheel.
+[build-system]
+requires = ["uv_build>=0.4.0,<1.0"]
+build-backend = "uv_build"

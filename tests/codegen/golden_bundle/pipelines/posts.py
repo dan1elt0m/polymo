@@ -7,24 +7,13 @@ file freely — it is not read by polymo again.
 
 from pyspark import pipelines as dp  # noqa: E402
 from pyspark.sql import SparkSession  # noqa: E402
-from jsonplaceholder_demo import client as _client_module  # noqa: E402
-from jsonplaceholder_demo import source as _source_module  # noqa: E402
-from pyspark import cloudpickle  # noqa: E402
+from jsonplaceholder_demo.source import JsonplaceholderDemoSource  # noqa: E402
 
-# Spark pickles the DataSource/reader below BY REFERENCE (they live in
-# `jsonplaceholder_demo.source`, not `__main__`), so executors would otherwise
-# need `jsonplaceholder_demo` importable on their own sys.path — but
-# databricks.yml's root_path only extends the driver's. Registering both
-# modules for by-value pickling ships their code inside the pickle payload
-# instead, so executors never need to import either of them. `source`
-# imports from `client` internally, and by-value serialization follows
-# that import, so `client` needs registering too even though this file
-# never calls it directly.
-cloudpickle.register_pickle_by_value(_client_module)
-cloudpickle.register_pickle_by_value(_source_module)
-
+# `databricks.yml` builds `src/jsonplaceholder_demo` into a wheel and installs it via
+# the pipeline's `environment.dependencies`, so `jsonplaceholder_demo` is importable
+# on the driver AND every executor — no by-value pickling needed.
 spark = SparkSession.getActiveSession()
-spark.dataSource.register(_source_module.JsonplaceholderDemoSource)
+spark.dataSource.register(JsonplaceholderDemoSource)
 
 
 @dp.table(name="posts")

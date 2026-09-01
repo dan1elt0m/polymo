@@ -525,6 +525,7 @@ def test_bootstrap_writes_expected_files(tmp_path):
     assert project_path == tmp_path / "demo"
     assert set(payload["files"]) == {
         "databricks.yml",
+        "pyproject.toml",
         "src/demo/__init__.py",
         "src/demo/client.py",
         "src/demo/source.py",

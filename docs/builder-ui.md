@@ -75,7 +75,7 @@ The **Deploy** tab (next to UI Builder and Generated Code) turns your connector 
 
 ### CLI requirement
 
-Deploying needs the [Databricks CLI](https://docs.databricks.com/dev-tools/cli/) installed and at least one profile configured in `~/.databrickscfg` (`databricks configure`, or a profile added by hand). If the CLI isn't on your `PATH`, every Databricks-backed control on this tab (and the secret-scope pickers in Authentication) shows an inline message with the install link instead of failing silently — export and preview keep working either way, since they never touch the CLI.
+Deploying needs the [Databricks CLI](https://docs.databricks.com/dev-tools/cli/) installed and at least one profile configured in `~/.databrickscfg` (`databricks configure`, or a profile added by hand). If the CLI isn't on your `PATH`, every Databricks-backed control on this tab (and the secret-scope pickers in Authentication) shows an inline message with the install link instead of failing silently — export and preview keep working either way, since they never touch the CLI. Deploying a bundle project separately needs [`uv`](https://docs.astral.sh/uv/) on the machine running `databricks bundle deploy` — that's what builds the wheel `src/<pkg>` ships as (see [Project bootstrap](#project-bootstrap) below).
 
 ### Profile → catalog → schema
 
@@ -93,17 +93,19 @@ Fill in a **Project name** (defaults to the connector's table name) and a **Proj
 
 ```
 <project>/
-  databricks.yml            # bundle + one Lakeflow Declarative Pipeline resource,
-                             # wired to the catalog/schema you picked (profile is
-                             # passed separately, at deploy time)
+  databricks.yml            # bundle + a `whl` artifact (built via `uv build --wheel`
+                             # at deploy time) + one Lakeflow Declarative Pipeline
+                             # resource, wired to the catalog/schema you picked
+                             # (profile is passed separately, at deploy time)
+  pyproject.toml            # packages src/<pkg> as that wheel (uv_build backend)
   src/<pkg>/__init__.py
   src/<pkg>/client.py        # the fetch/pagination/schema code — byte-identical to
                              # the first half of the Generated Code pane's script
   src/<pkg>/source.py        # the <PascalCase(pkg)>Source data source and reader
                              # (e.g. maileon_contacts -> MaileonContactsSource),
                              # built on <pkg>.client via a relative import
-  pipelines/<stream>.py      # thin: registers <pkg>.client and <pkg>.source for
-                             # by-value pickling, then the @dp.table wiring
+  pipelines/<stream>.py      # thin: imports <pkg>.source's DataSource class, then
+                             # the @dp.table wiring
   README.md                  # what this project is, how to deploy/run it, where the
                               # table lands
   .polymo-bundle.json         # small manifest the Run button reads back (pipeline
@@ -114,7 +116,7 @@ Fill in a **Project name** (defaults to the connector's table name) and a **Proj
 
 The DataSource class in `src/<pkg>/source.py` is named after the connector, not a generic `RestSource` — this is what shows up in Spark UI/logs and makes multiple bundled connectors easy to tell apart.
 
-`pipelines/<stream>.py` calls `cloudpickle.register_pickle_by_value()` on both the imported `<pkg>.client` and `<pkg>.source` modules right after importing them: `databricks.yml`'s `root_path` only extends the *driver's* `sys.path`, so without this, an executor unpickling the data source would fail with `ModuleNotFoundError: No module named '<pkg>'`. `source` imports from `client` internally, and by-value serialization follows that import — but `source` still needs registering in its own right (it holds the DataSource/reader classes Spark actually pickles), so both modules are registered.
+**The package reaches every executor via a wheel, not by-value pickling.** `databricks.yml` declares a `whl` artifact (`artifacts.default.build: uv build --wheel`) built from the root `pyproject.toml`, and the pipeline resource's `environment.dependencies` installs that built wheel — so `src/<pkg>` is importable on the driver *and* every executor, and `pipelines/<stream>.py` just does a plain `from <pkg>.source import <Class>`. Deploying needs [`uv`](https://docs.astral.sh/uv/) on the machine running `databricks bundle deploy` (it builds the wheel). The pipeline resource runs `serverless: true`; a classic-cluster pipeline would need the built wheel added as a cluster library instead of relying on `environment.dependencies`.
 
 **Overwrite semantics are file-scoped, not directory-scoped.** Bootstrapping into a non-empty directory is refused by default; checking **Overwrite bundle files in existing folder** lets it proceed, but it only overwrites the bundle files listed above — anything else you've added to that project directory (a `.git` folder, notes, other pipelines, local CLI state) is left untouched.
 
