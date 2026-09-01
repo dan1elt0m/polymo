@@ -442,14 +442,14 @@ def test_sample_endpoint_redacts_secret_in_raw_page_url(http_server) -> None:
     assert "***REDACTED***" in payload["raw_pages"][0]["url"]
 
 
-def test_sample_endpoint_redacts_secret_in_502_error_detail(http_server) -> None:
+def test_sample_endpoint_redacts_secret_in_records_step_error(http_server) -> None:
     """Regression pin: when the mock API echoes the session secret into a
     field that an explicit schema then fails to coerce (e.g. `k INT` given
-    a string value), `_collect_records` raises and the endpoint used to
-    surface `str(exc)` verbatim as the 502 `detail` — leaking the secret
-    through a Spark type-conversion error message instead of the
-    already-redacted `records`/`raw_pages` paths. The `detail` must be
-    redacted the same way."""
+    a string value), `_collect_records` raises. The endpoint must surface
+    that as a normal 200 with `rest_error` set (not a 502 — see
+    `test_sample_endpoint_keeps_raw_pages_when_records_step_fails` for why),
+    and the error text must be redacted the same way `records`/`raw_pages`
+    already are."""
 
     token = "supersecrettoken123"
 
@@ -477,11 +477,41 @@ def test_sample_endpoint_redacts_secret_in_502_error_detail(http_server) -> None
     payload = response.json()
     body_text = json.dumps(payload)
 
-    assert response.status_code == 502
+    assert response.status_code == 200
     assert "***REDACTED***" in body_text
     assert token not in body_text
     assert quote(token, safe="") not in body_text
     assert quote_plus(token) not in body_text
+
+
+def test_sample_endpoint_keeps_raw_pages_when_records_step_fails(http_server) -> None:
+    """UX regression pin: when the records/dtypes step fails after the HTTP
+    fetch already succeeded (e.g. an explicit schema that can't coerce a
+    sampled value — `k INT` given a string), `/api/sample` used to discard
+    the already-collected `raw_pages` behind a 502, so the builder UI's Raw
+    API tab showed only an error with nothing to inspect. It must now
+    return 200 with the real `raw_pages` populated and `rest_error`
+    describing the records-step failure, so the UI can still show what the
+    API actually returned."""
+
+    http_server.routes["/posts"] = lambda q, h, b: (200, [{"k": "not-an-int"}], {})
+    app = create_app()
+    client = TestClient(app)
+
+    config_dict = {
+        "version": "0.1",
+        "source": {"type": "rest", "base_url": http_server.url},
+        "stream": {"name": "posts", "path": "/posts", "schema": "k INT"},
+    }
+
+    response = client.post("/api/sample", json={"config_dict": config_dict, "limit": 5})
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload["raw_pages"]
+    assert payload["raw_pages"][0]["status_code"] == 200
+    assert payload["rest_error"]
+    assert "records/schema step failed" in payload["rest_error"]
 
 
 def test_sample_endpoint_redacts_url_encoded_secret_variants(http_server) -> None:

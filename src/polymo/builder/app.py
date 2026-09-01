@@ -215,11 +215,25 @@ def create_app() -> FastAPI:
             records, dtypes = await run_in_threadpool(
                 partial(_collect_records, config, payload.token, payload.limit)
             )
-        except Exception as exc:  # pragma: no cover - surfaced to UI
+        except Exception as exc:
+            # The fetch itself already succeeded (raw_pages was collected
+            # above, before this records/dtypes step ever ran) — only the
+            # local dtypes-inference step failed. Surface that as a normal
+            # 200 with `rest_error` set rather than a 502, so the already
+            # -collected `raw_pages` aren't discarded: the UI's Raw API tab
+            # renders `raw_pages`/`rest_error` the same way it does for an
+            # actual fetch failure, and the prefix below makes clear to the
+            # user that the request itself worked.
             detail = str(exc)
             if needles:
                 detail = _redact_secret(detail, needles)
-            raise HTTPException(status_code=502, detail=detail) from exc
+            return SampleResponse(
+                stream=stream_config.name,
+                records=[],
+                dtypes=[],
+                raw_pages=raw_pages,
+                rest_error=f"records/schema step failed: {detail}",
+            )
 
         if needles:
             records = _redact_secret(records, needles)
