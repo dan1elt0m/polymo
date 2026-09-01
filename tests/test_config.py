@@ -4,6 +4,7 @@ from polymo.config import (
     ConfigError,
     RestSourceConfig,
     SecretRef,
+    UcSecretRef,
     config_to_dict,
     parse_config,
 )
@@ -865,6 +866,177 @@ def test_option_secrets_rejects_non_mapping() -> None:
         "version": 0.1,
         "source": {"type": "rest", "base_url": "https://api.test"},
         "stream": {"path": "/objects", "option_secrets": ["not", "a", "mapping"]},
+    }
+
+    with pytest.raises(ConfigError):
+        parse_config(raw)
+
+
+# --- Unity Catalog service-credential secret references -------------------
+
+
+def _uc_ref_dict() -> dict:
+    return {
+        "credential": "kv-cred",
+        "vault_url": "https://my-vault.vault.azure.net/",
+        "secret_name": "api-token",
+    }
+
+
+def test_bearer_auth_uc_secret_round_trip() -> None:
+    raw = {
+        "version": 0.1,
+        "source": {
+            "type": "rest",
+            "base_url": "https://api.test",
+            "auth": {"type": "bearer", "uc_secret": _uc_ref_dict()},
+        },
+        "stream": {"path": "/objects"},
+    }
+
+    config = parse_config(raw)
+    assert config.auth.type == "bearer"
+    assert config.auth.uc_secret == UcSecretRef(
+        credential="kv-cred",
+        vault_url="https://my-vault.vault.azure.net/",
+        secret_name="api-token",
+    )
+    assert config.auth.secret is None
+    assert config.auth.token is None
+
+    config_dict = config_to_dict(config)
+    assert config_dict["source"]["auth"] == {
+        "type": "bearer",
+        "uc_secret": _uc_ref_dict(),
+    }
+
+    round_tripped = parse_config(config_dict)
+    assert round_tripped.auth.uc_secret == config.auth.uc_secret
+
+
+def test_api_key_auth_uc_secret_round_trip() -> None:
+    raw = {
+        "version": 0.1,
+        "source": {
+            "type": "rest",
+            "base_url": "https://api.test",
+            "auth": {
+                "type": "api_key",
+                "in": "header",
+                "name": "X-API-Key",
+                "uc_secret": _uc_ref_dict(),
+            },
+        },
+        "stream": {"path": "/objects"},
+    }
+
+    config = parse_config(raw)
+    assert config.auth.uc_secret == UcSecretRef(**_uc_ref_dict())
+
+    config_dict = config_to_dict(config)
+    assert config_dict["source"]["auth"]["uc_secret"] == _uc_ref_dict()
+
+    round_tripped = parse_config(config_dict)
+    assert round_tripped.auth.uc_secret == UcSecretRef(**_uc_ref_dict())
+
+
+def test_oauth2_auth_uc_secret_round_trip() -> None:
+    raw = {
+        "version": 0.1,
+        "source": {
+            "type": "rest",
+            "base_url": "https://api.test",
+            "auth": {
+                "type": "oauth2",
+                "token_url": "https://auth.example.com/token",
+                "client_id": "my-client",
+                "uc_secret": _uc_ref_dict(),
+            },
+        },
+        "stream": {"path": "/objects"},
+    }
+
+    config = parse_config(raw)
+    assert config.auth.uc_secret == UcSecretRef(**_uc_ref_dict())
+    assert config.auth.client_secret is None
+
+    config_dict = config_to_dict(config)
+    assert config_dict["source"]["auth"]["uc_secret"] == _uc_ref_dict()
+
+    round_tripped = parse_config(config_dict)
+    assert round_tripped.auth.uc_secret == UcSecretRef(**_uc_ref_dict())
+
+
+@pytest.mark.parametrize("auth_type", ["bearer", "api_key", "oauth2"])
+def test_auth_uc_secret_requires_all_fields(auth_type: str) -> None:
+    auth: dict = {
+        "type": auth_type,
+        "uc_secret": {
+            "credential": "kv-cred",
+            "vault_url": "https://v.vault.azure.net/",
+        },
+    }
+    if auth_type == "api_key":
+        auth.update({"in": "header", "name": "X-API-Key"})
+    if auth_type == "oauth2":
+        auth.update({"token_url": "https://auth.example.com/token", "client_id": "cid"})
+
+    raw = {
+        "version": 0.1,
+        "source": {"type": "rest", "base_url": "https://api.test", "auth": auth},
+        "stream": {"path": "/objects"},
+    }
+
+    with pytest.raises(ConfigError):
+        parse_config(raw)
+
+
+def test_auth_uc_secret_rejects_non_mapping() -> None:
+    raw = {
+        "version": 0.1,
+        "source": {
+            "type": "rest",
+            "base_url": "https://api.test",
+            "auth": {"type": "bearer", "uc_secret": "kv-cred/vault/secret"},
+        },
+        "stream": {"path": "/objects"},
+    }
+
+    with pytest.raises(ConfigError):
+        parse_config(raw)
+
+
+@pytest.mark.parametrize("secret_field", ["value", "key", "token"])
+def test_auth_uc_secret_rejects_inline_secret_value(secret_field: str) -> None:
+    ref = _uc_ref_dict()
+    ref[secret_field] = "not-allowed"
+    raw = {
+        "version": 0.1,
+        "source": {
+            "type": "rest",
+            "base_url": "https://api.test",
+            "auth": {"type": "bearer", "uc_secret": ref},
+        },
+        "stream": {"path": "/objects"},
+    }
+
+    with pytest.raises(ConfigError):
+        parse_config(raw)
+
+
+def test_auth_secret_and_uc_secret_are_mutually_exclusive() -> None:
+    raw = {
+        "version": 0.1,
+        "source": {
+            "type": "rest",
+            "base_url": "https://api.test",
+            "auth": {
+                "type": "bearer",
+                "secret": {"scope": "my-scope", "key": "my-key"},
+                "uc_secret": _uc_ref_dict(),
+            },
+        },
+        "stream": {"path": "/objects"},
     }
 
     with pytest.raises(ConfigError):

@@ -12,6 +12,7 @@ from polymo.config import (
     PartitionConfig,
     RecordSelectorConfig,
     SecretRef,
+    UcSecretRef,
 )
 from tests.codegen.helpers import assert_hygiene, make_config
 
@@ -86,6 +87,19 @@ CASES = {
         path="/v1/widgets",
         auth=AuthConfig(
             type="bearer", secret=SecretRef(scope="my-scope", key="api-token")
+        ),
+    ),
+    "uc_secret_bearer": make_config(
+        base_url="https://api.example.com",
+        name="widgets",
+        path="/v1/widgets",
+        auth=AuthConfig(
+            type="bearer",
+            uc_secret=UcSecretRef(
+                credential="kv-cred",
+                vault_url="https://my-vault.vault.azure.net/",
+                secret_name="api-token",
+            ),
         ),
     ),
     "maileon_xml": make_config(

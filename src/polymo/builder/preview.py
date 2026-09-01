@@ -10,13 +10,16 @@ from typing import Any, Dict, List, Optional, Tuple
 from ..codegen import generate_core
 from ..config import RestSourceConfig
 
-# Matches a module-level `<VAR>: str = _dbx_secret(...)` assignment for one
-# of the four secret-ref slot kinds the generator can emit (API_TOKEN /
-# API_KEY / CLIENT_SECRET, and any OPT_* option placeholder). Anchored to
-# line start via MULTILINE so it only ever matches the assignment itself.
+# Matches a module-level `<VAR>: str = _dbx_secret(...)` OR `<VAR>: str =
+# _uc_secret(...)` assignment for one of the four secret-ref slot kinds the
+# generator can emit (API_TOKEN / API_KEY / CLIENT_SECRET, and any OPT_*
+# option placeholder — though OPT_* is `_dbx_secret`-only, since
+# `option_secrets` stays scope-only; see `StreamConfig.option_secrets`).
+# Anchored to line start via MULTILINE so it only ever matches the
+# assignment itself.
 _DBX_SECRET_ASSIGNMENT_RE = re.compile(
     r"^(?P<var>API_TOKEN|API_KEY|CLIENT_SECRET|OPT_[A-Za-z0-9_]*): str = "
-    r"_dbx_secret\([^\n]*\)$",
+    r"(?:_dbx_secret|_uc_secret)\([^\n]*\)$",
     re.MULTILINE,
 )
 
@@ -27,11 +30,12 @@ _TOKEN_OVERRIDABLE_VARS = frozenset({"API_TOKEN", "API_KEY", "CLIENT_SECRET"})
 
 
 def _substitute_secret_refs(code: str, token: Optional[str]) -> str:
-    """Source-substitute `_dbx_secret(...)` call sites before `exec`.
+    """Source-substitute `_dbx_secret(...)`/`_uc_secret(...)` call sites before `exec`.
 
-    A module-level `_dbx_secret(...)` call executes during `exec` and would
-    raise `RuntimeError` outside Databricks (no active Spark session) — so
-    it can never be left in place for preview. Instead, each matching
+    A module-level `_dbx_secret(...)`/`_uc_secret(...)` call executes during
+    `exec` and would raise `RuntimeError` outside Databricks (no active
+    Spark session, or — for `_uc_secret` — no `dbutils`/Key Vault access
+    either) — so it can never be left in place for preview. Instead, each matching
     assignment line is rewritten to a literal pre-exec: the auth slot
     (API_TOKEN/API_KEY/CLIENT_SECRET) that matches the supplied `token`, if
     any, gets that real value; every other secret-ref variable — including

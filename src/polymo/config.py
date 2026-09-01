@@ -143,6 +143,24 @@ class SecretRef:
 
 
 @dataclass(frozen=True)
+class UcSecretRef:
+    """A reference to a secret resolved via a Unity Catalog service
+    credential + Azure Key Vault, instead of a Databricks secret scope.
+
+    Configs carry ONLY this reference (`credential`, `vault_url`,
+    `secret_name`) — never the secret value itself. Generated code resolves
+    it on the driver via the `_uc_secret(credential, vault_url,
+    secret_name)` helper (see `polymo.codegen.generator`), which calls
+    `dbutils.credentials.getServiceCredentialsProvider(credential)` and uses
+    it to authenticate an Azure Key Vault `SecretClient`.
+    """
+
+    credential: str
+    vault_url: str
+    secret_name: str
+
+
+@dataclass(frozen=True)
 class AuthConfig:
     """Authentication configuration for REST requests."""
 
@@ -162,8 +180,12 @@ class AuthConfig:
     # Optional Databricks secret-scope reference for the auth secret slot
     # (bearer token / api_key value / oauth2 client_secret — one slot each).
     # When set, codegen resolves it via `_dbx_secret(...)` instead of the
-    # `"REPLACE_ME"` placeholder.
+    # `"REPLACE_ME"` placeholder. Mutually exclusive with `uc_secret`.
     secret: SecretRef | None = None
+    # Optional Unity Catalog service-credential + Key Vault reference for
+    # the same auth secret slot. When set, codegen resolves it via
+    # `_uc_secret(...)` instead. Mutually exclusive with `secret`.
+    uc_secret: UcSecretRef | None = None
 
 
 @dataclass(frozen=True)
@@ -276,6 +298,11 @@ class StreamConfig:
     # Databricks secret-scope references for `{{ options.<name> }}`
     # placeholders, keyed by option name. A name that isn't actually
     # referenced as an unresolved option is harmless (simply unused).
+    # Scope-only by design: unlike `AuthConfig.secret`/`AuthConfig.uc_secret`
+    # (one slot each, so either source is unambiguous), a per-option UC
+    # secret source would need a second mapping here to stay unambiguous
+    # per name — not worth the complexity for what's a power-user escape
+    # hatch already. Use `auth.uc_secret` for the primary auth secret slot.
     option_secrets: Mapping[str, SecretRef] = field(default_factory=dict)
 
 
@@ -367,6 +394,54 @@ def _secret_ref_to_dict(ref: SecretRef) -> Dict[str, str]:
     return {"scope": ref.scope, "key": ref.key}
 
 
+def _parse_uc_secret_ref(raw: Any, field_label: str) -> Optional[UcSecretRef]:
+    """Parse a `{"credential": ..., "vault_url": ..., "secret_name": ...}`
+    Unity Catalog service-credential reference.
+
+    Returns None when `raw` is None (the slot has no UC secret reference).
+    All three fields must be non-empty strings when a reference is
+    provided — this is a reference only, never a secret value.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping):
+        raise ConfigError(
+            f"'{field_label}' must be a mapping with 'credential', 'vault_url',"
+            " and 'secret_name'"
+        )
+
+    for secret_field in ("value", "key", "token"):
+        if secret_field in raw:
+            raise ConfigError(
+                f"'{field_label}' is a reference only; it must not contain a"
+                f" '{secret_field}' key with an actual secret value"
+            )
+
+    credential_raw = raw.get("credential")
+    vault_url_raw = raw.get("vault_url")
+    secret_name_raw = raw.get("secret_name")
+    credential = credential_raw.strip() if isinstance(credential_raw, str) else None
+    vault_url = vault_url_raw.strip() if isinstance(vault_url_raw, str) else None
+    secret_name = secret_name_raw.strip() if isinstance(secret_name_raw, str) else None
+    if not credential or not vault_url or not secret_name:
+        raise ConfigError(
+            f"'{field_label}' requires non-empty 'credential', 'vault_url', and"
+            " 'secret_name'"
+        )
+
+    return UcSecretRef(
+        credential=credential, vault_url=vault_url, secret_name=secret_name
+    )
+
+
+def _uc_secret_ref_to_dict(ref: UcSecretRef) -> Dict[str, str]:
+    return {
+        "credential": ref.credential,
+        "vault_url": ref.vault_url,
+        "secret_name": ref.secret_name,
+    }
+
+
 def _parse_option_secrets(raw: Any) -> Dict[str, SecretRef]:
     if raw is None:
         return {}
@@ -455,6 +530,8 @@ def config_to_dict(config: RestSourceConfig) -> Dict[str, Any]:
         source["auth"] = {"type": "bearer"}
         if config.auth.secret:
             source["auth"]["secret"] = _secret_ref_to_dict(config.auth.secret)
+        if config.auth.uc_secret:
+            source["auth"]["uc_secret"] = _uc_secret_ref_to_dict(config.auth.uc_secret)
     elif config.auth.type == "api_key":
         # Expose placement and name, never the key value (which isn't
         # stored on AuthConfig in the first place).
@@ -465,6 +542,8 @@ def config_to_dict(config: RestSourceConfig) -> Dict[str, Any]:
         }
         if config.auth.secret:
             source["auth"]["secret"] = _secret_ref_to_dict(config.auth.secret)
+        if config.auth.uc_secret:
+            source["auth"]["uc_secret"] = _uc_secret_ref_to_dict(config.auth.uc_secret)
     elif config.auth.type == "oauth2":
         auth_block: Dict[str, Any] = {"type": "oauth2"}
         if config.auth.token_url:
@@ -479,6 +558,8 @@ def config_to_dict(config: RestSourceConfig) -> Dict[str, Any]:
             auth_block["extra_params"] = dict(config.auth.extra_params)
         if config.auth.secret:
             auth_block["secret"] = _secret_ref_to_dict(config.auth.secret)
+        if config.auth.uc_secret:
+            auth_block["uc_secret"] = _uc_secret_ref_to_dict(config.auth.uc_secret)
         source["auth"] = auth_block
 
     stream = config.stream
@@ -588,12 +669,22 @@ def _parse_auth_config(
         return AuthConfig()
 
     auth_secret = _parse_secret_ref(raw_auth.get("secret"), "source.auth.secret")
+    auth_uc_secret = _parse_uc_secret_ref(
+        raw_auth.get("uc_secret"), "source.auth.uc_secret"
+    )
+    if auth_secret and auth_uc_secret:
+        raise ConfigError(
+            "'source.auth.secret' and 'source.auth.uc_secret' are mutually"
+            " exclusive; choose one secret source"
+        )
 
     if auth_type == "bearer":
         raw_token = raw_auth.get("token")
         raw_token = raw_token.strip() if isinstance(raw_token, str) else None
         token = token_value or raw_token
-        return AuthConfig(type="bearer", token=token, secret=auth_secret)
+        return AuthConfig(
+            type="bearer", token=token, secret=auth_secret, uc_secret=auth_uc_secret
+        )
 
     if auth_type == "api_key":
         for secret_field in ("value", "key", "token"):
@@ -619,6 +710,7 @@ def _parse_auth_config(
             api_key_in=api_key_in,
             api_key_name=api_key_name,
             secret=auth_secret,
+            uc_secret=auth_uc_secret,
         )
 
     # OAuth2 client credentials
@@ -675,6 +767,7 @@ def _parse_auth_config(
         audience=audience,
         extra_params=extra_params,
         secret=auth_secret,
+        uc_secret=auth_uc_secret,
     )
 
 

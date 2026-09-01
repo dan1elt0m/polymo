@@ -168,6 +168,62 @@ once the pipeline actually runs on a Databricks cluster
 source files and cluster/pipeline definitions, it does not execute the
 pipeline or evaluate `_dbx_secret`.
 
+### UC service-credential secret references
+
+An alternative to a Databricks secret scope: resolve the secret through a
+[Unity Catalog service credential](https://docs.databricks.com/en/connect/unity-catalog/index.html)
+and an Azure Key Vault secret instead. The same four auth secret slots
+(`bearer`'s token, `api_key`'s value, `oauth2`'s `client_secret`) can carry a
+`uc_secret` object in place of `secret` —
+
+```yaml
+source:
+  auth:
+    type: bearer
+    uc_secret:
+      credential: my-service-credential
+      vault_url: https://my-vault.vault.azure.net/
+      secret_name: my-key
+```
+
+`credential`, `vault_url`, and `secret_name` are all required and must be
+non-empty — again, a **reference only**; the value itself never appears in
+the config. `secret` and `uc_secret` are **mutually exclusive** on the same
+auth slot — setting both raises a config error. Codegen resolves it at
+runtime via a generated `_uc_secret(credential, vault_url, secret_name)`
+helper instead:
+
+```python
+API_TOKEN: str = _uc_secret("my-service-credential", "https://my-vault.vault.azure.net/", "my-key")
+```
+
+`_uc_secret` is emitted once per script, only when the auth slot references
+a UC secret. It calls
+`dbutils.credentials.getServiceCredentialsProvider(credential)` to get an
+Azure-SDK-compatible credential, then uses it to authenticate an Azure Key
+Vault `SecretClient(vault_url=..., credential=...)` and fetch
+`secret_name`. It raises a clear `RuntimeError` if called outside a
+Databricks cluster (no active Spark session), if `dbutils`/the Key Vault SDK
+aren't available, or if the resolved secret has no value — the error
+message names the required `azure-keyvault-secrets` package. Unlike
+`_dbx_secret`, there is no `{{ options.* }}` placeholder equivalent —
+`option_secrets` stays scope-only (see above); use `auth.uc_secret` for the
+primary auth secret slot.
+
+**Setting a `uc_secret` reference in the Builder** happens through the same
+**Secret source** toggle described above — pick **UC credential (Key
+Vault)** and fill in the credential, vault URL, and secret name. See
+[Deploy to Databricks → Secrets](builder-ui.md#secrets) for the UI
+walkthrough.
+
+**At deploy time**, this reference travels the same way a Databricks
+secret-scope reference does: unchanged, into `src/<pkg>/client.py`, resolved
+only once the pipeline actually runs (never at `databricks bundle deploy`
+time). The generated `pyproject.toml` adds `azure-keyvault-secrets` as a
+dependency automatically whenever a `uc_secret` reference is present, so the
+built wheel (see [Deploy to Databricks → Project bootstrap](builder-ui.md#project-bootstrap))
+carries what `_uc_secret` needs.
+
 ## Query parameters & headers
 
 - **Params** (`stream.params`) → the `PARAMS` constant in the generated
@@ -443,10 +499,12 @@ into literal constants in the exported script (`BASE_URL`, `PATH`, `PARAMS`,
 the script directly, or changing the Builder form and re-exporting.
 
 The one exception is a [Databricks secret-scope
-reference](#databricks-secret-scope-references): the *call site* —
-`_dbx_secret("scope", "key")` — is still baked in as a literal at generation
-time, but the secret *value* it resolves is looked up fresh on the driver
-every time the generated script runs.
+reference](#databricks-secret-scope-references) or a [UC service-credential
+reference](#uc-service-credential-secret-references): the *call site* —
+`_dbx_secret("scope", "key")` or `_uc_secret("credential", "vault_url",
+"secret_name")` — is still baked in as a literal at generation time, but the
+secret *value* it resolves is looked up fresh on the driver every time the
+generated script runs.
 
 If you're coming from the 0.x YAML runtime, see the
 [migration guide](migration-1.0.md) for the full list of what moved or

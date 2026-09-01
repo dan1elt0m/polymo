@@ -58,6 +58,9 @@ export const handlers = [
 	http.get("/api/databricks/secret-keys", () => {
 		return HttpResponse.json({ secret_keys: ["api-token"] });
 	}),
+	http.get("/api/databricks/service-credentials", () => {
+		return HttpResponse.json({ service_credentials: ["kv-credential"] });
+	}),
 	http.post("/api/databricks/bootstrap", async ({ request }) => {
 		const body = (await request.json()) as { project_dir?: string; project_name?: string };
 		const projectPath = `${body?.project_dir ?? "~/polymo-projects"}/${body?.project_name ?? "connector"}`;

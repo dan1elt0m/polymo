@@ -356,6 +356,62 @@ def test_secret_keys_endpoint_requires_scope_param(monkeypatch):
     assert response.status_code == 422
 
 
+def test_service_credentials_endpoint_happy_path(monkeypatch):
+    capture = install_fake_runner(
+        monkeypatch,
+        stdout='{"credentials": [{"name": "kv-cred", "purpose": "SERVICE"}, {"name": "other-cred"}]}',
+    )
+
+    app = create_app()
+    client = TestClient(app)
+    response = client.get(
+        "/api/databricks/service-credentials", params={"profile": "dev"}
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"service_credentials": ["kv-cred", "other-cred"]}
+    argv = capture[0]
+    assert argv[1:5] == ["credentials", "list-credentials", "--purpose", "SERVICE"]
+    assert "--profile" in argv and "dev" in argv
+
+
+def test_service_credentials_endpoint_handles_bare_array(monkeypatch):
+    install_fake_runner(monkeypatch, stdout='[{"name": "cred-a"}]')
+
+    app = create_app()
+    client = TestClient(app)
+    response = client.get("/api/databricks/service-credentials")
+
+    assert response.status_code == 200
+    assert response.json() == {"service_credentials": ["cred-a"]}
+
+
+def test_service_credentials_endpoint_missing_cli_returns_501(monkeypatch):
+    def runner(argv, *, timeout):
+        raise FileNotFoundError("no such file")
+
+    monkeypatch.setattr(databricks, "_run_subprocess", runner)
+
+    app = create_app()
+    client = TestClient(app)
+    response = client.get("/api/databricks/service-credentials")
+
+    assert response.status_code == 501
+
+
+def test_service_credentials_endpoint_cli_error_returns_502(monkeypatch):
+    install_fake_runner(
+        monkeypatch, returncode=1, stderr="permission denied: not authenticated"
+    )
+
+    app = create_app()
+    client = TestClient(app)
+    response = client.get("/api/databricks/service-credentials")
+
+    assert response.status_code == 502
+    assert "permission denied" in response.json()["detail"]
+
+
 def test_cli_missing_returns_501(monkeypatch):
     def runner(argv, *, timeout):
         raise FileNotFoundError("no such file")

@@ -279,15 +279,28 @@ export function formStateToConfig(formState: ConfigFormState): RestSourceConfig 
     return undefined;
   })();
 
-  // Attach the Databricks secret-scope reference (if the user picked one)
-  // for whichever auth secret slot is active. Never carries the secret
-  // value itself — only the scope+key reference the exported bundle
-  // resolves at runtime.
+  // Attach the Databricks secret-scope OR Unity Catalog service-credential
+  // reference (if the user picked one) for whichever auth secret slot is
+  // active. Never carries the secret value itself — only the reference the
+  // exported bundle resolves at runtime. The two sources are mutually
+  // exclusive (enforced by AuthConfig parsing on the backend too).
   if (authBlock && formState.authType !== 'none' && formState.authSecretMode === 'secret_scope') {
     const scope = formState.authSecretScope?.trim();
     const key = formState.authSecretKey?.trim();
     if (scope && key) {
       (authBlock as Record<string, any>).secret = { scope, key };
+    }
+  }
+  if (authBlock && formState.authType !== 'none' && formState.authSecretMode === 'uc_secret') {
+    const credential = formState.authUcCredential?.trim();
+    const vaultUrl = formState.authUcVaultUrl?.trim();
+    const secretName = formState.authUcSecretName?.trim();
+    if (credential && vaultUrl && secretName) {
+      (authBlock as Record<string, any>).uc_secret = {
+        credential,
+        vault_url: vaultUrl,
+        secret_name: secretName,
+      };
     }
   }
 
@@ -513,9 +526,17 @@ export function configToFormState(config: RestSourceConfig): ConfigFormState {
   const authApiKeyIn = authType === 'api_key' ? (authConfig?.api_key_in ?? 'header') : 'header';
   const authApiKeyName = authType === 'api_key' ? (authConfig?.api_key_name ?? '') : '';
   const authSecret = authType !== 'none' ? authConfig?.secret ?? null : null;
-  const authSecretMode: ConfigFormState['authSecretMode'] = authSecret ? 'secret_scope' : 'inline';
+  const authUcSecret = authType !== 'none' ? authConfig?.uc_secret ?? null : null;
+  const authSecretMode: ConfigFormState['authSecretMode'] = authSecret
+    ? 'secret_scope'
+    : authUcSecret
+      ? 'uc_secret'
+      : 'inline';
   const authSecretScope = authSecret?.scope ?? '';
   const authSecretKey = authSecret?.key ?? '';
+  const authUcCredential = authUcSecret?.credential ?? '';
+  const authUcVaultUrl = authUcSecret?.vault_url ?? '';
+  const authUcSecretName = authUcSecret?.secret_name ?? '';
 
   return {
     version: config.version,
@@ -532,6 +553,9 @@ export function configToFormState(config: RestSourceConfig): ConfigFormState {
     authSecretMode,
     authSecretScope,
     authSecretKey,
+    authUcCredential,
+    authUcVaultUrl,
+    authUcSecretName,
     streamName,
     streamPath,
     streaming: Boolean(config.stream.streaming),
@@ -635,15 +659,26 @@ export function validateFormState(formState: ConfigFormState): string[] {
     errors.push('Stream path must start with /');
   }
 
-  const usesSecretScope =
-    formState.authSecretMode === 'secret_scope' &&
-    (formState.authType === 'bearer' || formState.authType === 'api_key' || formState.authType === 'oauth2');
+  const authAppliesToCurrentType =
+    formState.authType === 'bearer' || formState.authType === 'api_key' || formState.authType === 'oauth2';
+  const usesSecretScope = authAppliesToCurrentType && formState.authSecretMode === 'secret_scope';
+  const usesUcSecret = authAppliesToCurrentType && formState.authSecretMode === 'uc_secret';
+  const usesExternalSecret = usesSecretScope || usesUcSecret;
 
   if (usesSecretScope && (!formState.authSecretScope?.trim() || !formState.authSecretKey?.trim())) {
     errors.push('Select a Databricks secret scope and key, or switch the secret source back to preview value');
   }
 
-  if (formState.authType === 'bearer' && !usesSecretScope && !formState.authToken.trim()) {
+  if (
+    usesUcSecret &&
+    (!formState.authUcCredential?.trim() || !formState.authUcVaultUrl?.trim() || !formState.authUcSecretName?.trim())
+  ) {
+    errors.push(
+      'Select a UC service credential and provide a Key Vault URL and secret name, or switch the secret source back to preview value',
+    );
+  }
+
+  if (formState.authType === 'bearer' && !usesExternalSecret && !formState.authToken.trim()) {
     errors.push('Bearer token is required when using bearer authentication');
   }
 
@@ -658,7 +693,7 @@ export function validateFormState(formState: ConfigFormState): string[] {
     if (!formState.authClientId?.trim()) {
       errors.push('OAuth2 client ID is required');
     }
-    if (!usesSecretScope && !formState.authToken.trim()) {
+    if (!usesExternalSecret && !formState.authToken.trim()) {
       errors.push('OAuth2 client secret is required (stored only for this session)');
     }
     const extraRaw = formState.authExtraParams?.trim();

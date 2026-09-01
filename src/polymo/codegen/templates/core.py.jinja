@@ -34,6 +34,31 @@ def _dbx_secret(scope: str, key: str) -> str:
             "Outside Databricks, replace this call with the literal value."
         ) from exc
 {% endif %}
+{% if has_uc_secret_refs %}
+
+
+def _uc_secret(credential: str, vault_url: str, secret_name: str) -> str:
+    """Resolve a secret via a Unity Catalog service credential + Key Vault."""
+    try:
+        from pyspark.dbutils import DBUtils  # type: ignore[import]
+        from pyspark.sql import SparkSession
+
+        session = SparkSession.getActiveSession()
+        if session is None:
+            raise RuntimeError("no active Spark session")
+        provider = DBUtils(session).credentials.getServiceCredentialsProvider(credential)
+        from azure.keyvault.secrets import SecretClient  # type: ignore[import]
+
+        value = SecretClient(vault_url=vault_url, credential=provider).get_secret(secret_name).value
+        if value is None:
+            raise RuntimeError(f"secret {secret_name!r} in {vault_url} has no value")
+        return value
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(
+            f"could not resolve UC credential secret {credential}/{secret_name}:"
+            f" {exc}. Requires azure-keyvault-secrets and runs only on Databricks."
+        ) from exc
+{% endif %}
 
 {% if option_placeholders %}
 # Runtime values referenced as {{ '{{ options.* }}' }} in the builder config.

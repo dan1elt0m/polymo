@@ -7,6 +7,7 @@ from polymo.config import (
     PaginationConfig,
     PartitionConfig,
     SecretRef,
+    UcSecretRef,
 )
 from tests.codegen.helpers import make_config
 
@@ -310,3 +311,96 @@ def test_preview_option_secret_ref_unaffected_by_unrelated_token(http_server):
     records, _, error = run_preview(config, token="some-bearer-token", limit=5)
     assert records == [{"id": 1}]
     assert error is None
+
+
+# --- Unity Catalog service-credential secret references (`_uc_secret`) ----
+# Mirrors the `_dbx_secret` tests above: a module-level `_uc_secret(...)`
+# call executes during `exec` and would raise outside Databricks (no active
+# Spark session / no dbutils / no Key Vault access) — `run_preview` must
+# source-substitute it the same way it does `_dbx_secret(...)`.
+
+
+def _uc_ref() -> UcSecretRef:
+    return UcSecretRef(
+        credential="kv-cred",
+        vault_url="https://my-vault.vault.azure.net/",
+        secret_name="api-token",
+    )
+
+
+def test_preview_uc_secret_ref_with_token_sends_it_to_server(http_server):
+    def route(query, headers, body):
+        assert headers.get("Authorization") == "Bearer real-token"
+        return 200, [{"id": 1}], {}
+
+    http_server.routes["/posts"] = route
+    config = make_config(
+        base_url=http_server.url,
+        auth=AuthConfig(type="bearer", uc_secret=_uc_ref()),
+    )
+    records, _, error = run_preview(config, token="real-token", limit=5)
+    assert records == [{"id": 1}]
+    assert error is None
+
+
+def test_preview_uc_secret_ref_without_token_sends_dummy_and_succeeds(http_server):
+    def route(query, headers, body):
+        assert headers.get("Authorization") == "Bearer REPLACE_ME"
+        return 200, [{"id": 1}], {}
+
+    http_server.routes["/posts"] = route
+    config = make_config(
+        base_url=http_server.url,
+        auth=AuthConfig(type="bearer", uc_secret=_uc_ref()),
+    )
+    records, _, error = run_preview(config, token=None, limit=5)
+    assert records == [{"id": 1}]
+    assert error is None
+
+
+def test_preview_api_key_uc_secret_ref_with_token(http_server):
+    def route(query, headers, body):
+        assert headers.get("X-API-Key") == "key-1"
+        return 200, [{"id": 1}], {}
+
+    http_server.routes["/posts"] = route
+    config = make_config(
+        base_url=http_server.url,
+        auth=AuthConfig(
+            type="api_key",
+            api_key_in="header",
+            api_key_name="X-API-Key",
+            uc_secret=_uc_ref(),
+        ),
+    )
+    records, _, error = run_preview(config, token="key-1", limit=5)
+    assert records == [{"id": 1}]
+    assert error is None
+
+
+def test_preview_oauth2_uc_secret_ref_with_token(http_server):
+    calls = {"token": 0}
+
+    def token_route(query, headers, body):
+        calls["token"] += 1
+        return 200, {"access_token": "tok-abc"}, {}
+
+    def data_route(query, headers, body):
+        assert headers.get("Authorization") == "Bearer tok-abc"
+        return 200, [{"id": 1}], {}
+
+    http_server.routes["/token"] = token_route
+    http_server.routes["/posts"] = data_route
+    config = make_config(
+        base_url=http_server.url,
+        auth=AuthConfig(
+            type="oauth2",
+            token_url=f"{http_server.url}/token",
+            client_id="cid",
+            uc_secret=_uc_ref(),
+        ),
+    )
+    records, _, error = run_preview(config, token="whatever-session-token", limit=5)
+    assert records == [{"id": 1}]
+    assert error is None
+    assert calls["token"] == 1

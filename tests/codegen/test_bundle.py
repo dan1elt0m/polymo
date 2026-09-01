@@ -472,6 +472,29 @@ def test_pyproject_toml_packages_the_pkg_directory():
     )
 
 
+def test_pyproject_toml_adds_azure_keyvault_dependency_when_uc_secret_present():
+    from polymo.config import AuthConfig, UcSecretRef
+
+    config = make_config(
+        base_url="https://x",
+        auth=AuthConfig(
+            type="bearer",
+            uc_secret=UcSecretRef(
+                credential="kv-cred",
+                vault_url="https://my-vault.vault.azure.net/",
+                secret_name="api-token",
+            ),
+        ),
+    )
+    files = _bundle(config, project_name="demo", catalog="main", schema="raw")
+    data = _load_toml(files["pyproject.toml"])
+
+    assert any(
+        dep.startswith("azure-keyvault-secrets")
+        for dep in data["project"]["dependencies"]
+    )
+
+
 # --- manifest -----------------------------------------------------------------
 
 

@@ -132,7 +132,10 @@ def generate_bundle(
         stream=stream,
     )
 
-    pyproject_toml = _ENV.get_template("bundle/pyproject.toml.jinja").render(pkg=pkg)
+    pyproject_toml = _ENV.get_template("bundle/pyproject.toml.jinja").render(
+        pkg=pkg,
+        has_uc_secret_refs=ctx["has_uc_secret_refs"],
+    )
 
     readme = _ENV.get_template("bundle/readme.md.jinja").render(
         project_name=project_name,

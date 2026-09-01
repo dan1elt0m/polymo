@@ -317,6 +317,23 @@ def create_app() -> FastAPI:
             )
         }
 
+    @app.get("/api/databricks/service-credentials")
+    async def list_databricks_service_credentials(
+        profile: Optional[str] = Query(None),
+    ) -> Dict[str, List[str]]:
+        data = await run_in_threadpool(
+            _run_databricks_cli,
+            ["credentials", "list-credentials", "--purpose", "SERVICE"],
+            profile,
+        )
+        return {
+            "service_credentials": databricks.extract_names(
+                data,
+                wrapper_keys=("credentials", "service_credentials"),
+                item_key="name",
+            )
+        }
+
     @app.post("/api/databricks/bootstrap", response_model=BootstrapResponse)
     async def bootstrap_databricks_project(
         payload: BootstrapRequest,

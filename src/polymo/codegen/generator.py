@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Mapping, Optional
 
 from jinja2 import Environment, PackageLoader, StrictUndefined
 
-from ..config import PartitionConfig, RestSourceConfig, SecretRef
+from ..config import PartitionConfig, RestSourceConfig, SecretRef, UcSecretRef
 from .templating import _PathFormatter, _render_template
 
 
@@ -171,6 +171,14 @@ _REPLACE_ME_RHS = '"REPLACE_ME"'
 def _dbx_secret_call(ref: SecretRef) -> str:
     """Render a `SecretRef` as a call to the generated `_dbx_secret` helper."""
     return f"_dbx_secret({_py_literal(ref.scope)}, {_py_literal(ref.key)})"
+
+
+def _uc_secret_call(ref: UcSecretRef) -> str:
+    """Render a `UcSecretRef` as a call to the generated `_uc_secret` helper."""
+    return (
+        f"_uc_secret({_py_literal(ref.credential)}, {_py_literal(ref.vault_url)}, "
+        f"{_py_literal(ref.secret_name)})"
+    )
 
 
 def _comment_escape(value: str) -> str:
@@ -473,21 +481,22 @@ def _context(config: RestSourceConfig) -> Dict[str, Any]:
     page_param = stream.pagination.page_param or "page"
     scope = " ".join(auth.scope)
 
-    api_token_rhs = (
-        _dbx_secret_call(auth.secret)
-        if auth.type == "bearer" and auth.secret
-        else _REPLACE_ME_RHS
-    )
-    api_key_rhs = (
-        _dbx_secret_call(auth.secret)
-        if auth.type == "api_key" and auth.secret
-        else _REPLACE_ME_RHS
-    )
-    client_secret_rhs = (
-        _dbx_secret_call(auth.secret)
-        if auth.type == "oauth2" and auth.secret
-        else _REPLACE_ME_RHS
-    )
+    def _auth_secret_rhs(auth_type: str) -> str:
+        """RHS for one auth secret slot: `_dbx_secret(...)`, `_uc_secret(...)`,
+        or the `"REPLACE_ME"` placeholder. `secret`/`uc_secret` are mutually
+        exclusive (enforced in `AuthConfig` parsing), so at most one applies.
+        """
+        if auth.type != auth_type:
+            return _REPLACE_ME_RHS
+        if auth.secret:
+            return _dbx_secret_call(auth.secret)
+        if auth.uc_secret:
+            return _uc_secret_call(auth.uc_secret)
+        return _REPLACE_ME_RHS
+
+    api_token_rhs = _auth_secret_rhs("bearer")
+    api_key_rhs = _auth_secret_rhs("api_key")
+    client_secret_rhs = _auth_secret_rhs("oauth2")
     option_placeholder_specs = [
         (
             var,
@@ -497,9 +506,15 @@ def _context(config: RestSourceConfig) -> Dict[str, Any]:
         )
         for var in option_placeholders
     ]
+    # option_secrets (the `{{ options.* }}` placeholder path) stays
+    # scope-only — see the docstring on `StreamConfig.option_secrets` — so
+    # only the top-level auth slot can ever need the `_uc_secret` helper.
     has_secret_refs = bool(
         (auth.type in ("bearer", "api_key", "oauth2") and auth.secret)
         or option_placeholder_refs
+    )
+    has_uc_secret_refs = bool(
+        auth.type in ("bearer", "api_key", "oauth2") and auth.uc_secret
     )
     return {
         "auth_type": auth.type,
@@ -528,6 +543,7 @@ def _context(config: RestSourceConfig) -> Dict[str, Any]:
         "api_key_rhs": api_key_rhs,
         "client_secret_rhs": client_secret_rhs,
         "has_secret_refs": has_secret_refs,
+        "has_uc_secret_refs": has_uc_secret_refs,
         "schema_ddl": stream.schema,
         "stream_name": stream.name,
         "stream_name_repr": _py_literal(stream.name),

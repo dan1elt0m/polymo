@@ -8,6 +8,17 @@ export interface SecretRef {
   key: string;
 }
 
+// A reference to a secret resolved via a Unity Catalog service credential
+// + Azure Key Vault, instead of a Databricks secret scope. Configs carry
+// ONLY this reference — never the secret value itself; the exported bundle
+// resolves it at runtime via `dbutils.credentials.getServiceCredentialsProvider`
+// + the Azure Key Vault SDK.
+export interface UcSecretRef {
+  credential: string;
+  vault_url: string;
+  secret_name: string;
+}
+
 export interface AuthConfig {
   type: 'none' | 'bearer' | 'oauth2' | 'api_key';
   token?: string | null;
@@ -24,8 +35,11 @@ export interface AuthConfig {
   // Optional Databricks secret-scope reference for the auth secret slot
   // (bearer token / api_key value / oauth2 client_secret). When set, the
   // exported bundle resolves the secret from Databricks instead of a
-  // REPLACE_ME placeholder.
+  // REPLACE_ME placeholder. Mutually exclusive with `uc_secret`.
   secret?: SecretRef | null;
+  // Optional Unity Catalog service-credential + Key Vault reference for the
+  // same auth secret slot. Mutually exclusive with `secret`.
+  uc_secret?: UcSecretRef | null;
 }
 
 export interface PaginationConfig {
@@ -171,6 +185,10 @@ export interface DatabricksSecretKeysResponse {
   secret_keys: string[];
 }
 
+export interface DatabricksServiceCredentialsResponse {
+  service_credentials: string[];
+}
+
 export interface DatabricksBootstrapResponse {
   project_path: string;
   files: string[];
@@ -197,10 +215,20 @@ export interface ConfigFormState {
   // Where the auth secret value comes from. 'inline' keeps today's
   // behavior (a session-only preview value / REPLACE_ME placeholder on
   // export); 'secret_scope' references a Databricks secret scope + key
-  // instead, resolved by the exported bundle at runtime.
-  authSecretMode: 'inline' | 'secret_scope';
+  // instead; 'uc_secret' references a Unity Catalog service credential +
+  // Azure Key Vault secret. Both non-inline modes are resolved by the
+  // exported bundle at runtime instead of a REPLACE_ME placeholder.
+  authSecretMode: 'inline' | 'secret_scope' | 'uc_secret';
   authSecretScope?: string;
   authSecretKey?: string;
+  // Unity Catalog service-credential secret source fields (authSecretMode
+  // === 'uc_secret'). authUcCredential holds the resolved credential name
+  // whether it was picked from the profile's list or typed as a custom
+  // value — the UI's select-vs-custom toggle is local component state, not
+  // part of the saved config.
+  authUcCredential?: string;
+  authUcVaultUrl?: string;
+  authUcSecretName?: string;
   streamName: string;
   streamPath: string;
   streaming: boolean;

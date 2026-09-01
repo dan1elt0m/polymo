@@ -7,6 +7,7 @@ import type {
 	DatabricksSchemasResponse,
 	DatabricksSecretScopesResponse,
 	DatabricksSecretKeysResponse,
+	DatabricksServiceCredentialsResponse,
 	DatabricksBootstrapResponse,
 	DatabricksCommandResponse,
 } from "../types";
@@ -93,6 +94,14 @@ export function listDatabricksSecretKeys(
 	profile?: string,
 ): Promise<DatabricksSecretKeysResponse> {
 	return getJson<DatabricksSecretKeysResponse>("/api/databricks/secret-keys", { scope, profile });
+}
+
+export function listDatabricksServiceCredentials(
+	profile?: string,
+): Promise<DatabricksServiceCredentialsResponse> {
+	return getJson<DatabricksServiceCredentialsResponse>("/api/databricks/service-credentials", {
+		profile,
+	});
 }
 
 export interface BootstrapDatabricksProjectBody {
