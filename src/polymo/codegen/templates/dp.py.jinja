@@ -6,6 +6,16 @@ from pyspark import pipelines as dp  # noqa: E402
 from pyspark.sql import SparkSession  # noqa: E402
 {% if bundle_pkg %}
 from {{ bundle_pkg }}.client import {{ bundle_imports | join(", ") }}  # noqa: E402
+from {{ bundle_pkg }} import client as _client_module  # noqa: E402
+from pyspark import cloudpickle  # noqa: E402
+
+# Spark pickles the DataSource/reader below BY REFERENCE (they are not
+# defined in __main__), so executors would otherwise need `{{ bundle_pkg }}`
+# importable on their own sys.path — but databricks.yml's root_path only
+# extends the driver's. Registering the client module for by-value pickling
+# ships its code inside the pickle payload instead, so executors never need
+# to import it.
+cloudpickle.register_pickle_by_value(_client_module)
 {% endif %}
 
 spark = SparkSession.getActiveSession()

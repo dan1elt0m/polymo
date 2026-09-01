@@ -108,6 +108,8 @@ Fill in a **Project name** (defaults to the connector's table name) and a **Proj
 
 `src/<pkg>/client.py` is never a re-derived or hand-simplified copy of the exported script — it *is* the same `generate_core()` output, so the bundle project can never drift from what the Generated Code pane and the Preview panel show you.
 
+`pipelines/<stream>.py` also calls `cloudpickle.register_pickle_by_value()` on the imported `<pkg>.client` module right after importing from it: `databricks.yml`'s `root_path` only extends the *driver's* `sys.path`, so without this, an executor unpickling the data source would fail with `ModuleNotFoundError: No module named '<pkg>'`; registering the module ships its code inside the pickle payload instead, so executors never need to import it.
+
 **Overwrite semantics are file-scoped, not directory-scoped.** Bootstrapping into a non-empty directory is refused by default; checking **Overwrite bundle files in existing folder** lets it proceed, but it only overwrites the six bundle files listed above — anything else you've added to that project directory (a `.git` folder, notes, other pipelines, local CLI state) is left untouched.
 
 ### Deploy and Run

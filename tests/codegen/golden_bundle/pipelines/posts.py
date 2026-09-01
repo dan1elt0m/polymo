@@ -9,6 +9,16 @@ from typing import Any, Iterator
 from pyspark import pipelines as dp  # noqa: E402
 from pyspark.sql import SparkSession  # noqa: E402
 from jsonplaceholder_demo.client import fetch_records, _infer_schema  # noqa: E402
+from jsonplaceholder_demo import client as _client_module  # noqa: E402
+from pyspark import cloudpickle  # noqa: E402
+
+# Spark pickles the DataSource/reader below BY REFERENCE (they are not
+# defined in __main__), so executors would otherwise need `jsonplaceholder_demo`
+# importable on their own sys.path — but databricks.yml's root_path only
+# extends the driver's. Registering the client module for by-value pickling
+# ships its code inside the pickle payload instead, so executors never need
+# to import it.
+cloudpickle.register_pickle_by_value(_client_module)
 
 spark = SparkSession.getActiveSession()
 

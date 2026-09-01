@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import ast
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -150,6 +152,125 @@ def test_streaming_pipeline_does_not_import_fetch_records():
     assert "WINDOWS" not in import_line
     assert "_infer_schema" not in import_line
     assert "_write_state" not in import_line
+
+
+# --- executor pickle simulation ----------------------------------------------
+# The critical regression this fix closes: a bundle-deployed pipeline is
+# pickled by Spark on the driver and unpickled on an *executor* that never
+# ran `databricks.yml`'s root_path sys.path extension (that only applies to
+# the driver process). Without `cloudpickle.register_pickle_by_value`, the
+# executor's unpickle fails with `ModuleNotFoundError: No module named
+# '<pkg>'` because the DataSource/reader reference the client module's
+# functions BY REFERENCE, not by value.
+#
+# This is simulated with two real subprocesses sharing nothing but a pickle
+# file on disk: subprocess A has the generated `src/<pkg>/client.py` on its
+# sys.path (like the driver) and performs exactly the import + registration
+# dance the generated pipeline file performs, then pickles `fetch_records`.
+# Subprocess B has NOTHING of `<pkg>` on its sys.path (like an executor) and
+# just unpickles + calls the function against a real mock HTTP server. A
+# negative-control run (pickled without the registration) proves the test
+# actually exercises the failure mode this fix prevents, not just a tautology.
+
+_BUILD_PICKLE_SCRIPT = """
+import importlib
+import sys
+
+pkg, src_root, register, out_path = sys.argv[1], sys.argv[2], sys.argv[3] == "1", sys.argv[4]
+sys.path.insert(0, src_root)
+
+from pyspark import cloudpickle
+
+client_module = importlib.import_module(f"{pkg}.client")
+fetch_records = client_module.fetch_records
+
+if register:
+    cloudpickle.register_pickle_by_value(client_module)
+
+with open(out_path, "wb") as fh:
+    fh.write(cloudpickle.dumps(fetch_records))
+"""
+
+_LOAD_AND_CALL_SCRIPT = """
+import json
+import sys
+
+from pyspark import cloudpickle
+
+with open(sys.argv[1], "rb") as fh:
+    fetch_records = cloudpickle.loads(fh.read())
+
+sys.stdout.write(json.dumps(list(fetch_records())))
+"""
+
+
+def test_executor_can_unpickle_client_functions_without_pkg_on_its_path(
+    tmp_path, http_server
+):
+    http_server.routes["/posts"] = lambda query, headers, body: (
+        200,
+        [{"id": 1, "title": "hello from the executor"}],
+        {},
+    )
+    config = make_config(base_url=http_server.url, name="posts", path="/posts")
+
+    pkg = "execsim_pkg"
+    src_root = tmp_path / "driver_sys_path" / "src"
+    pkg_dir = src_root / pkg
+    pkg_dir.mkdir(parents=True)
+    (pkg_dir / "__init__.py").write_text("")
+    (pkg_dir / "client.py").write_text(generate_core(config))
+
+    build_script = tmp_path / "build_pickle.py"
+    build_script.write_text(_BUILD_PICKLE_SCRIPT)
+    load_script = tmp_path / "load_and_call.py"
+    load_script.write_text(_LOAD_AND_CALL_SCRIPT)
+
+    # Executor working directory: deliberately NOT src_root, and nothing
+    # about `pkg` is importable from here (unlike the driver, which got
+    # root_path added to its sys.path by databricks.yml).
+    executor_cwd = tmp_path / "executor_cwd"
+    executor_cwd.mkdir()
+
+    def build(register: str, out_name: str) -> Path:
+        out_path = tmp_path / out_name
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(build_script),
+                pkg,
+                str(src_root),
+                register,
+                str(out_path),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        return out_path
+
+    def load_on_executor(pickle_path: Path) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, str(load_script), str(pickle_path)],
+            capture_output=True,
+            text=True,
+            cwd=str(executor_cwd),
+        )
+
+    # --- positive: registered by value, exactly like the generated pipeline file
+    registered_pickle = build("1", "payload_registered.pkl")
+    result = load_on_executor(registered_pickle)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == [{"id": 1, "title": "hello from the executor"}]
+
+    # --- negative control: same flow, minus the registration line this fix
+    # adds. Proves the executor really does need it — without this, the
+    # positive result above wouldn't demonstrate anything.
+    unregistered_pickle = build("0", "payload_unregistered.pkl")
+    failure = load_on_executor(unregistered_pickle)
+    assert failure.returncode != 0
+    assert "ModuleNotFoundError" in failure.stderr
+    assert pkg in failure.stderr
 
 
 # --- databricks.yml -----------------------------------------------------------
