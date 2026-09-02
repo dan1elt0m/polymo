@@ -14,7 +14,7 @@
 
 # Welcome to Polymo
 
-Setting up API ingestion in Databricks Lakeflow Declarative Pipelines is tricky, because it involves classes and requires knowledge of inner working of declrative pipelines. Polymo is a tool that helps to define the pipeline from the [Polymo UI](docs/builder-ui.md), it allows you to preview real responses locally, and export a standalone [Lakeflow Declarative Pipelines](https://docs.databricks.com/aws/en/dlt/) pipeline. `polymo` is never a dependency of the scripts it generates.
+Setting up API ingestion in Databricks Lakeflow Declarative Pipelines is tricky, because it involves classes and requires knowledge of inner working of declarative pipelines. Polymo is a tool that helps to define the pipeline from the [Polymo UI](docs/builder-ui.md), it allows you to preview real responses locally, and export a standalone [Lakeflow Declarative Pipelines](https://docs.databricks.com/aws/en/dlt/) pipeline. `polymo` is never a dependency of the scripts it generates.
 The output is plain Python that only needs `requests`, the standard library, and `pyspark`. Nothing is imported from `polymo`, and there is no config file to load at runtime. The generated code is yours: edit it, version it, review it like any other code.
 
 ## What Polymo generates
