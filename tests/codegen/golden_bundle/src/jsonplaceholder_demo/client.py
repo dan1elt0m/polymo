@@ -12,6 +12,9 @@ HEADERS: dict[str, str] = {}
 TIMEOUT: float = 30.0
 
 MAX_RETRIES: int = 5
+INITIAL_DELAY: float = 1.0
+MAX_DELAY: float = 30.0
+BACKOFF: float = 2.0
 
 
 def _should_retry(status: int) -> bool:
@@ -19,22 +22,22 @@ def _should_retry(status: int) -> bool:
 
 
 def _request(session: requests.Session, url: str, params: dict[str, Any] | None) -> requests.Response:
-    delay = 1.0
+    delay = INITIAL_DELAY
     for attempt in range(MAX_RETRIES + 1):
         try:
             response = session.get(url, params=params, timeout=TIMEOUT)
         except requests.exceptions.Timeout:
-            if not True or attempt == MAX_RETRIES:
+            if attempt == MAX_RETRIES:
                 raise
         except requests.exceptions.ConnectionError:
-            if not True or attempt == MAX_RETRIES:
+            if attempt == MAX_RETRIES:
                 raise
         else:
             if not _should_retry(response.status_code) or attempt == MAX_RETRIES:
                 response.raise_for_status()
                 return response
         time.sleep(delay)
-        delay = min(delay * 2.0, 30.0) if 30.0 > 0 else delay * 2.0
+        delay = min(delay * BACKOFF, MAX_DELAY)
     raise RuntimeError("unreachable")
 
 

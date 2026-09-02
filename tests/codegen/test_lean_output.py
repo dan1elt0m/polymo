@@ -33,6 +33,29 @@ GOLDEN_BUNDLE_DIR = Path(__file__).parent / "golden_bundle"
 # pragmas — everything else must be gone from generated output.
 _ALLOWED_TRAILING_COMMENT_RE = re.compile(r"#\s*(noqa\b|type:\s*ignore\b)")
 
+# A config flag interpolated straight into a runtime condition ("if not
+# True or ...", "30.0 > 0") reads as generated, not hand-written — the
+# generator is supposed to specialize on the flag's value at generation
+# time instead. `\b\d+(\.\d+)?\s*[<>]=?\s*\d` catches a numeric-literal
+# comparison like `30.0 > 0`; it deliberately requires a digit on *both*
+# sides so real runtime comparisons against a variable (`status <= 599`,
+# `page >= int(total)`) don't trip it.
+_LITERAL_CONDITION_RE = re.compile(
+    r"\bnot True\b|\bnot False\b|\bif True\b|\bif False\b|\bor False\b|\band True\b"
+    r"|\b\d+(?:\.\d+)?\s*[<>]=?\s*\d"
+)
+
+
+def _assert_no_literal_conditions(code: str, label: str) -> None:
+    for lineno, line in enumerate(code.splitlines(), start=1):
+        match = _LITERAL_CONDITION_RE.search(line)
+        if match:
+            pytest.fail(
+                f"{label}:{lineno}: literal interpolated into a condition"
+                f" ({match.group(0)!r}) — specialize it at generation time"
+                f" instead: {line!r}"
+            )
+
 
 def _assert_no_stray_comments(code: str, label: str) -> None:
     for lineno, line in enumerate(code.splitlines(), start=1):
@@ -85,6 +108,11 @@ def _all_golden_py_files():
 @pytest.mark.parametrize("path", _all_golden_py_files(), ids=lambda p: p.name)
 def test_golden_py_files_have_no_stray_comments(path: Path):
     _assert_no_stray_comments(path.read_text(), str(path))
+
+
+@pytest.mark.parametrize("path", _all_golden_py_files(), ids=lambda p: p.name)
+def test_golden_py_files_have_no_literal_conditions(path: Path):
+    _assert_no_literal_conditions(path.read_text(), str(path))
 
 
 def test_golden_bundle_files_have_no_polymo_mentions():
@@ -170,6 +198,7 @@ def test_single_file_sweep_has_no_stray_comments_or_polymo_mentions(case):
     script = generate(SWEEP_CONFIGS[case])
     _assert_no_stray_comments(script, f"generate({case})")
     _assert_no_polymo_mentions(script, f"generate({case})")
+    _assert_no_literal_conditions(script, f"generate({case})")
 
 
 @pytest.mark.parametrize("case", SWEEP_CONFIGS)
@@ -177,6 +206,7 @@ def test_core_sweep_has_no_stray_comments_or_polymo_mentions(case):
     core = generate_core(SWEEP_CONFIGS[case])
     _assert_no_stray_comments(core, f"generate_core({case})")
     _assert_no_polymo_mentions(core, f"generate_core({case})")
+    _assert_no_literal_conditions(core, f"generate_core({case})")
 
 
 @pytest.mark.parametrize("case", SWEEP_CONFIGS)
@@ -187,6 +217,7 @@ def test_bundle_sweep_has_no_stray_comments_or_polymo_mentions(case):
     for relpath, content in files.items():
         if relpath.endswith(".py"):
             _assert_no_stray_comments(content, f"bundle({case})/{relpath}")
+            _assert_no_literal_conditions(content, f"bundle({case})/{relpath}")
         if relpath == ".polymo-bundle.json":
             continue
         _assert_no_polymo_mentions(content, f"bundle({case})/{relpath}")

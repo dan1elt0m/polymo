@@ -1,6 +1,8 @@
 """Lakeflow Declarative Pipelines connector for {{ stream_name_doc }}."""
 
+{% if max_retries > 0 %}
 import time
+{% endif %}
 from typing import Any, Iterator
 
 import requests
@@ -147,30 +149,60 @@ def get_token() -> str:
 {% endif %}
 
 MAX_RETRIES: int = {{ max_retries }}
+{% if max_retries > 0 %}
+INITIAL_DELAY: float = {{ initial_delay }}
+{% if max_delay > 0 %}
+MAX_DELAY: float = {{ max_delay }}
+{% endif %}
+BACKOFF: float = {{ multiplier }}
+{% endif %}
 
 
+{% if max_retries > 0 %}
 def _should_retry(status: int) -> bool:
     return {{ retry_condition }}
 
 
+{% endif %}
 def _request(session: requests.Session, url: str, params: dict[str, Any] | None) -> requests.Response:
-    delay = {{ initial_delay }}
+{% if max_retries == 0 %}
+    response = session.get(url, params=params, timeout=TIMEOUT)
+    response.raise_for_status()
+    return response
+{% else %}
+    delay = INITIAL_DELAY
     for attempt in range(MAX_RETRIES + 1):
+{% if retry_on_timeout or retry_on_connection_errors %}
         try:
             response = session.get(url, params=params, timeout=TIMEOUT)
+{% if retry_on_timeout %}
         except requests.exceptions.Timeout:
-            if not {{ retry_on_timeout }} or attempt == MAX_RETRIES:
+            if attempt == MAX_RETRIES:
                 raise
+{% endif %}
+{% if retry_on_connection_errors %}
         except requests.exceptions.ConnectionError:
-            if not {{ retry_on_connection_errors }} or attempt == MAX_RETRIES:
+            if attempt == MAX_RETRIES:
                 raise
+{% endif %}
         else:
             if not _should_retry(response.status_code) or attempt == MAX_RETRIES:
                 response.raise_for_status()
                 return response
+{% else %}
+        response = session.get(url, params=params, timeout=TIMEOUT)
+        if not _should_retry(response.status_code) or attempt == MAX_RETRIES:
+            response.raise_for_status()
+            return response
+{% endif %}
         time.sleep(delay)
-        delay = min(delay * {{ multiplier }}, {{ max_delay }}) if {{ max_delay }} > 0 else delay * {{ multiplier }}
+{% if max_delay > 0 %}
+        delay = min(delay * BACKOFF, MAX_DELAY)
+{% else %}
+        delay *= BACKOFF
+{% endif %}
     raise RuntimeError("unreachable")
+{% endif %}
 
 
 {% if total_pages_path or cursor_path or next_url_path %}
