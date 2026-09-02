@@ -1,7 +1,7 @@
 import React from "react";
 import type { ConfigFormState } from "../../../types";
-import { InfoTooltip } from "../../InfoTooltip";
 import { InputWithCursorPosition } from "../../InputWithCursorPosition";
+import { BTN_LINK, CheckboxRow, Disclosure, Field, ICON_BTN, INPUT, PlusIcon, TEXTAREA, XIcon, cx } from "../../ui/primitives";
 
 export interface RecordSelectorSectionProps {
   state: ConfigFormState;
@@ -44,102 +44,65 @@ export const RecordSelectorSection: React.FC<RecordSelectorSectionProps> = ({ st
   );
 
   const segments = state.recordFieldPath || [];
+  const summary = React.useMemo(() => {
+    const parts: string[] = [];
+    if (segments.length) parts.push(segments.filter(Boolean).join(".") || `${segments.length} segments`);
+    if (state.recordFilter.trim()) parts.push("filter");
+    if (state.castToSchemaTypes) parts.push("cast");
+    return parts.length ? parts.join(" · ") : "whole response";
+  }, [segments, state.recordFilter, state.castToSchemaTypes]);
 
   return (
-    <div className="space-y-3">
-      <button
-        type="button"
-        className="flex w-full items-center justify-between rounded-lg border border-border bg-background px-4 py-3 text-left text-sm font-medium text-slate-12 hover:border-blue-7 hover:bg-blue-3/20 dark:hover:bg-drac-selection/40 transition-colors duration-200"
-        onClick={() => setIsOpen((value) => !value)}
-        aria-expanded={isOpen}
-        aria-controls={TOGGLE_ID}
-      >
-        <span className="flex items-center gap-2">
-          Record Selector
-          <span className="text-xs font-normal text-muted">({segments.length ? `${segments.length} path segments` : "optional"})</span>
-        </span>
-        <span className={`transition-transform duration-200 ${isOpen ? "rotate-90" : ""}`}>
-          <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-            <path d="M7.25 3.75a.75.75 0 0 1 1.06 0l5 5a.75.75 0 0 1 0 1.06l-5 5a.75.75 0 1 1-1.06-1.06L11.69 10 7.25 5.56a.75.75 0 0 1 0-1.06Z" />
-          </svg>
-        </span>
-      </button>
-
-      {isOpen && (
-        <div
-          id={TOGGLE_ID}
-          className="space-y-4 rounded-xl border border-border/60 dark:border-drac-border/60 bg-surface/70 dark:bg-[#1f232b]/80 backdrop-blur-sm p-5 shadow-inner transition ring-1 ring-border/40 dark:ring-drac-border/30 animate-in fade-in duration-200"
-        >
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <h4 className="text-sm font-semibold text-slate-12 dark:text-drac-foreground">Record path</h4>
-              <button
-                type="button"
-                className="inline-flex items-center gap-1.5 rounded-full border border-border/60 dark:border-drac-border bg-background/70 dark:bg-[#242a33] px-4 py-1.5 text-xs font-medium text-slate-11 dark:text-drac-foreground shadow-sm transition-all duration-200 hover:border-blue-7 hover:text-blue-11 dark:hover:border-drac-accent dark:hover:text-drac-accent hover:scale-105 hover:shadow-md dark:hover:shadow-[0_0_8px_rgba(80,250,123,0.15)] hover:bg-blue-3/50 dark:hover:bg-[#273242] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-7 dark:focus-visible:ring-drac-accent"
-                onClick={handleAddSegment}
-              >
-                <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-                  <path d="M10 4a1 1 0 0 1 1 1v4h4a1 1 0 1 1 0 2h-4v4a1 1 0 1 1-2 0v-4H5a1 1 0 1 1 0-2h4V5a1 1 0 0 1 1-1Z" />
-                </svg>
-                <span>Add segment</span>
+    <Disclosure id={TOGGLE_ID} title="Record selector" summary={summary} open={isOpen} onToggle={() => setIsOpen((v) => !v)}>
+      <Field as="div" label="Record path" tooltip="Dotted path segments pointing at the array of records inside the response payload.">
+        {segments.length > 0 ? (
+          <ul className="flex flex-wrap items-center gap-2">
+            {segments.map((segment, index) => (
+              <li key={`record-path-${index}`} className="flex items-center gap-1">
+                {index > 0 && <span className="font-mono text-xs text-fg-subtle">.</span>}
+                <InputWithCursorPosition
+                  className={cx(INPUT, "max-w-[9rem] font-mono text-xs")}
+                  placeholder={index === 0 ? "data" : "items"}
+                  value={segment}
+                  onValueChange={(value) => handleUpdateSegment(index, value)}
+                  aria-label={`Path segment ${index + 1}`}
+                />
+                <button type="button" className={ICON_BTN} onClick={() => handleRemoveSegment(index)} aria-label={`Remove segment ${index + 1}`}>
+                  <XIcon />
+                </button>
+              </li>
+            ))}
+            <li>
+              <button type="button" className={BTN_LINK} onClick={handleAddSegment}>
+                <PlusIcon /> Add segment
               </button>
-            </div>
-
-            {segments.length > 0 ? (
-              <ul className="flex flex-col gap-2">
-                {segments.map((segment, index) => (
-                  <li key={`record-path-${index}`} className="group relative">
-                    <div className="flex items-center gap-2">
-                      <InputWithCursorPosition
-                        className="flex-1 rounded-lg border border-border dark:border-drac-border bg-background/70 dark:bg-[#272d38] px-4 py-2 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:focus-visible:border-drac-accent focus-visible:ring-1 focus-visible:ring-blue-5"
-                        placeholder={index === 0 ? "data" : "items"}
-                        value={segment}
-                        onValueChange={(value) => handleUpdateSegment(index, value)}
-                      />
-                      <button
-                        type="button"
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border/60 dark:border-drac-border bg-background/70 dark:bg-[#2d3541] text-slate-11 dark:text-drac-muted opacity-0 shadow-sm transition-all duration-200 group-hover:opacity-100 hover:border-red-7 hover:text-red-9 hover:bg-red-3/40 dark:hover:border-drac-red/80 dark:hover:text-drac-red dark:hover:bg-[#3a3f4b]"
-                        onClick={() => handleRemoveSegment(index)}
-                        aria-label={`Remove segment ${index + 1}`}
-                      >
-                        <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-                          <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
-                        </svg>
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-sm text-muted dark:text-drac-muted">No selector path configured.</p>
-            )}
+            </li>
+          </ul>
+        ) : (
+          <div className="flex items-center gap-3 text-xs text-fg-muted">
+            <span>No selector path — records are read from the response root.</span>
+            <button type="button" className={BTN_LINK} onClick={handleAddSegment}>
+              <PlusIcon /> Add segment
+            </button>
           </div>
+        )}
+      </Field>
 
-          <label className="flex flex-col gap-2">
-            <div className="flex items-center gap-1">
-              <span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Record filter (optional)</span>
-              <InfoTooltip text="Provide a Python expression evaluated against each record (access the payload via record)." />
-            </div>
-            <textarea
-              className="w-full rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border focus-visible:ring-1 focus-visible:ring-blue-5"
-              rows={3}
-              placeholder="record.get('status') == 'active'"
-              value={state.recordFilter}
-              onChange={(event) => onUpdateState({ recordFilter: event.target.value })}
-            />
-          </label>
+      <Field label="Record filter" tooltip="Provide a Python expression evaluated against each record (access the payload via record).">
+        <textarea
+          className={cx(TEXTAREA, "min-h-[60px] font-mono text-xs")}
+          rows={2}
+          placeholder="record.get('status') == 'active'"
+          value={state.recordFilter}
+          onChange={(event) => onUpdateState({ recordFilter: event.target.value })}
+        />
+      </Field>
 
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              className="h-4 w-4 rounded border-border text-blue-7 focus:ring-blue-5"
-              checked={state.castToSchemaTypes}
-              onChange={(event) => onUpdateState({ castToSchemaTypes: event.target.checked })}
-            />
-            <span className="text-sm text-slate-11 dark:text-drac-foreground/90">Cast values to schema types</span>
-          </label>
-        </div>
-      )}
-    </div>
+      <CheckboxRow
+        label="Cast values to schema types"
+        checked={state.castToSchemaTypes}
+        onChange={(event) => onUpdateState({ castToSchemaTypes: event.target.checked })}
+      />
+    </Disclosure>
   );
 };

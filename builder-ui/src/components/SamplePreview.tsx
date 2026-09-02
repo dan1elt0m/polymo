@@ -4,6 +4,7 @@ import { clsx } from "clsx";
 import { collectColumns, formatCell, truncate } from "../lib/table";
 import { PAGE_SIZE_OPTIONS, SAMPLE_VIEWS } from "../lib/constants";
 import type { RawPagePayload, StatusState } from "../types";
+import { BTN_PRIMARY, BTN_SECONDARY, BTN_SMALL, Callout, ChevronIcon, INPUT, LABEL, SegmentedControl, cx } from "./ui/primitives";
 
 interface SamplePreviewProps {
 	status: StatusState;
@@ -23,8 +24,11 @@ interface SamplePreviewProps {
 	dtypes: Array<{ column: string; type: string }>;
 	rawPages: RawPagePayload[];
 	restError: string | null;
-	onCopySchema: () => void; // new
+	onCopySchema: () => void;
 	placeholderNotice?: string | null;
+	/** Focus mode: the preview owns the full width. */
+	focus: boolean;
+	onToggleFocus: () => void;
 }
 
 export const SamplePreview: React.FC<SamplePreviewProps> = ({
@@ -47,6 +51,8 @@ export const SamplePreview: React.FC<SamplePreviewProps> = ({
 	restError,
 	onCopySchema,
 	placeholderNotice,
+	focus,
+	onToggleFocus,
 }) => {
 	const hasTableData = data.length > 0;
 	const hasRawData = rawPages.length > 0 || Boolean(restError);
@@ -57,198 +63,159 @@ export const SamplePreview: React.FC<SamplePreviewProps> = ({
 			? data.slice((safePage - 1) * pageSize, safePage * pageSize)
 			: [];
 	const columns = hasTableData && view === SAMPLE_VIEWS.TABLE ? collectColumns(rows) : [];
+	const isTable = hasTableData && view === SAMPLE_VIEWS.TABLE;
 
 	return (
-		<div className="flex h-full flex-col gap-4 min-w-0 w-full max-w-full">
-			<header className="flex flex-col gap-3 min-w-0">
-				<div className="flex items-center justify-between gap-3 min-w-0 flex-wrap">
-					<h2 className="text-lg font-semibold text-slate-12 truncate">Data Preview</h2>
-					<div className="flex items-center gap-2">
+		<div className="flex h-full min-h-0 w-full min-w-0 flex-col">
+			<header className="flex min-h-12 shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-4 py-2">
+				<h2 className="shrink-0 text-sm font-semibold text-fg">Data preview</h2>
+				<span className="status-slot flex min-w-0 flex-1 items-center">
+					<StatusPill status={status} />
+				</span>
+				<div className="ml-auto flex shrink-0 items-center gap-2">
+					<label className="flex items-center gap-1.5">
+						<span className={cx(LABEL, "label-long")}>Limit</span>
+						<input
+							type="number"
+							min={1}
+							max={1000}
+							className={cx(INPUT, "h-8 max-w-[4.5rem] px-2 text-xs tabular-nums")}
+							value={limit}
+							onChange={(event) => onLimitChange(Number(event.target.value))}
+							aria-label="Sample row limit"
+						/>
+					</label>
 					<button
 						type="button"
-						className="rounded-full border border-border px-4 py-2 text-sm font-semibold text-slate-12 transition hover:border-blue-7 hover:text-blue-11 disabled:opacity-50"
+						className={cx(BTN_SECONDARY, "h-8 px-3 text-xs")}
+						onClick={onCopySchema}
+						disabled={!dtypes.length && !data.length}
+						aria-label="Copy schema in DDL format"
+						title="Copy schema as DDL"
+					>
+						<span className="label-long">Copy schema</span>
+						<span className="label-short">DDL</span>
+					</button>
+					<button
+						type="button"
+						className={cx(BTN_PRIMARY, "h-8 px-3.5 text-xs")}
 						onClick={onPreview}
 						disabled={isBusy}
 						data-testid="data-preview-button"
 					>
-							{isBusy ? "Working…" : "Preview"}
-						</button>
-						<button
-							type="button"
-							className="rounded-full border border-border px-4 py-2 text-sm font-medium text-slate-11 hover:border-blue-7 hover:text-blue-11 disabled:opacity-50"
-							onClick={onCopySchema}
-							disabled={(!dtypes.length && !data.length)}
-							aria-label="Copy schema in DDL format"
-						>
-							Copy Schema
-						</button>
-					</div>
-				</div>
-				<div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(200px,auto)] lg:items-end min-w-0">
-					<div className="flex flex-wrap items-end gap-3 min-w-0">
-						<label className="flex flex-col gap-1">
-							<span className="text-xs font-semibold uppercase tracking-wide text-muted">
-								Limit
-							</span>
-							<input
-								type="number"
-								min={1}
-								max={1000}
-								className="w-24 rounded-lg border border-border bg-background px-3 py-2 text-sm text-slate-12 shadow-sm focus-visible:border-blue-7"
-								value={limit}
-								onChange={(event) => onLimitChange(Number(event.target.value))}
-							/>
-						</label>
-					</div>
-					<div className="flex justify-end">
-						<StatusPill status={status} />
-					</div>
+						{isBusy ? "Working…" : "Preview"}
+					</button>
+					<button
+						type="button"
+						className={cx(
+							"inline-flex h-8 w-8 items-center justify-center rounded-md border transition-colors",
+							focus
+								? "border-accent bg-accent-soft text-accent-text"
+								: "border-border bg-surface text-fg-muted hover:border-border-strong hover:text-fg",
+						)}
+						onClick={onToggleFocus}
+						aria-pressed={focus}
+						aria-label={focus ? "Exit focus mode" : "Focus preview (hide configuration)"}
+						title={focus ? "Exit focus mode" : "Focus preview"}
+						data-testid="focus-preview-toggle"
+					>
+						{focus ? (
+							<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden="true">
+								<path d="M6.5 2.5v4h-4M9.5 13.5v-4h4M2.5 9.5h4v4M13.5 6.5h-4v-4" />
+							</svg>
+						) : (
+							<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden="true">
+								<path d="M2.5 6.5v-4h4M13.5 9.5v4h-4M2.5 9.5v4h4M13.5 6.5v-4h-4" />
+							</svg>
+						)}
+					</button>
 				</div>
 			</header>
 
-			{placeholderNotice && (
-				<div
-					className="flex items-start gap-2 rounded-md border border-blue-7/40 bg-blue-3/40 dark:bg-drac-accent/15 dark:border-drac-accent/40 px-3 py-2 text-xs text-blue-11 dark:text-drac-accent shadow-sm"
-					data-status="info"
-					data-testid="option-placeholder-notice"
-				>
-					<span className="mt-0.5 inline-block h-2 w-2 flex-shrink-0 rounded-full bg-blue-9 dark:bg-drac-accent" />
-					<p className="leading-snug">{placeholderNotice}</p>
-				</div>
-			)}
+			<div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
+				{status.tone === "error" && (
+					<Callout tone="error" testId="preview-error-notice">
+						{status.message}
+					</Callout>
+				)}
+				{placeholderNotice && (
+					<Callout tone="info" testId="option-placeholder-notice">
+						{placeholderNotice}
+					</Callout>
+				)}
 
-			<div className="flex flex-col gap-3 min-w-0 w-full">
-				<div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-background px-3 py-2 min-w-0">
-					<div className="inline-flex rounded-full border border-border bg-surface p-1 text-xs font-semibold">
+				<div className="flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2">
+					<div className="flex items-center gap-2">
+						<SegmentedControl
+							aria-label="Preview view"
+							size="sm"
+							value={view}
+							onChange={onViewChange}
+							options={[
+								{ value: SAMPLE_VIEWS.TABLE, label: "DataFrame", disabled: !hasTableData || isBusy, testId: "view-tab-dataframe" },
+								{ value: SAMPLE_VIEWS.JSON, label: "Records", disabled: !hasTableData || isBusy, testId: "view-tab-records" },
+								{ value: SAMPLE_VIEWS.RAW, label: "Raw API", disabled: !hasRawData || isBusy, testId: "view-tab-raw" },
+							]}
+						/>
 						<button
 							type="button"
-							className={clsx(
-								"rounded-full px-3 py-1 transition",
-								view === SAMPLE_VIEWS.TABLE ? "bg-blue-9 text-white" : "text-slate-11",
-							)}
-							onClick={() => onViewChange(SAMPLE_VIEWS.TABLE)}
-							disabled={!hasTableData || isBusy}
-							data-testid="view-tab-dataframe"
-						>
-							DataFrame
-						</button>
-						<button
-							type="button"
-							className={clsx(
-								"rounded-full px-3 py-1 transition",
-								view === SAMPLE_VIEWS.JSON ? "bg-blue-9 text-white" : "text-slate-11",
-							)}
-							onClick={() => onViewChange(SAMPLE_VIEWS.JSON)}
-							disabled={!hasTableData || isBusy}
-							data-testid="view-tab-records"
-						>
-							Records
-						</button>
-						<button
-							type="button"
-							className={clsx(
-								"rounded-full px-3 py-1 transition",
-								view === SAMPLE_VIEWS.RAW ? "bg-blue-9 text-white" : "text-slate-11",
-							)}
-							onClick={() => onViewChange(SAMPLE_VIEWS.RAW)}
-							disabled={!hasRawData || isBusy}
-							data-testid="view-tab-raw"
-						>
-							Raw API
-						</button>
-						<button
-							type="button"
-							className={clsx(
-								"rounded-full px-3 py-1 transition",
-								wrap && view === SAMPLE_VIEWS.TABLE ? "bg-blue-9 text-white" : "text-slate-11",
+							className={cx(
+								"inline-flex h-7 items-center rounded-md border px-2.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+								wrap && isTable ? "border-accent bg-accent-soft text-accent-text" : "border-border bg-field text-fg-muted hover:text-fg",
 							)}
 							onClick={onWrapToggle}
 							disabled={!hasTableData || view !== SAMPLE_VIEWS.TABLE || isBusy}
+							aria-pressed={wrap && isTable}
 						>
-							Wrap Text
+							Wrap text
 						</button>
 					</div>
-					<div className="flex items-center gap-3 text-sm text-slate-11">
-						<SelectPageSize
-							value={pageSize}
-							onValueChange={onPageSizeChange}
-							disabled={!hasTableData || isBusy}
-						/>
-						<div className="flex items-center gap-1">
+					<div className="flex items-center gap-2 text-xs text-fg-muted">
+						{hasTableData && (
+							<span className="tabular-nums">
+								{data.length} row{data.length === 1 ? "" : "s"}
+							</span>
+						)}
+						<SelectPageSize value={pageSize} onValueChange={onPageSizeChange} disabled={!hasTableData || isBusy} />
+						<div className="inline-flex items-center rounded-md border border-border bg-field">
 							<button
 								type="button"
-								className="rounded-full border border-border px-2 py-1 text-xs font-semibold text-slate-12 transition hover:border-blue-7 hover:text-blue-11 disabled:opacity-50"
+								className="inline-flex h-7 w-7 items-center justify-center rounded-l-md text-fg-muted transition-colors hover:bg-raised hover:text-fg disabled:cursor-not-allowed disabled:opacity-40"
 								onClick={() => onPageChange(Math.max(1, safePage - 1))}
 								disabled={!hasTableData || safePage <= 1 || isBusy}
+								aria-label="Previous page"
 							>
-								Prev
+								<ChevronIcon direction="left" />
 							</button>
-							<span className="text-xs text-muted">
-								{totalPages ? `Page ${safePage} of ${totalPages}` : "Page 0 of 0"}
+							<span className="min-w-[4.5rem] border-x border-border px-2 text-center tabular-nums">
+								{totalPages ? `${safePage} / ${totalPages}` : "0 / 0"}
 							</span>
 							<button
 								type="button"
-								className="rounded-full border border-border px-2 py-1 text-xs font-semibold text-slate-12 transition hover:border-blue-7 hover:text-blue-11 disabled:opacity-50"
+								className="inline-flex h-7 w-7 items-center justify-center rounded-r-md text-fg-muted transition-colors hover:bg-raised hover:text-fg disabled:cursor-not-allowed disabled:opacity-40"
 								onClick={() => onPageChange(Math.min(totalPages, safePage + 1))}
 								disabled={!hasTableData || safePage >= totalPages || isBusy}
+								aria-label="Next page"
 							>
-								Next
+								<ChevronIcon />
 							</button>
 						</div>
 					</div>
 				</div>
 
-				<div className="min-h-[260px] rounded-2xl border border-border bg-background overflow-hidden w-full">
-					{hasTableData && view === SAMPLE_VIEWS.TABLE ? (
-						<div className="w-full h-full overflow-auto relative">
-							<div className="p-4 w-max min-w-full">
-								{renderOutput({ view, data, rows, columns, dtypes, wrap, rawPages, restError })}
-							</div>
-						</div>
-					) : (
-						<div className="p-4 overflow-x-auto w-full">
-							{renderOutput({ view, data, rows, columns, dtypes, wrap, rawPages, restError })}
-						</div>
+				<div
+					className={cx(
+						"scroll-thin relative min-h-0 flex-1 overflow-auto rounded-lg border border-border bg-field",
+						!isTable && "p-4",
 					)}
+					data-testid="preview-viewport"
+				>
+					{renderOutput({ view, data, rows, columns, dtypes, wrap, rawPages, restError })}
 				</div>
 			</div>
 		</div>
 	);
 };
-
-interface SelectRootProps {
-	value: string;
-	options: string[];
-	onValueChange: (value: string) => void;
-	placeholder: string;
-}
-
-const SelectRoot: React.FC<SelectRootProps> = ({ value, onValueChange, options, placeholder }) => (
-	<Select.Root value={value} onValueChange={onValueChange}>
-		<Select.Trigger className="inline-flex items-center justify-between gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm text-slate-12 shadow-sm focus-visible:border-blue-7">
-			<Select.Value placeholder={placeholder} />
-			<ChevronDownIcon className="h-4 w-4 text-slate-9" />
-		</Select.Trigger>
-		<Select.Content className="z-20 overflow-hidden rounded-xl border border-border bg-surface shadow-soft">
-			<Select.Viewport className="p-1">
-				{!options.length && (
-					<Select.Item value="" disabled className="rounded-lg px-3 py-2 text-sm text-muted">
-						No streams
-					</Select.Item>
-				)}
-				{options.map((option) => (
-					<Select.Item
-						key={option}
-						value={option}
-						className="flex cursor-pointer select-none items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-12 outline-none data-[state=checked]:bg-blue-4"
-					>
-						<Select.ItemText>{option}</Select.ItemText>
-					</Select.Item>
-				))}
-			</Select.Viewport>
-		</Select.Content>
-	</Select.Root>
-);
 
 interface SelectPageSizeProps {
 	value: number;
@@ -262,33 +229,39 @@ const SelectPageSize: React.FC<SelectPageSizeProps> = ({ value, onValueChange, d
 		onValueChange={(next) => onValueChange(Number(next))}
 		disabled={disabled}
 	>
-		<Select.Trigger className="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-1 text-xs text-slate-11 shadow-sm focus-visible:border-blue-7 disabled:opacity-50">
+		<Select.Trigger
+			className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-field px-2.5 text-xs text-fg-muted transition-colors hover:text-fg disabled:cursor-not-allowed disabled:opacity-40"
+			aria-label="Rows per page"
+		>
 			<Select.Value />
-			<ChevronDownIcon className="h-3 w-3" />
+			<ChevronIcon direction="down" className="h-3 w-3" />
 		</Select.Trigger>
-		<Select.Content className="z-20 overflow-hidden rounded-xl border border-border bg-surface shadow-soft">
-			<Select.Viewport className="p-1">
-				{PAGE_SIZE_OPTIONS.map((option) => (
-					<Select.Item
-						key={option}
-						value={String(option)}
-						className="flex cursor-pointer select-none items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-slate-11 outline-none data-[state=checked]:bg-blue-4"
-					>
-						<Select.ItemText>{option} rows</Select.ItemText>
-					</Select.Item>
-				))}
-			</Select.Viewport>
-		</Select.Content>
+		<Select.Portal>
+			<Select.Content className="z-50 overflow-hidden rounded-md border border-border bg-surface shadow-card" position="popper" sideOffset={4}>
+				<Select.Viewport className="p-1">
+					{PAGE_SIZE_OPTIONS.map((option) => (
+						<Select.Item
+							key={option}
+							value={String(option)}
+							className="flex cursor-pointer select-none items-center gap-2 rounded px-2 py-1.5 text-xs text-fg outline-none data-[highlighted]:bg-raised data-[state=checked]:text-accent-text"
+						>
+							<Select.ItemText>{option} rows</Select.ItemText>
+						</Select.Item>
+					))}
+				</Select.Viewport>
+			</Select.Content>
+		</Select.Portal>
 	</Select.Root>
 );
 
 const StatusPill: React.FC<{ status: StatusState }> = ({ status }) => (
 	<span
-		className="inline-flex items-center gap-2 rounded-full border border-border bg-background px-3 py-1 text-xs font-semibold"
+		className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-border bg-field px-2.5 py-0.5 text-xs font-medium"
 		data-status={status.tone}
+		title={status.message}
 	>
-		<span className="inline-block h-2 w-2 rounded-full bg-current" />
-		{status.message}
+		<span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-current" />
+		<span className="truncate">{status.message}</span>
 	</span>
 );
 
@@ -313,23 +286,19 @@ function renderOutput({
 }) {
 	if (view === SAMPLE_VIEWS.RAW) {
 		if (!rawPages.length && !restError) {
-			return (
-				<p className="text-sm text-muted" data-status="info">
-					REST client did not return any data.
-				</p>
-			);
+			return <EmptyState>REST client did not return any data.</EmptyState>;
 		}
 
 		return (
 			<div className="space-y-3">
 				{restError && (
-					<p className="text-sm font-medium text-red-11" data-status="error">
+					<p className="text-sm font-medium text-error" data-status="error">
 						{restError}
 					</p>
 				)}
 				<pre
 					data-status={restError ? "error" : "info"}
-					className="whitespace-pre-wrap break-words text-xs"
+					className="m-0 whitespace-pre-wrap break-words bg-transparent p-0 font-mono text-xs leading-5 text-fg"
 				>
 					{JSON.stringify({ pages: rawPages }, null, 2)}
 				</pre>
@@ -339,32 +308,37 @@ function renderOutput({
 
 	if (!data.length) {
 		return (
-			<p className="text-sm text-muted" data-status="info">
-				Preview will appear here after sampling.
-			</p>
+			<EmptyState>
+				<span className="text-sm text-fg-muted">Preview will appear here after sampling.</span>
+				<span className="text-xs text-fg-subtle">Fill in a base URL and stream path, then press Preview.</span>
+			</EmptyState>
 		);
 	}
 
 	if (view === SAMPLE_VIEWS.JSON) {
-		return <pre data-status="info">{JSON.stringify({ records: data }, null, 2)}</pre>;
+		return (
+			<pre data-status="info" className="m-0 whitespace-pre-wrap break-words bg-transparent p-0 font-mono text-xs leading-5 text-fg">
+				{JSON.stringify({ records: data }, null, 2)}
+			</pre>
+		);
 	}
 
 	return (
 		<table
 			className={clsx(
-				"w-full min-w-max border-collapse text-sm",
+				"w-full min-w-max border-separate border-spacing-0 text-[13px]",
 				wrap ? "[&_td]:whitespace-pre-wrap" : "[&_td]:whitespace-nowrap",
 			)}
 		>
 			<thead>
-				<tr className="bg-slate-2 dark:bg-drac-surface/60">
+				<tr>
 					{columns.map((column) => (
 						<th
 							key={column}
-							className="border-b border-border px-3 py-2 align-bottom text-left text-slate-12 sticky top-0 z-10 bg-slate-2 dark:bg-drac-surface/80 backdrop-blur supports-[backdrop-filter]:bg-slate-2/75 dark:supports-[backdrop-filter]:bg-drac-surface/70"
+							className="sticky top-0 z-10 border-b border-border bg-raised px-3 py-2 text-left align-bottom"
 						>
 							<div className="flex flex-col gap-0.5">
-								<span className="font-semibold">{column}</span>
+								<span className="text-xs font-semibold text-fg">{column}</span>
 								{renderColumnType(column, dtypes)}
 							</div>
 						</th>
@@ -373,10 +347,7 @@ function renderOutput({
 			</thead>
 			<tbody>
 				{rows.map((row, rowIndex) => (
-					<tr
-						key={rowIndex}
-						className="even:bg-slate-2/40 hover:bg-blue-3/40"
-					>
+					<tr key={rowIndex} className="group">
 						{columns.map((column) => {
 							const value = column in row ? row[column] : "";
 							const text = formatCell(value);
@@ -384,7 +355,7 @@ function renderOutput({
 							return (
 								<td
 									key={column}
-									className="border-b border-border px-3 py-2 align-top text-slate-11"
+									className="border-b border-border/70 px-3 py-1.5 align-top font-mono text-xs text-fg-muted transition-colors group-hover:bg-accent-soft/60 group-hover:text-fg"
 									title={needsTooltip ? text : undefined}
 								>
 									{needsTooltip ? truncate(text, 500) : text}
@@ -398,29 +369,21 @@ function renderOutput({
 	);
 }
 
+const EmptyState: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+	<div className="flex h-full min-h-[160px] flex-col items-center justify-center gap-1 text-center" data-status="info">
+		<span className="mb-2 flex h-9 w-9 items-center justify-center rounded-full border border-dashed border-border-strong text-fg-subtle" aria-hidden="true">
+			<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="h-4 w-4">
+				<path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11" />
+			</svg>
+		</span>
+		{children}
+	</div>
+);
+
 function renderColumnType(column: string, dtypes: Array<{ column: string; type: string }>) {
 	const dtype = dtypes.find((entry) => entry.column === column);
 	if (!dtype) {
 		return null;
 	}
-	return (
-		<span className="text-xs font-medium uppercase tracking-wide text-muted">{dtype.type}</span>
-	);
+	return <span className="font-mono text-[10px] font-medium uppercase tracking-wide text-fg-subtle">{dtype.type}</span>;
 }
-
-const ChevronDownIcon: React.FC<{ className?: string }> = ({ className }) => (
-	<svg
-		className={className}
-		xmlns="http://www.w3.org/2000/svg"
-		width="16"
-		height="16"
-		viewBox="0 0 24 24"
-		fill="none"
-		stroke="currentColor"
-		strokeWidth="2"
-		strokeLinecap="round"
-		strokeLinejoin="round"
-	>
-		<polyline points="6 9 12 15 18 9" />
-	</svg>
-);

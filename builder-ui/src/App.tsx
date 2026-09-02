@@ -28,6 +28,8 @@ import { DeployPanel } from "./components/DeployPanel";
 import { SamplePreview } from "./components/SamplePreview";
 import { ThemeMenu } from "./components/ThemeMenu";
 import { LandingScreen } from "./components/LandingScreen";
+import { SplitLayout } from "./components/SplitLayout";
+import { BTN_PRIMARY, BTN_SECONDARY, BTN_SMALL, Field, INPUT, cx } from "./components/ui/primitives";
 import type { ConfigFormState, ValidationResponse, RestSourceConfig, SavedConnector, WorkingState } from "./types";
 import { MAX_SAMPLE_ROWS, SAMPLE_VIEWS } from "./lib/constants";
 import { INITIAL_FORM_STATE } from "./lib/initial-data";
@@ -60,6 +62,9 @@ const scrubAuthToken = (state: ConfigFormState): ConfigFormState => ({ ...state,
 
 const App: React.FC = () => {
 	const [showLandingScreen, setShowLandingScreen] = React.useState(true);
+	// Focus mode hands the whole width to the preview; session-only by design.
+	const [focusPreview, setFocusPreview] = React.useState(false);
+	const toggleFocusPreview = React.useCallback(() => setFocusPreview((value) => !value), []);
 	const [configFormState, setConfigFormState] = useAtom(configFormStateAtom);
 	const [builderView, setBuilderView] = useAtom(builderViewAtom);
 	const [lastEdited, setLastEdited] = useAtom(lastEditedAtom);
@@ -752,7 +757,11 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 		if (stored === 'light' || stored === 'dark' || stored === 'system') return stored;
 		return 'system';
 	});
-	const effectiveTheme = themeMode === 'system' ? (getSystemDark() ? 'dark' : 'light') : themeMode;
+	// Tracked as state so a live OS theme change re-renders the app (theme
+	// menu label, `key={effectiveTheme}` fade) instead of only toggling the
+	// root class behind React's back.
+	const [systemDark, setSystemDark] = React.useState<boolean>(() => getSystemDark());
+	const effectiveTheme = themeMode === 'system' ? (systemDark ? 'dark' : 'light') : themeMode;
 
 	React.useEffect(() => {
 		const root = document.documentElement;
@@ -764,16 +773,12 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 	}, [themeMode]);
 
 	React.useEffect(() => {
-		if (themeMode !== 'system') return;
 		const mq = window.matchMedia('(prefers-color-scheme: dark)');
-		const handler = () => {
-			const dark = mq.matches;
-			const root = document.documentElement;
-			if (dark) root.classList.add('dark'); else root.classList.remove('dark');
-		};
+		const handler = () => setSystemDark(mq.matches);
+		handler();
 		mq.addEventListener('change', handler);
 		return () => mq.removeEventListener('change', handler);
-	}, [themeMode]);
+	}, []);
 
 	const handleCopySchema = React.useCallback(() => {
 		let ddl: string;
@@ -813,105 +818,211 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 		return `This config references runtime options (${names.join(', ')}) that preview sends as "REPLACE_ME" — remove leftover {{ options.* }} params or fill them at deploy time.`;
 	}, [sample.loading, sample.data.length, sample.rawPages.length, generatedCode.script]);
 
+	const tabTriggerClass =
+		"h-7 whitespace-nowrap rounded-[5px] px-3 text-xs font-medium text-fg-muted transition-colors hover:text-fg data-[state=active]:bg-accent data-[state=active]:text-accent-fg data-[state=active]:shadow-sm focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:bg-raised";
+	const activeTabLabel = builderView === "code" ? "Generated code" : builderView === "deploy" ? "Deploy" : "Configuration";
+
+	const primaryPane = (
+		<section
+			className="pane flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-card"
+			aria-label="Connector configuration"
+		>
+			<Tabs.Root value={builderView} onValueChange={handleViewChange} className="flex h-full min-h-0 flex-col">
+				<div className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border px-3">
+					<Tabs.List className="inline-flex rounded-md border border-border bg-field p-0.5" aria-label="Builder view">
+						<Tabs.Trigger value="ui" className={tabTriggerClass} aria-label="UI Builder">
+							<span className="label-long">UI Builder</span>
+							<span className="label-short">Builder</span>
+						</Tabs.Trigger>
+						<Tabs.Trigger value="code" className={tabTriggerClass} aria-label="Generated Code">
+							<span className="label-long">Generated Code</span>
+							<span className="label-short">Code</span>
+						</Tabs.Trigger>
+						<Tabs.Trigger value="deploy" className={tabTriggerClass}>
+							Deploy
+						</Tabs.Trigger>
+					</Tabs.List>
+					<div className="flex items-center gap-2">
+						<button
+							type="button"
+							className={cx(BTN_SECONDARY, "h-8 px-3 text-xs", validateFlashClass)}
+							onClick={handleValidate}
+							disabled={busy}
+						>
+							{isValidating ? 'Validating…' : 'Validate'}
+						</button>
+						<button
+							type="button"
+							className={cx(BTN_PRIMARY, "h-8 px-3.5 text-xs")}
+							onClick={openSaveModal}
+							disabled={busy}
+							data-testid="open-export-modal"
+							aria-label="Save config"
+						>
+							<span className="label-long">Save config</span>
+							<span className="label-short">Save</span>
+						</button>
+					</div>
+				</div>
+				<Tabs.Content value="ui" className="scroll-thin min-h-0 flex-1 overflow-y-auto px-5 py-5 outline-none">
+					<BuilderPanel
+						state={configFormState}
+						onUpdateState={handleUpdateFormState}
+						onAddParam={handleAddParam}
+						onRemoveParam={handleRemoveParam}
+						onUpdateParam={handleUpdateParam}
+					/>
+				</Tabs.Content>
+				<Tabs.Content value="code" className="min-h-0 flex-1 px-5 py-4 outline-none">
+					<CodePane
+						script={generatedCode.script}
+						stream={generatedCode.stream}
+						error={generatedCode.error}
+						loading={generatedCode.loading}
+						emptyMessage={
+							configFormState.baseUrl.trim()
+								? undefined
+								: "Fill in a base URL to see the generated script."
+						}
+					/>
+				</Tabs.Content>
+				<Tabs.Content value="deploy" className="scroll-thin min-h-0 flex-1 overflow-y-auto px-5 py-5 outline-none">
+					<DeployPanel />
+				</Tabs.Content>
+			</Tabs.Root>
+		</section>
+	);
+
+	const secondaryPane = (
+		<section
+			className="pane flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-card"
+			aria-label="Data preview"
+		>
+			<SamplePreview
+				status={status}
+				limit={sample.limit}
+				onLimitChange={handleLimitChange}
+				onPreview={handlePreview}
+				isBusy={busy}
+				view={sample.view}
+				onViewChange={handleSampleViewChange}
+				wrap={sample.wrap}
+				onWrapToggle={handleWrapToggle}
+				page={sample.page}
+				pageSize={sample.pageSize}
+				onPageSizeChange={handlePageSizeChange}
+				onPageChange={handlePageChange}
+				data={sample.data}
+				dtypes={sample.dtypes}
+				rawPages={sample.rawPages}
+				restError={sample.restError}
+				onCopySchema={handleCopySchema}
+				placeholderNotice={placeholderNotice}
+				focus={focusPreview}
+				onToggleFocus={toggleFocusPreview}
+			/>
+		</section>
+	);
+
 	return (
-		<div key={effectiveTheme} className="min-h-screen flex flex-col bg-background text-background-foreground dark:bg-slate-1 dark:text-slate-12 transition-colors theme-fade">
-			<header className="sticky top-0 z-20 border-b border-border bg-surface/95 backdrop-blur dark:bg-[#1d2026] dark:border-[#2c313a] transition-colors">
-				<div className="flex w-full items-center justify-between px-4 py-2">
-				<div className="flex items-center gap-2">
-					<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-5 shadow-soft overflow-hidden dark:bg-blue-7/40">
-						<img
-							src={import.meta.env.DEV ? "/favicon.ico" : "/static/favicon.ico"}
-							alt="polymo Logo"
-							className="h-7 w-7 object-contain"
-						/>
-					</div>
-					<div className="leading-tight select-none">
-						<p className="text-[11px] font-medium tracking-wide text-muted uppercase">polymo</p>
-						<div className="flex items-baseline gap-2">
-							<h1 className="text-base font-semibold text-slate-12 dark:text-drac-foreground">Connector Builder</h1>
+		<div key={effectiveTheme} className="theme-fade flex h-screen flex-col overflow-hidden bg-background text-fg">
+			<header className="z-20 shrink-0 border-b border-border bg-surface">
+				<div className="flex h-12 w-full items-center justify-between gap-4 px-4">
+					<div className="flex min-w-0 items-center gap-2.5">
+						<div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-accent-soft">
+							<img
+								src={import.meta.env.DEV ? "/favicon.ico" : "/static/favicon.ico"}
+								alt="polymo Logo"
+								className="h-6 w-6 object-contain"
+							/>
+						</div>
+						<div className="flex min-w-0 items-baseline gap-2 leading-tight select-none">
+							<h1 className="text-sm font-semibold text-fg">Connector Builder</h1>
 							{appVersion && (
-								<span className="text-[11px] font-medium text-slate-11 dark:text-drac-muted">v{appVersion}</span>
+								<span className="font-mono text-[11px] text-fg-subtle">v{appVersion}</span>
 							)}
 						</div>
+						{currentConnector && (
+							<>
+								<span className="mx-1 h-4 w-px bg-border" aria-hidden="true" />
+								{isRenamingConnector ? (
+									<div className="flex items-center gap-1.5">
+										<input
+											autoFocus
+											className={cx(INPUT, "h-8 w-56 text-sm")}
+											value={connectorNameDraft}
+											onChange={(e) => setConnectorNameDraft(e.target.value)}
+											onKeyDown={(e) => {
+												if (e.key === 'Enter') {
+													e.preventDefault();
+													commitHeaderRename();
+												} else if (e.key === 'Escape') {
+													cancelHeaderRename();
+												}
+											}}
+											onBlur={commitHeaderRename}
+											aria-label="Connector name"
+										/>
+										<button
+											type="button"
+											className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-accent text-accent-fg hover:bg-accent-hover"
+											onClick={commitHeaderRename}
+											aria-label="Save name"
+										>
+											<svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+												<path fillRule="evenodd" d="M16.704 5.29a1 1 0 010 1.42l-7.5 7.5a1 1 0 01-1.42 0l-3.5-3.5a1 1 0 111.42-1.42L8.5 11.58l6.79-6.79a1 1 0 011.414 0z" clipRule="evenodd" />
+											</svg>
+										</button>
+										<button
+											type="button"
+											className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border text-fg-muted hover:text-error"
+											onClick={cancelHeaderRename}
+											aria-label="Cancel rename"
+										>
+											<svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+												<path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+											</svg>
+										</button>
+									</div>
+								) : (
+									<button
+										type="button"
+										className="group inline-flex h-8 min-w-0 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-fg hover:bg-raised"
+										onClick={beginHeaderRename}
+										title="Rename connector"
+									>
+										<span className="truncate">{currentConnector.name}</span>
+										<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 shrink-0 text-fg-subtle opacity-0 transition-opacity group-hover:opacity-100" aria-hidden="true">
+											<path d="M10.5 2.5 13.5 5.5 6 13H3v-3z" />
+										</svg>
+									</button>
+								)}
+							</>
+						)}
 					</div>
-				</div>
-				<div className="flex items-center gap-3">
-					{currentConnector && (
-						<div className="flex items-center gap-2 rounded-full border border-border/70 bg-background/80 px-3 py-1.5 text-sm text-slate-12 dark:border-drac-border/60 dark:bg-[#1f232b] dark:text-drac-foreground">
-							{isRenamingConnector ? (
-								<div className="flex items-center gap-2">
-									<input
-										autoFocus
-										className="w-48 rounded-md border border-border bg-surface/70 px-3 py-1 text-sm text-slate-12 dark:border-drac-border/70 dark:bg-[#202530] dark:text-drac-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-7"
-										value={connectorNameDraft}
-										onChange={(e) => setConnectorNameDraft(e.target.value)}
-										onKeyDown={(e) => {
-											if (e.key === 'Enter') {
-												e.preventDefault();
-												commitHeaderRename();
-											} else if (e.key === 'Escape') {
-												cancelHeaderRename();
-											}
-										}}
-										onBlur={commitHeaderRename}
-									/>
-									<button
-										type="button"
-										className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-border bg-blue-9 text-white hover:bg-blue-10"
-										onClick={commitHeaderRename}
-										aria-label="Save name"
-									>
-										<svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-											<path fillRule="evenodd" d="M16.704 5.29a1 1 0 010 1.42l-7.5 7.5a1 1 0 01-1.42 0l-3.5-3.5a1 1 0 111.42-1.42L8.5 11.58l6.79-6.79a1 1 0 011.414 0z" clipRule="evenodd" />
-										</svg>
-									</button>
-									<button
-										type="button"
-										className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-border bg-background text-slate-11 hover:text-red-9 hover:border-red-7 dark:border-drac-border/60 dark:bg-[#1f232b] dark:text-drac-muted"
-										onClick={cancelHeaderRename}
-										aria-label="Cancel rename"
-									>
-										<svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-											<path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
-										</svg>
-									</button>
-								</div>
-							) : (
-								<button
-									type="button"
-									className="inline-flex items-center gap-2 rounded-full bg-transparent text-sm font-medium text-slate-12 dark:text-drac-foreground"
-									onClick={beginHeaderRename}
-								>
-									<svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 text-blue-9" viewBox="0 0 20 20" fill="currentColor">
-										<path fillRule="evenodd" d="M5 10a5 5 0 015-5h1a5 5 0 015 5v4a1 1 0 01-1 1H6a1 1 0 01-1-1v-4zm5-3.5A3.5 3.5 0 006.5 10V13h7V10A3.5 3.5 0 0011 6.5h-1z" clipRule="evenodd" />
-									</svg>
-										{currentConnector.name}
-								</button>
-							)}
-						</div>
-					)}
-					<button
-						type="button"
-						className="rounded-full px-3 py-1.5 text-xs font-medium border border-border bg-background text-slate-12 hover:bg-blue-3/40 dark:border-drac-border/50 dark:bg-[#1f232b] dark:text-drac-foreground dark:hover:bg-blue-9/20 transition"
-						onClick={openConnectorLibrary}
-						data-testid="open-connector-library"
-					>
-						Connectors
-					</button>
-					<button
-						type="button"
-						className="rounded-full px-3 py-1.5 text-xs font-medium border border-border bg-background text-slate-12 hover:bg-blue-3/40 dark:border-drac-border/50 dark:bg-[#1f232b] dark:text-drac-foreground dark:hover:bg-blue-9/20 transition disabled:opacity-50 disabled:cursor-not-allowed"
-						onClick={() => currentConnector && handleExportSavedConnector(currentConnector.id)}
-						disabled={!currentConnector}
-					>
-						Save config
-					</button>
-					<ThemeMenu mode={themeMode} effective={effectiveTheme} onChange={setThemeMode} />
-				</div>
+					<div className="flex shrink-0 items-center gap-2">
+						<button
+							type="button"
+							className={cx(BTN_SECONDARY, "h-8 px-3 text-xs")}
+							onClick={openConnectorLibrary}
+							data-testid="open-connector-library"
+						>
+							Connectors
+						</button>
+						<button
+							type="button"
+							className={cx(BTN_SECONDARY, "h-8 px-3 text-xs")}
+							onClick={() => currentConnector && handleExportSavedConnector(currentConnector.id)}
+							disabled={!currentConnector}
+						>
+							Save config
+						</button>
+						<ThemeMenu mode={themeMode} effective={effectiveTheme} onChange={setThemeMode} />
+					</div>
 				</div>
 			</header>
-			<main className="flex-1 flex w-full gap-6 px-4 py-8 lg:px-6 items-stretch">
-				{showLandingScreen ? (
+			{showLandingScreen ? (
+				<main className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-8 lg:px-6">
 					<LandingScreen
 						onStartNew={handleStartNewConnector}
 						onImportConfig={handleImportConnector}
@@ -923,141 +1034,48 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 						onResumeWorking={handleResumeWorkingState}
 						onDiscardWorking={handleDiscardWorkingState}
 					/>
-				) : (
-					<>
-						<section className="w-full max-w-2xl flex flex-col gap-4 rounded-2xl border border-border bg-surface p-6 shadow-soft h-full">
-							<Tabs.Root value={builderView} onValueChange={handleViewChange}>
-								<div className="flex items-center justify-between mb-4 gap-4 flex-wrap">
-									<Tabs.List className="inline-flex rounded-full border border-border bg-background p-1 text-sm font-medium">
-										<Tabs.Trigger
-											value="ui"
-											className="rounded-full px-4 py-1.5 transition text-slate-11 dark:text-drac-foreground/80 hover:text-slate-12 dark:hover:text-drac-foreground data-[state=active]:bg-blue-9 data-[state=active]:text-white data-[state=active]:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-7"
-										>
-											UI Builder
-										</Tabs.Trigger>
-										<Tabs.Trigger
-											value="code"
-											className="rounded-full px-4 py-1.5 transition text-slate-11 dark:text-drac-foreground/80 hover:text-slate-12 dark:hover:text-drac-foreground data-[state=active]:bg-blue-9 data-[state=active]:text-white data-[state=active]:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-7"
-										>
-											Generated Code
-										</Tabs.Trigger>
-										<Tabs.Trigger
-											value="deploy"
-											className="rounded-full px-4 py-1.5 transition text-slate-11 dark:text-drac-foreground/80 hover:text-slate-12 dark:hover:text-drac-foreground data-[state=active]:bg-blue-9 data-[state=active]:text-white data-[state=active]:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-7"
-										>
-											Deploy
-										</Tabs.Trigger>
-									</Tabs.List>
-									<div className="flex items-center gap-3">
-										<button
-											type="button"
-											className={"inline-flex items-center gap-1 rounded-full border border-border bg-background px-4 py-2 text-sm font-medium text-slate-12 hover:border-blue-7 hover:text-blue-11 disabled:opacity-50 disabled:cursor-not-allowed transition " + validateFlashClass}
-											onClick={handleValidate}
-											disabled={busy}
-										>
-											{isValidating ? 'Validating…' : 'Validate'}
-										</button>
-						<button
-							type="button"
-							className="inline-flex items-center gap-1 rounded-full bg-blue-9 px-5 py-2 text-sm font-semibold text-white shadow-soft transition hover:bg-blue-10 disabled:opacity-50 disabled:cursor-not-allowed"
-							onClick={openSaveModal}
-							disabled={busy}
-							data-testid="open-export-modal"
-						>
-											Save config
-										</button>
-									</div>
-								</div>
-								<Tabs.Content value="ui" className="outline-none">
-									<BuilderPanel
-										state={configFormState}
-										onUpdateState={handleUpdateFormState}
-										onAddParam={handleAddParam}
-										onRemoveParam={handleRemoveParam}
-										onUpdateParam={handleUpdateParam}
-									/>
-								</Tabs.Content>
-								<Tabs.Content value="code" className="outline-none">
-									<CodePane
-										script={generatedCode.script}
-										stream={generatedCode.stream}
-										error={generatedCode.error}
-										loading={generatedCode.loading}
-										emptyMessage={
-											configFormState.baseUrl.trim()
-												? undefined
-												: "Fill in a base URL to see the generated script."
-										}
-									/>
-								</Tabs.Content>
-								<Tabs.Content value="deploy" className="outline-none">
-									<DeployPanel />
-								</Tabs.Content>
-							</Tabs.Root>
-						</section>
-						<section className="flex-1 min-w-0 flex flex-col gap-4 rounded-2xl border border-border bg-surface p-6 shadow-soft h-full">
-											<SamplePreview
-												status={status}
-												limit={sample.limit}
-												onLimitChange={handleLimitChange}
-												onPreview={handlePreview}
-												isBusy={busy}
-												view={sample.view}
-												onViewChange={handleSampleViewChange}
-												wrap={sample.wrap}
-												onWrapToggle={handleWrapToggle}
-												page={sample.page}
-												pageSize={sample.pageSize}
-												onPageSizeChange={handlePageSizeChange}
-												onPageChange={handlePageChange}
-												data={sample.data}
-												dtypes={sample.dtypes}
-												rawPages={sample.rawPages}
-												restError={sample.restError}
-												onCopySchema={handleCopySchema}
-												placeholderNotice={placeholderNotice}
-											/>
-						</section>
-					</>
-				)}
-			</main>
+				</main>
+			) : (
+				<main className="min-h-0 flex-1 p-3">
+					<SplitLayout primary={primaryPane} secondary={secondaryPane} focus={focusPreview} railLabel={activeTabLabel} />
+				</main>
+			)}
 			{showSaveModal && (
 				<div className="fixed inset-0 z-50 flex items-center justify-center p-4">
 					<div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => !isSaving && setShowSaveModal(false)} />
-					<div role="dialog" aria-modal="true" className="relative z-10 w-full max-w-md rounded-2xl border border-border bg-surface dark:bg-drac-surface shadow-soft p-6 flex flex-col gap-5">
+					<div role="dialog" aria-modal="true" className="relative z-10 flex w-full max-w-md flex-col gap-5 rounded-xl border border-border bg-surface p-6 shadow-card">
 						<header className="flex items-start justify-between gap-4">
-							<h2 className="text-lg font-semibold text-slate-12 dark:text-drac-foreground">Save config</h2>
+							<h2 className="text-base font-semibold text-fg">Save config</h2>
 						</header>
 						<div className="space-y-4">
-							<label className="flex flex-col gap-2">
-								<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/80">File Name</span>
-							<input
-								type="text"
-								className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-slate-12 shadow-sm focus-visible:border-blue-7 dark:border-drac-border dark:bg-drac-surface dark:text-drac-foreground"
-								value={saveFileName}
-								onChange={(e) => setSaveFileName(e.target.value)}
-								placeholder={`config${CONFIG_FILE_EXTENSION}`}
-								data-testid="export-file-name-input"
-							/>
-							</label>
+							<Field label="File name">
+								<input
+									type="text"
+									className={cx(INPUT, "font-mono text-xs")}
+									value={saveFileName}
+									onChange={(e) => setSaveFileName(e.target.value)}
+									placeholder={`config${CONFIG_FILE_EXTENSION}`}
+									data-testid="export-file-name-input"
+								/>
+							</Field>
 							<div className="flex items-center gap-3">
 								{dirPickerSupported ? (
 									<button
 										type="button"
-										className="rounded-full px-3 py-1.5 text-xs font-medium border border-border bg-background hover:border-blue-7 hover:text-blue-11 transition"
+										className={cx(BTN_SECONDARY, BTN_SMALL)}
 										onClick={handleChooseDirectory}
 										disabled={isSaving}
 									>
-										{saveDirName ? 'Change Folder' : 'Choose Folder'}
+										{saveDirName ? 'Change folder' : 'Choose folder'}
 									</button>
 								) : (
-									<span className="rounded-full border border-border px-3 py-1.5 text-xs font-medium text-slate-11 dark:text-drac-foreground/80 bg-muted/50 dark:bg-drac-surface/70">
+									<span className="rounded-md border border-border bg-raised px-2.5 py-1 text-xs text-fg-muted">
 										Folder selection not available in this browser
 									</span>
 								)}
-								{saveDirName && dirPickerSupported && <span className="text-xs text-muted truncate max-w-[140px]" title={saveDirName}>{saveDirName}/</span>}
+								{saveDirName && dirPickerSupported && <span className="max-w-[160px] truncate font-mono text-xs text-fg-muted" title={saveDirName}>{saveDirName}/</span>}
 							</div>
-							<p className="text-xs text-muted dark:text-drac-muted">
+							<p className="text-xs leading-relaxed text-fg-muted">
 								{dirPickerSupported
 									? (saveDirName ? 'Will write directly into the selected folder (if permissions granted).' : 'Select a folder for direct write or leave blank to download.')
 									: (filePickerSupported
@@ -1065,10 +1083,10 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 										: 'The file will download automatically when you click Save.')}
 							</p>
 						</div>
-						<div className="flex justify-end gap-3 pt-2">
+						<div className="flex justify-end gap-2 pt-1">
 							<button
 								type="button"
-								className="rounded-full px-4 py-2 text-sm font-medium border border-border dark:border-drac-border text-slate-12 dark:text-drac-foreground hover:bg-blue-3/40 dark:hover:bg-blue-9/25 transition disabled:opacity-50"
+								className={BTN_SECONDARY}
 								onClick={() => !isSaving && setShowSaveModal(false)}
 								disabled={isSaving}
 							>
@@ -1076,7 +1094,7 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 							</button>
 							<button
 								type="button"
-								className="rounded-full px-5 py-2 text-sm font-semibold bg-blue-9 text-white hover:bg-blue-10 shadow-soft transition disabled:opacity-50"
+								className={BTN_PRIMARY}
 								onClick={() => { setShowSaveModal(false); handleSave(saveFileName); }}
 								disabled={isSaving || !saveFileName.trim()}
 								data-testid="confirm-export"
@@ -1087,15 +1105,10 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 					</div>
 				</div>
 			)}
-			<footer className="mt-auto border-t border-border bg-surface/80 py-4 dark:bg-[#1d2026] dark:border-[#2c313a] transition-colors">
-				<div className="mx-auto flex w-full max-w-7xl items-center justify-between px-4 text-sm text-muted">
-					<span>
-					</span>
-				</div>
-			</footer>
 		</div>
 	);
 };
+
 
 
 function formatError(error: unknown): string {

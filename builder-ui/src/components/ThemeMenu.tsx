@@ -32,14 +32,15 @@ export const ThemeMenu: React.FC<ThemeMenuProps> = ({ mode, effective, onChange 
         onClick={() => setOpen(o => !o)}
         aria-haspopup="true"
         aria-expanded={open}
-        className="rounded-full border border-border dark:border-drac-border px-3 py-2 text-xs font-medium text-slate-11 dark:text-drac-foreground hover:border-blue-7 hover:text-blue-11 dark:hover:border-drac-accent transition-colors"
+        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 text-xs font-medium text-fg-muted transition-colors hover:border-border-strong hover:text-fg"
       >
+        <span aria-hidden="true" className="text-[13px] leading-none">{effective === 'dark' ? '☾' : '☀'}</span>
         {label}
       </button>
       {open && (
         <div
           role="menu"
-          className="absolute right-0 mt-2 w-48 overflow-hidden rounded-lg border border-border/70 bg-background shadow-lg dark:bg-drac-surface dark:border-drac-border z-50"
+          className="absolute right-0 z-50 mt-1.5 w-44 overflow-hidden rounded-md border border-border bg-surface p-1 shadow-card"
         >
           {(['light','dark','system'] as ThemeMode[]).map(opt => {
             const active = opt === mode;
@@ -49,9 +50,9 @@ export const ThemeMenu: React.FC<ThemeMenuProps> = ({ mode, effective, onChange 
                 role="menuitemradio"
                 aria-checked={active}
                 onClick={() => { onChange(opt); setOpen(false); }}
-                className={`flex w-full items-center gap-2 px-3 py-2 text-sm text-left transition-colors ${active ? 'bg-blue-9 text-white dark:bg-drac-accent dark:text-drac-foreground' : 'hover:bg-slate-3 dark:hover:bg-drac-base/60 text-slate-12 dark:text-drac-foreground'} focus-visible:outline-none focus-visible:bg-blue-9 focus-visible:text-white dark:focus-visible:bg-drac-accent`}
+                className={`flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-sm transition-colors ${active ? 'bg-accent text-accent-fg' : 'text-fg hover:bg-raised'} focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:bg-raised`}
               >
-                <span className="inline-block h-2 w-2 rounded-full border border-border dark:border-drac-border" style={active ? { background: 'currentColor' } : {}} />
+                <span className="inline-block h-1.5 w-1.5 rounded-full border border-current" style={active ? { background: 'currentColor' } : {}} />
                 {opt === 'system' ? 'System (auto)' : opt.charAt(0).toUpperCase() + opt.slice(1)}
               </button>
             );
@@ -61,4 +62,3 @@ export const ThemeMenu: React.FC<ThemeMenuProps> = ({ mode, effective, onChange 
     </div>
   );
 };
-
