@@ -141,6 +141,23 @@ def _fstring_literal(value: str) -> str:
     return 'f"' + "".join(parts) + '"'
 
 
+def _marker_names(value: Any) -> set:
+    """Every `OPT_*` var name embedded in `value` (a str, or dict of str).
+
+    Used to decide which of PATH/PARAMS/HEADERS need re-evaluating in
+    bundle mode after `_apply_secret_options` setattrs a resolved value
+    onto the corresponding `OPT_*` global — see `_rebuild_option_globals`.
+    """
+    if isinstance(value, str):
+        return set(_MARKER_RE.findall(value))
+    if isinstance(value, dict):
+        names: set = set()
+        for v in value.values():
+            names |= _marker_names(v)
+        return names
+    return set()
+
+
 def _py_literal(value: Any) -> str:
     """Render a value as a Python literal, using double-quoted strings.
 
@@ -588,6 +605,27 @@ def _context(config: RestSourceConfig, *, for_bundle: bool = False) -> Dict[str,
         ref = option_placeholder_refs.get(var)
         if ref is not None:
             bundle_secret_slots.append((var, _bundle_secret_call(ref)))
+    # Bundle-mode-only fix: HEADERS/PARAMS/PATH literals that embed an
+    # `OPT_*` placeholder for a driver-resolved secret (i.e. the var also
+    # appears in `bundle_secret_slots` above) are otherwise frozen at
+    # import time — `_apply_secret_options` (source.py.jinja) setattrs the
+    # resolved value onto the `OPT_*` global itself, but that setattr never
+    # reaches an f-string/dict literal that already evaluated. Naming here
+    # exactly which of PATH/PARAMS/HEADERS need re-evaluating (and only
+    # those) lets `core.py.jinja` emit a `_rebuild_option_literals()` that
+    # re-runs the same literal expressions, called from
+    # `_apply_secret_options` after the setattr loop. Empty (and thus a
+    # no-op everywhere) unless `for_bundle`, so single-file output is
+    # unaffected.
+    secret_backed_option_vars = set(option_placeholder_refs.keys())
+    rebuild_option_globals: List[str] = []
+    if for_bundle:
+        if _marker_names(path) & secret_backed_option_vars:
+            rebuild_option_globals.append("PATH")
+        if _marker_names(params) & secret_backed_option_vars:
+            rebuild_option_globals.append("PARAMS")
+        if _marker_names(headers) & secret_backed_option_vars:
+            rebuild_option_globals.append("HEADERS")
     return {
         "auth_type": auth.type,
         "token_url": auth.token_url,
@@ -617,6 +655,7 @@ def _context(config: RestSourceConfig, *, for_bundle: bool = False) -> Dict[str,
         "has_secret_refs": has_secret_refs,
         "has_uc_secret_refs": has_uc_secret_refs,
         "bundle_secret_slots": bundle_secret_slots,
+        "rebuild_option_globals": rebuild_option_globals,
         "schema_ddl": stream.schema,
         "stream_name": stream.name,
         "stream_name_repr": _py_literal(stream.name),

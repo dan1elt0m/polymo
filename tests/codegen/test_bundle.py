@@ -591,6 +591,175 @@ def test_bundle_wheel_secret_ref_resolved_driver_side_and_shipped_via_options(
     assert seen_auth_headers[-1] == "Bearer REPLACE_ME"
 
 
+# --- executor wheel simulation: OPT_* placeholders inside HEADERS/PARAMS/PATH
+# Critical gap in the secret-ref fix above: `_apply_secret_options` setattrs
+# the driver-resolved value onto the `OPT_*` module global itself, but
+# HEADERS/PARAMS/PATH that embed that placeholder (e.g. a header
+# `{"X-Tenant": "{{ options.tenant_id }}"}`) are dict/f-string literals
+# evaluated ONCE at import time, with the "REPLACE_ME" placeholder still in
+# effect then — the later setattr never reaches them, so a bundled read
+# would silently ship "REPLACE_ME" to the real API instead of the resolved
+# secret. `core.py.jinja` emits `_rebuild_option_literals()`, re-evaluating
+# exactly those literals, called from `_apply_secret_options` right after
+# the setattr loop.
+
+
+def test_bundle_wheel_option_placeholders_in_headers_and_params_resolved(
+    tmp_path, http_server
+):
+    seen_requests: list = []
+
+    def route(query, headers, body):
+        seen_requests.append({"query": query, "headers": headers})
+        return 200, [{"id": 1, "title": "hello"}], {}
+
+    http_server.routes["/posts"] = route
+    config = make_config(
+        base_url=http_server.url,
+        name="posts",
+        path="/posts",
+        headers={"X-Tenant": "{{ options.tenant_id }}"},
+        params={"team": "{{ options.team_id }}"},
+        option_secrets={
+            "tenant_id": SecretRef(scope="my-scope", key="tenant-id"),
+            "team_id": SecretRef(scope="my-scope", key="team-id"),
+        },
+    )
+
+    pkg = "execsim_opt_pkg"
+    files = generate_bundle(config, project_name=pkg, catalog="main", schema="raw")
+    source_class_name = f"{_pascal_case(pkg)}Source"
+
+    client_py = files[f"src/{pkg}/client.py"]
+    # the module-level literals still carry the placeholder at import time...
+    assert 'OPT_TENANT_ID: str = "REPLACE_ME"' in client_py
+    assert 'OPT_TEAM_ID: str = "REPLACE_ME"' in client_py
+    # ...but the rebuild function that re-evaluates HEADERS/PARAMS after a
+    # driver-resolved value lands is emitted alongside them
+    assert "def _rebuild_option_literals(" in client_py
+
+    project_dir = tmp_path / "bundle_project"
+    (project_dir / "src" / pkg).mkdir(parents=True)
+    (project_dir / "pyproject.toml").write_text(files["pyproject.toml"])
+    (project_dir / "src" / pkg / "__init__.py").write_text(
+        files[f"src/{pkg}/__init__.py"]
+    )
+    (project_dir / "src" / pkg / "client.py").write_text(client_py)
+    (project_dir / "src" / pkg / "source.py").write_text(files[f"src/{pkg}/source.py"])
+
+    wheel_path = _build_wheel(project_dir)
+
+    load_script = tmp_path / "load_from_wheel_options.py"
+    load_script.write_text(_LOAD_FROM_WHEEL_WITH_SECRET_SCRIPT)
+    executor_cwd = tmp_path / "executor_cwd_options"
+    executor_cwd.mkdir()
+
+    def load(options: dict) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [
+                sys.executable,
+                str(load_script),
+                str(wheel_path),
+                pkg,
+                source_class_name,
+                json.dumps(options),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(executor_cwd),
+        )
+
+    # --- positive: both driver-resolved options arrive as reader options,
+    # pre-lowercased exactly like Spark's real CaseInsensitiveDict would
+    # hand them over.
+    positive = load(
+        {
+            "polymo_secret_opt_tenant_id": "real-tenant",
+            "polymo_secret_opt_team_id": "real-team",
+        }
+    )
+    assert positive.returncode == 0, positive.stderr
+    assert json.loads(positive.stdout) == [[1, "hello"]]
+    assert seen_requests[-1]["headers"].get("X-Tenant") == "real-tenant"
+    assert seen_requests[-1]["query"].get("team") == "real-team"
+    assert "REPLACE_ME" not in json.dumps(seen_requests[-1])
+
+    # --- negative control: no options supplied at all -> the request goes
+    # out with the unresolved "REPLACE_ME" placeholders instead of the real
+    # values, proving the positive result above genuinely depends on the
+    # options channel (and on the rebuild actually running).
+    negative = load({})
+    assert negative.returncode == 0, negative.stderr
+    assert seen_requests[-1]["headers"].get("X-Tenant") == "REPLACE_ME"
+    assert seen_requests[-1]["query"].get("team") == "REPLACE_ME"
+
+
+def test_bundle_wheel_option_placeholder_in_path_resolved(tmp_path, http_server):
+    def ok_route(query, headers, body):
+        return 200, [{"id": 1, "title": "hello"}], {}
+
+    http_server.routes["/tenants/real-tenant/posts"] = ok_route
+    http_server.routes["/tenants/REPLACE_ME/posts"] = ok_route
+
+    config = make_config(
+        base_url=http_server.url,
+        name="posts",
+        path="/tenants/{{ options.tenant_id }}/posts",
+        option_secrets={"tenant_id": SecretRef(scope="my-scope", key="tenant-id")},
+    )
+
+    pkg = "execsim_opt_path_pkg"
+    files = generate_bundle(config, project_name=pkg, catalog="main", schema="raw")
+    source_class_name = f"{_pascal_case(pkg)}Source"
+    client_py = files[f"src/{pkg}/client.py"]
+    assert "def _rebuild_option_literals(" in client_py
+
+    project_dir = tmp_path / "bundle_project"
+    (project_dir / "src" / pkg).mkdir(parents=True)
+    (project_dir / "pyproject.toml").write_text(files["pyproject.toml"])
+    (project_dir / "src" / pkg / "__init__.py").write_text(
+        files[f"src/{pkg}/__init__.py"]
+    )
+    (project_dir / "src" / pkg / "client.py").write_text(client_py)
+    (project_dir / "src" / pkg / "source.py").write_text(files[f"src/{pkg}/source.py"])
+
+    wheel_path = _build_wheel(project_dir)
+
+    load_script = tmp_path / "load_from_wheel_path.py"
+    load_script.write_text(_LOAD_FROM_WHEEL_WITH_SECRET_SCRIPT)
+    executor_cwd = tmp_path / "executor_cwd_path"
+    executor_cwd.mkdir()
+
+    def load(options: dict) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [
+                sys.executable,
+                str(load_script),
+                str(wheel_path),
+                pkg,
+                source_class_name,
+                json.dumps(options),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(executor_cwd),
+        )
+
+    # --- positive: the driver-resolved tenant id arrives as a reader
+    # option; the request path actually reaching the mock server must carry
+    # the resolved segment, not the frozen-at-import "REPLACE_ME" one.
+    positive = load({"polymo_secret_opt_tenant_id": "real-tenant"})
+    assert positive.returncode == 0, positive.stderr
+    assert json.loads(positive.stdout) == [[1, "hello"]]
+    assert http_server.log[-1][1] == "/tenants/real-tenant/posts"
+
+    # --- negative control: no option supplied -> the unresolved
+    # placeholder path is what actually goes out.
+    negative = load({})
+    assert negative.returncode == 0, negative.stderr
+    assert http_server.log[-1][1] == "/tenants/REPLACE_ME/posts"
+
+
 # --- databricks.yml -----------------------------------------------------------
 
 

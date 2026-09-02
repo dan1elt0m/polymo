@@ -35,6 +35,13 @@ def _apply_secret_options(options: Any) -> None:
     for key, value in options.items():
         if key.lower().startswith(prefix):
             setattr(_client, key[len(prefix) :].upper(), value)
+{% if rebuild_option_globals %}
+    # PATH/PARAMS/HEADERS above embed one of these OPT_* values inside an
+    # f-string/dict literal that already evaluated at import time (with the
+    # "REPLACE_ME" placeholder) — the setattr above never reaches it, so
+    # rebuild those literals now that the real value is installed.
+    _client._rebuild_option_literals()
+{% endif %}
 
 {% endif %}
 {% if streaming %}

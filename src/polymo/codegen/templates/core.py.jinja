@@ -75,6 +75,29 @@ PATH: str = {{ path_repr }}
 PARAMS: dict[str, Any] = {{ params_repr }}
 HEADERS: dict[str, str] = {{ headers_repr }}
 TIMEOUT: float = 30.0
+{% if rebuild_option_globals %}
+
+
+def _rebuild_option_literals() -> None:
+    """Re-evaluate literals that embed OPT_* placeholders from the live globals.
+
+    PATH/PARAMS/HEADERS are evaluated once at import time, so a resolved
+    `OPT_*` value installed afterwards (see `_apply_secret_options` in
+    source.py, which setattrs it onto this module) never reaches an
+    already-evaluated f-string/dict literal on its own. Called from
+    `_apply_secret_options` after that setattr to pick up the change.
+    """
+    global {{ rebuild_option_globals | join(", ") }}
+{% if "PATH" in rebuild_option_globals %}
+    PATH = {{ path_repr }}
+{% endif %}
+{% if "PARAMS" in rebuild_option_globals %}
+    PARAMS = {{ params_repr }}
+{% endif %}
+{% if "HEADERS" in rebuild_option_globals %}
+    HEADERS = {{ headers_repr }}
+{% endif %}
+{% endif %}
 {% if windows_repr %}
 
 # One entry per partition; each is fetched independently (parallelized
