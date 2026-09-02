@@ -213,6 +213,20 @@ SWEEP_CONFIGS = {
             mode="cursor", cursor_param="since", cursor_field="updated"
         ),
     ),
+    "pushdown": make_config(
+        base_url="https://x",
+        params={"status": "open"},
+        pushdown_params={"status": "status", "owner_id": "owner"},
+        schema="id BIGINT, status STRING",
+    ),
+    "pushdown_fanout_incremental_windows": make_config(
+        base_url="https://x",
+        partition=PartitionConfig(strategy="param_range", param="region", values="a,b"),
+        incremental=IncrementalConfig(
+            mode="cursor", cursor_param="since", cursor_field="updated"
+        ),
+        pushdown_params={"status": "status"},
+    ),
     "streaming": make_config(
         base_url="https://x",
         streaming=True,

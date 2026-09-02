@@ -618,6 +618,12 @@ def _context(config: RestSourceConfig, *, for_bundle: bool = False) -> Dict[str,
     state_path, state_remote = _resolve_state_path(config)
     state_key = incremental.state_key or f"{stream.name}@{base_url}"
     page_partitions = _page_partitions(stream)
+    # Static windows carry either `path` (endpoints) or `extra_params`
+    # (param_range), never both — the reader template merges pushed filter
+    # params differently for each shape.
+    windows_kind = None
+    if windows:
+        windows_kind = "path" if "path" in windows[0] else "extra_params"
 
     def _auth_secret_rhs(auth_type: str) -> Tuple[str, str, bool]:
         """RHS for one auth secret slot: `_dbx_secret(...)`, `_uc_secret(...)`,
@@ -833,6 +839,9 @@ def _context(config: RestSourceConfig, *, for_bundle: bool = False) -> Dict[str,
         "start_value_repr": _py_literal(incremental.start_value),
         "windows_repr": _py_literal(windows) if windows is not None else None,
         "has_windows": bool(windows),
+        "windows_kind": windows_kind,
+        "pushdown": bool(stream.pushdown_params),
+        "pushdown_params_repr": _py_literal(dict(stream.pushdown_params)),
         "partition_strategy": partition_strategy,
         "streaming": stream.streaming,
         "response_format": stream.response_format,
@@ -874,6 +883,11 @@ def validate_dp_wiring(config: RestSourceConfig) -> None:
         raise CodegenError("streaming does not support incremental state")
     if stream.streaming and stream.partition.strategy != "none":
         raise CodegenError("streaming does not support partition strategies")
+    if stream.streaming and stream.pushdown_params:
+        raise CodegenError(
+            "streaming does not support filter pushdown (pushdown_params);"
+            " Spark only pushes filters into batch reads"
+        )
 
 
 def generate(config: RestSourceConfig) -> str:

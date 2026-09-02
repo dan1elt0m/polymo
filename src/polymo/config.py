@@ -310,6 +310,10 @@ class StreamConfig:
     streaming: bool = False
     response_format: Literal["json", "xml"] = "json"
     xml_record_path: Optional[str] = None
+    # Filter pushdown: DataFrame column name -> API query parameter name. An
+    # equality filter on a mapped column is sent to the API as that query
+    # parameter instead of being evaluated by Spark after the read.
+    pushdown_params: Dict[str, str] = field(default_factory=dict)
     # Databricks secret-scope references for `{{ options.<name> }}`
     # placeholders, keyed by option name. A name that isn't actually
     # referenced as an unresolved option is harmless (simply unused).
@@ -478,8 +482,20 @@ def _reserved_query_param_names(stream: StreamConfig) -> Dict[str, str]:
     """Query parameter names the generated script populates itself.
 
     Maps each reserved name to a human-readable label of where it comes
-    from, for use in the api_key/query collision error message. Only
-    includes names that are actually applied at request time for this
+    from, for use in the api_key/query collision error message: the
+    built-in names (see `_builtin_query_param_names`) plus every
+    `pushdown_params` target.
+    """
+    reserved = _builtin_query_param_names(stream)
+    for column, param in stream.pushdown_params.items():
+        reserved.setdefault(param, f"pushdown_params.{column}")
+    return reserved
+
+
+def _builtin_query_param_names(stream: StreamConfig) -> Dict[str, str]:
+    """Query parameter names the generated fetch loop assigns itself.
+
+    Only includes names that are actually applied at request time for this
     stream's configuration — e.g. `pagination.offset_param` is irrelevant
     (and excluded) unless `pagination.type == "offset"`, since that's the
     only pagination type whose fetch loop ever assigns it into `params`.
@@ -514,6 +530,32 @@ def _reserved_query_param_names(stream: StreamConfig) -> Dict[str, str]:
         reserved[stream.partition.param] = "partition.param"
 
     return reserved
+
+
+def _check_pushdown_collisions(stream: StreamConfig) -> None:
+    """A pushed filter param must not mask a param the fetch loop assigns.
+
+    Pushed values are applied with `params.update(...)` before the
+    pagination / incremental params are set, so a shared name would either
+    be silently overwritten (pagination) or double-assigned (cursor); both
+    are configuration mistakes, rejected up front. Two columns mapping to
+    the same param would likewise overwrite each other.
+    """
+    builtin = _builtin_query_param_names(stream)
+    seen: Dict[str, str] = {}
+    for column, param in stream.pushdown_params.items():
+        label = builtin.get(param)
+        if label:
+            raise ConfigError(
+                f"'stream.pushdown_params.{column}' ({param!r}) collides with"
+                f" {label} ({param!r}); choose a different query parameter"
+            )
+        if param in seen:
+            raise ConfigError(
+                f"'stream.pushdown_params.{column}' and"
+                f" 'stream.pushdown_params.{seen[param]}' both map to {param!r}"
+            )
+        seen[param] = column
 
 
 def _check_api_key_query_collision(auth: AuthConfig, stream: StreamConfig) -> None:
@@ -603,6 +645,9 @@ def config_to_dict(config: RestSourceConfig) -> Dict[str, Any]:
             name: _secret_ref_to_dict(ref)
             for name, ref in stream.option_secrets.items()
         }
+
+    if stream.pushdown_params:
+        stream_dict["pushdown_params"] = dict(stream.pushdown_params)
 
     # Always include incremental object, even if all fields are null
     incremental: Dict[str, Any] = {
@@ -841,6 +886,7 @@ def _parse_stream(raw: Any) -> StreamConfig:
     error_handler = _parse_error_handler(raw.get("error_handler"))
     partition = _parse_partition(raw.get("partition"))
     option_secrets = _parse_option_secrets(raw.get("option_secrets"))
+    pushdown_params = _parse_pushdown_params(raw.get("pushdown_params"))
 
     infer_schema = raw.get("infer_schema")
     schema = raw.get("schema")
@@ -871,7 +917,7 @@ def _parse_stream(raw: Any) -> StreamConfig:
     if response_format == "xml" and not xml_record_path:
         raise ConfigError("'response_format: xml' requires 'xml_record_path' to be set")
 
-    return StreamConfig(
+    stream = StreamConfig(
         name=name,
         path=path,
         params=resolved_params,
@@ -886,8 +932,28 @@ def _parse_stream(raw: Any) -> StreamConfig:
         streaming=streaming,
         response_format=response_format,
         xml_record_path=xml_record_path,
+        pushdown_params=pushdown_params,
         option_secrets=option_secrets,
     )
+    _check_pushdown_collisions(stream)
+    return stream
+
+
+def _parse_pushdown_params(raw: Any) -> Dict[str, str]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ConfigError("'pushdown_params' must be a mapping when provided")
+    result: Dict[str, str] = {}
+    for column, param in raw.items():
+        if not isinstance(column, str) or not column.strip():
+            raise ConfigError("'pushdown_params' keys must be non-empty column names")
+        if not isinstance(param, str) or not param.strip():
+            raise ConfigError(
+                f"'pushdown_params.{column}' must be a non-empty query parameter name"
+            )
+        result[column] = param
+    return result
 
 
 def _parse_pagination(raw: Any) -> PaginationConfig:

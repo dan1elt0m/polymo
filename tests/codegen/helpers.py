@@ -118,7 +118,10 @@ def run_generated_script(config: RestSourceConfig) -> SimpleNamespace:
     install_fake_pipelines()
     script = generate(config)
     assert_hygiene(script)
-    stub = SimpleNamespace(dataSource=SimpleNamespace(register=lambda cls: None))
+    stub = SimpleNamespace(
+        dataSource=SimpleNamespace(register=lambda cls: None),
+        conf=SimpleNamespace(set=lambda key, value: None),
+    )
     namespace: dict[str, Any] = {}
     with mock.patch.object(SparkSession, "getActiveSession", return_value=stub):
         exec(compile(script, "<generated>", "exec"), namespace)  # noqa: S102

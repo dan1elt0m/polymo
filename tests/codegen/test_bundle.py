@@ -1338,6 +1338,82 @@ def test_bundle_wheel_page_partition_planned_on_driver_read_on_fresh_worker(
     assert seen_pages == ["1", "2"]
 
 
+# --- executor wheel simulation: filter pushdown ------------------------------
+# `pushFilters` runs on the driver (Spark's planning worker), which then
+# pickles the reader — so the pushed params live in a plain dict attribute
+# that must survive the trip to a fresh worker's `read()`.
+
+_DRIVER_PUSHDOWN_PICKLE_SCRIPT = _DRIVER_PICKLE_SCRIPT.replace(
+    'with open(pickle_path, "wb") as fh:\n    pickle.dump(reader, fh)',
+    "from pyspark.sql.datasource import EqualTo, In\n\n"
+    "unsupported = list(\n"
+    '    reader.pushFilters([EqualTo(("status",), "active"), In(("id",), [1, 2])])\n'
+    ")\n"
+    'assert [type(f).__name__ for f in unsupported] == ["In"], unsupported\n'
+    'with open(pickle_path, "wb") as fh:\n'
+    "    pickle.dump(reader, fh)",
+)
+assert "reader.pushFilters" in _DRIVER_PUSHDOWN_PICKLE_SCRIPT
+
+
+def test_bundle_wheel_pushed_filter_survives_pickling_to_fresh_worker(
+    tmp_path, http_server
+):
+    seen_queries: list = []
+
+    def route(query, headers, body):
+        seen_queries.append(query)
+        return 200, [{"id": 1, "title": "pushed"}], {}
+
+    http_server.routes["/posts"] = route
+    config = make_config(
+        base_url=http_server.url,
+        name="posts",
+        path="/posts",
+        pushdown_params={"status": "status"},
+        schema="id BIGINT, title STRING",
+    )
+
+    pkg = "execsim_pickle_pushdown_pkg"
+    files = generate_bundle(config, project_name=pkg, catalog="main", schema="raw")
+    source_class_name = f"{_pascal_case(pkg)}Source"
+    source_py = files[f"src/{pkg}/source.py"]
+    assert (
+        "def pushFilters(self, filters: list[Filter]) -> Iterable[Filter]:" in source_py
+    )
+    assert 'PUSHDOWN_PARAMS: dict[str, str] = {"status": "status"}' in source_py
+    pipeline_py = files["pipelines/posts.py"]
+    assert (
+        'spark.conf.set("spark.sql.python.filterPushdown.enabled", "true")'
+        in pipeline_py
+    )
+    project_dir = _write_bundle_project(tmp_path, pkg, files)
+    wheel_path = _build_wheel(project_dir)
+
+    pickle_path = _run_driver_pickle(
+        tmp_path,
+        wheel_path=wheel_path,
+        pkg=pkg,
+        source_class_name=source_class_name,
+        options={},
+        mode="batch",
+        tag="pushdown",
+        script=_DRIVER_PUSHDOWN_PICKLE_SCRIPT,
+    )
+    assert seen_queries == []
+
+    worker = _run_worker(
+        tmp_path,
+        wheel_path=wheel_path,
+        pickle_path=pickle_path,
+        script=_WORKER_READ_SCRIPT,
+        tag="pushdown",
+    )
+    assert worker.returncode == 0, worker.stderr
+    assert json.loads(worker.stdout) == [{"id": 1, "title": "pushed"}]
+    assert seen_queries == [{"status": "active"}]
+
+
 # --- databricks.yml -----------------------------------------------------------
 
 

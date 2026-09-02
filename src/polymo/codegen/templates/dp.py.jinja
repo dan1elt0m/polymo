@@ -2,9 +2,16 @@ from pyspark import pipelines as dp  # noqa: E402
 from pyspark.sql import SparkSession  # noqa: E402
 
 spark = SparkSession.getActiveSession()
+{% if pushdown %}
+spark.conf.set("spark.sql.python.filterPushdown.enabled", "true")
+{% endif %}
 
 {% if schema_ddl %}
 SCHEMA: str = {{ schema_ddl | tojson }}
+
+{% endif %}
+{% if pushdown %}
+PUSHDOWN_PARAMS: dict[str, str] = {{ pushdown_params_repr }}
 
 {% endif %}
 
@@ -53,11 +60,14 @@ spark.dataSource.register(RestStreamSource)
 def {{ func_name }}():
     return spark.readStream.format("{{ func_name }}_stream").load()
 {% else %}
-{% if has_windows or page_partitions %}
-from pyspark.sql.datasource import DataSource, DataSourceReader, InputPartition  # noqa: E402
-{% else %}
-from pyspark.sql.datasource import DataSource, DataSourceReader  # noqa: E402
+{% set reader_imports = ["DataSource", "DataSourceReader"] + (["EqualTo", "Filter"] if pushdown else []) + (["InputPartition"] if has_windows or page_partitions else []) %}
+{% set pushed = "self._pushed" if pushdown else "" %}
+{% set pushed_arg = ", self._pushed" if pushdown else "" %}
+{% set pushed_kw = "extra_params=self._pushed" if pushdown else "" %}
+{% if pushdown %}
+from typing import Iterable  # noqa: E402
 {% endif %}
+from pyspark.sql.datasource import {{ reader_imports | join(", ") }}  # noqa: E402
 
 
 class RestSource(DataSource):
@@ -76,17 +86,39 @@ class RestSource(DataSource):
 class _Reader(DataSourceReader):
     def __init__(self, schema: Any) -> None:
         self._columns: list[str] = [field.name for field in schema.fields]
+{% if pushdown %}
+        self._pushed: dict[str, str] = {}
+
+    def pushFilters(self, filters: list[Filter]) -> Iterable[Filter]:
+        self._pushed = {}
+        unsupported: list[Filter] = []
+        for filter_ in filters:
+            if isinstance(filter_, EqualTo) and len(filter_.attribute) == 1:
+                param = PUSHDOWN_PARAMS.get(filter_.attribute[0])
+                if param is not None and filter_.value is not None:
+                    self._pushed[param] = str(filter_.value)
+                    continue
+            unsupported.append(filter_)
+        return unsupported
+{% endif %}
 
 {% if has_windows %}
     def partitions(self) -> list[InputPartition]:
         return [InputPartition(index) for index in range(len(WINDOWS))]
 
     def read(self, partition) -> Iterator[tuple]:
+{% if pushdown and windows_kind == "path" %}
+        records = fetch_records(extra_params=self._pushed, **WINDOWS[partition.value])
+{% elif pushdown %}
+        extra_params = {**WINDOWS[partition.value]["extra_params"], **self._pushed}
+        records = fetch_records(extra_params=extra_params)
+{% else %}
         records = fetch_records(**WINDOWS[partition.value])
+{% endif %}
 {% elif page_partitions and incremental %}
     def partitions(self) -> list[InputPartition]:
         state_cursor = _read_state()
-        total = _probe_total_pages(state_cursor)
+        total = _probe_total_pages(state_cursor{{ pushed_arg }})
         if total is None or total <= 1:
             return [InputPartition((None, state_cursor))]
         return [InputPartition((index, state_cursor)) for index in range(total)]
@@ -94,24 +126,24 @@ class _Reader(DataSourceReader):
     def read(self, partition) -> Iterator[tuple]:
         page_index, state_cursor = partition.value
         if page_index is None:
-            records = fetch_records()
+            records = fetch_records({{ pushed_kw }})
         else:
-            records = fetch_page(page_index, state_cursor)
+            records = fetch_page(page_index, state_cursor{{ pushed_arg }})
 {% elif page_partitions %}
     def partitions(self) -> list[InputPartition]:
-        total = _probe_total_pages()
+        total = _probe_total_pages({{ pushed }})
         if total is None or total <= 1:
             return [InputPartition(None)]
         return [InputPartition(index) for index in range(total)]
 
     def read(self, partition) -> Iterator[tuple]:
         if partition.value is None:
-            records = fetch_records()
+            records = fetch_records({{ pushed_kw }})
         else:
-            records = fetch_page(partition.value)
+            records = fetch_page(partition.value{{ pushed_arg }})
 {% else %}
     def read(self, partition) -> Iterator[tuple]:
-        records = fetch_records()
+        records = fetch_records({{ pushed_kw }})
 {% endif %}
 {% if incremental %}
         cursor = None

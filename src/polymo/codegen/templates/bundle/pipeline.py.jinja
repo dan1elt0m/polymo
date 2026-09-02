@@ -8,6 +8,9 @@ from {{ bundle_pkg }} import client
 from {{ bundle_pkg }}.source import {{ source_class_name }}
 
 spark = SparkSession.getActiveSession()
+{% if pushdown %}
+spark.conf.set("spark.sql.python.filterPushdown.enabled", "true")
+{% endif %}
 spark.dataSource.register({{ source_class_name }})
 {% if bundle_secret_slots %}
 

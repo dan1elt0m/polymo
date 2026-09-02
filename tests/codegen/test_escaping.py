@@ -150,6 +150,19 @@ def test_remote_state_path_with_quotes_is_escaped():
     assert 'STATE_PATH: str = "s3://b/st\\"; import os #.json"' in script
 
 
+def test_pushdown_column_and_param_names_with_quotes_are_escaped():
+    config = make_config(
+        base_url="https://api.example.com",
+        pushdown_params={'sta"tus': 'st"; import os #'},
+    )
+    script = generate(config)
+    assert_hygiene(script)
+    assert (
+        'PUSHDOWN_PARAMS: dict[str, str] = {"sta\\"tus": "st\\"; import os #"}'
+        in script
+    )
+
+
 def test_base_url_and_path_with_quotes_are_escaped():
     config = make_config(
         base_url='https://api.example.com/"; import os #',

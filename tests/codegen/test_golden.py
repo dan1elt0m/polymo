@@ -72,6 +72,22 @@ CASES = {
         partition=PartitionConfig(strategy="pagination"),
         schema="id BIGINT",
     ),
+    "pushdown_page_fanout": make_config(
+        base_url="https://api.example.com",
+        name="issues",
+        path="/issues",
+        params={"state": "open"},
+        pagination=PaginationConfig(
+            type="page",
+            page_param="page",
+            limit_param="per_page",
+            page_size=100,
+            total_pages_header="X-Total-Pages",
+        ),
+        partition=PartitionConfig(strategy="pagination"),
+        pushdown_params={"state": "state", "assignee_id": "assignee"},
+        schema="id BIGINT, state STRING, assignee_id BIGINT",
+    ),
     "streaming_page": make_config(
         base_url="https://api.example.com",
         streaming=True,

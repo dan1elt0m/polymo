@@ -1113,6 +1113,94 @@ def test_incremental_state_path_and_key_must_be_non_empty_strings(field, value) 
         parse_config(raw)
 
 
+# --- pushdown_params ----------------------------------------------------------
+
+
+def _pushdown_raw(stream_extra: dict, auth: dict | None = None) -> dict:
+    source: dict = {"type": "rest", "base_url": "https://api.test"}
+    if auth:
+        source["auth"] = auth
+    stream = {"name": "sample", "path": "/objects"}
+    stream.update(stream_extra)
+    return {"version": 0.1, "source": source, "stream": stream}
+
+
+def test_pushdown_params_parse_and_round_trip() -> None:
+    raw = _pushdown_raw({"pushdown_params": {"status": "status", "owner_id": "owner"}})
+    config = parse_config(raw)
+    assert config.stream.pushdown_params == {"status": "status", "owner_id": "owner"}
+    assert config_to_dict(config)["stream"]["pushdown_params"] == {
+        "status": "status",
+        "owner_id": "owner",
+    }
+    assert parse_config(config_to_dict(config)).stream.pushdown_params == {
+        "status": "status",
+        "owner_id": "owner",
+    }
+
+
+def test_pushdown_params_absent_or_empty_is_omitted_from_dict() -> None:
+    for raw in (_pushdown_raw({}), _pushdown_raw({"pushdown_params": {}})):
+        config = parse_config(raw)
+        assert config.stream.pushdown_params == {}
+        assert "pushdown_params" not in config_to_dict(config)["stream"]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [["status"], {"": "status"}, {"status": ""}, {"status": 7}, {"status": "  "}],
+    ids=["not-mapping", "empty-key", "empty-value", "non-string-value", "blank"],
+)
+def test_pushdown_params_must_be_non_empty_string_pairs(value) -> None:
+    with pytest.raises(ConfigError, match="pushdown_params"):
+        parse_config(_pushdown_raw({"pushdown_params": value}))
+
+
+@pytest.mark.parametrize(
+    "stream_extra,param",
+    [
+        ({"incremental": {"cursor_param": "since", "cursor_field": "u"}}, "since"),
+        ({"pagination": {"type": "page", "page_param": "page"}}, "page"),
+        (
+            {"pagination": {"type": "offset", "page_size": 5, "limit_param": "limit"}},
+            "limit",
+        ),
+        (
+            {
+                "partition": {
+                    "strategy": "param_range",
+                    "param": "region",
+                    "values": ["a"],
+                }
+            },
+            "region",
+        ),
+    ],
+    ids=["cursor_param", "page_param", "limit_param", "partition.param"],
+)
+def test_pushdown_param_colliding_with_builtin_param_raises(
+    stream_extra, param
+) -> None:
+    stream_extra = dict(stream_extra, pushdown_params={"col": param})
+    with pytest.raises(ConfigError, match="collides with"):
+        parse_config(_pushdown_raw(stream_extra))
+
+
+def test_pushdown_param_colliding_with_api_key_query_name_raises() -> None:
+    raw = _pushdown_raw(
+        {"pushdown_params": {"key": "api_key"}},
+        auth={"type": "api_key", "in": "query", "name": "api_key"},
+    )
+    with pytest.raises(ConfigError, match="pushdown_params.key"):
+        parse_config(raw)
+
+
+def test_two_columns_mapping_to_one_param_raises() -> None:
+    raw = _pushdown_raw({"pushdown_params": {"a": "status", "b": "status"}})
+    with pytest.raises(ConfigError, match="both map to 'status'"):
+        parse_config(raw)
+
+
 def test_incremental_blank_start_value_means_none() -> None:
     raw = _incremental_raw(
         {"cursor_param": "since", "cursor_field": "u", "start_value": ""}
