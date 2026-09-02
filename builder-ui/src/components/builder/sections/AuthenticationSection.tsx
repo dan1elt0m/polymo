@@ -1,7 +1,6 @@
 import React from "react";
 import { useAtom } from "jotai";
 import type { ConfigFormState } from "../../../types";
-import { InfoTooltip } from "../../InfoTooltip";
 import { databricksProfileAtom } from "../../../atoms";
 import {
   ApiError,
@@ -10,6 +9,7 @@ import {
   listDatabricksSecretScopes,
   listDatabricksServiceCredentials,
 } from "../../../lib/api";
+import { BTN_LINK, Field, INPUT, RadioRow, SELECT, SegmentedControl, SelectInput, TEXTAREA, cx } from "../../ui/primitives";
 
 export interface AuthenticationSectionProps {
   state: ConfigFormState;
@@ -17,13 +17,11 @@ export interface AuthenticationSectionProps {
   setBearerToken: (value: string) => void;
 }
 
-const AUTH_TOGGLE_ID = "auth-section";
-
 // Shown under every preview-secret input. Saved connectors never persist
 // the preview secret (it's session-only), so it has to be re-entered after
 // a reload or after resuming/loading a connector.
 const SECRET_NOT_SAVED_HINT =
-  "Not saved with the connector — you'll need to re-enter this after a reload.";
+  "Not saved with the connector — re-enter after a reload.";
 
 function describeSecretPickerError(error: unknown): string {
   // 501/502 (feature disabled on the backend, or the Databricks CLI call
@@ -36,31 +34,43 @@ function describeSecretPickerError(error: unknown): string {
   return error instanceof Error ? error.message : String(error ?? "Failed to load");
 }
 
-const SELECT_CLASS =
-  "w-full rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm appearance-none pr-9 transition-all focus:border-blue-7 dark:focus:border-drac-accent focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed";
-const INPUT_CLASS =
-  "rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5 disabled:opacity-60 disabled:cursor-not-allowed";
+const AUTH_TYPE_OPTIONS: Array<{ value: ConfigFormState["authType"]; label: string }> = [
+  { value: "none", label: "None" },
+  { value: "bearer", label: "Bearer token" },
+  { value: "api_key", label: "API key" },
+  { value: "oauth2", label: "OAuth 2.0" },
+];
+
+const SECRET_SOURCE_OPTIONS: Array<{ value: ConfigFormState["authSecretMode"]; label: string; description: string }> = [
+  {
+    value: "inline",
+    label: "Preview only",
+    description:
+      "Enter the secret above to preview in this browser session. The exported script gets a REPLACE_ME placeholder instead.",
+  },
+  {
+    value: "secret_scope",
+    label: "Secret scope",
+    description: "Reference a Databricks secret scope + key. The exported bundle resolves it at runtime via dbutils.",
+  },
+  {
+    value: "uc_secret",
+    label: "UC credential",
+    description:
+      "Reference a Unity Catalog service credential + Azure Key Vault secret. The exported bundle resolves it at runtime.",
+  },
+];
 
 export const AuthenticationSection: React.FC<AuthenticationSectionProps> = ({
   state,
   onUpdateState,
   setBearerToken,
 }) => {
-  const [isOpen, setIsOpen] = React.useState(false);
-
-  React.useEffect(() => {
-    if (state.authType === "bearer" || state.authType === "api_key" || state.authType === "oauth2") {
-      setIsOpen(true);
-    }
-  }, [state.authType]);
-
   // Shared with the Deploy tab's profile picker, but here it's purely
-  // optional: it only powers the "Load from workspace" suggestion buttons
-  // below. Every credential/vault/secret/scope/key field is a plain text
-  // input regardless of whether a profile is set, so nothing in this
-  // section blocks on picking one — that was the bug (the UC credential
-  // picker used to hang whenever no profile had been chosen in the Deploy
-  // tab, since it only offered a <select> with no way to type a value).
+  // optional: it only powers the "Load …" suggestion links below. Every
+  // credential/vault/secret/scope/key field is a plain text input
+  // regardless of whether a profile is set, so nothing in this section
+  // blocks on picking one.
   const [profile, setProfile] = useAtom(databricksProfileAtom);
   const [profiles, setProfiles] = React.useState<string[]>([]);
   const [profilesLoading, setProfilesLoading] = React.useState(false);
@@ -79,6 +89,7 @@ export const AuthenticationSection: React.FC<AuthenticationSectionProps> = ({
 
   const secretScopeActive = state.authSecretMode === "secret_scope";
   const ucSecretActive = state.authSecretMode === "uc_secret";
+  const workspaceBacked = secretScopeActive || ucSecretActive;
 
   // Lazily fetch the profile list the first time a workspace-backed secret
   // source is opened, so the inline profile picker below has options
@@ -106,11 +117,11 @@ export const AuthenticationSection: React.FC<AuthenticationSectionProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [secretScopeActive, ucSecretActive]);
 
-  // The three loaders below are explicit, user-triggered ("Load from
-  // workspace") fetches rather than effects that auto-run on profile
-  // change: with no profile selected they simply stay idle (button
-  // disabled) instead of anything hanging, and a 501/502 from the backend
-  // surfaces as inline text next to the button without touching the input.
+  // The three loaders below are explicit, user-triggered fetches rather
+  // than effects that auto-run on profile change: with no profile selected
+  // they simply stay idle (link disabled) instead of anything hanging, and
+  // a 501/502 from the backend surfaces as inline text without touching
+  // the input.
   const loadScopes = React.useCallback(() => {
     if (!profile) return;
     setScopesLoading(true);
@@ -140,221 +151,6 @@ export const AuthenticationSection: React.FC<AuthenticationSectionProps> = ({
       .catch((err) => setCredentialsError(describeSecretPickerError(err)))
       .finally(() => setCredentialsLoading(false));
   }, [profile]);
-
-  const renderSecretSourcePicker = React.useCallback(
-    () => (
-      <div className="flex flex-col gap-3 md:col-span-2">
-        <div className="flex items-center gap-1">
-          <span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Secret source</span>
-          <InfoTooltip text="Preview value: enter a value used only for previewing in this browser session; the exported script gets a REPLACE_ME placeholder. Databricks secret scope: reference a scope + key so the exported bundle resolves it at runtime instead. UC credential (Key Vault): reference a Unity Catalog service credential + Azure Key Vault secret instead." />
-        </div>
-        <div className="inline-flex w-fit flex-wrap rounded-full border border-border bg-background p-1 text-xs font-medium dark:border-drac-border/60 dark:bg-[#1f232b]">
-          <button
-            type="button"
-            className={`rounded-full px-3 py-1.5 transition ${
-              state.authSecretMode === "inline"
-                ? "bg-blue-9 text-white shadow-sm"
-                : "text-slate-11 hover:text-slate-12 dark:text-drac-foreground/80 dark:hover:text-drac-foreground"
-            }`}
-            onClick={() => onUpdateState({ authSecretMode: "inline" })}
-          >
-            Enter for preview / placeholder in export
-          </button>
-          <button
-            type="button"
-            className={`rounded-full px-3 py-1.5 transition ${
-              secretScopeActive
-                ? "bg-blue-9 text-white shadow-sm"
-                : "text-slate-11 hover:text-slate-12 dark:text-drac-foreground/80 dark:hover:text-drac-foreground"
-            }`}
-            onClick={() => onUpdateState({ authSecretMode: "secret_scope" })}
-          >
-            Databricks secret scope
-          </button>
-          <button
-            type="button"
-            className={`rounded-full px-3 py-1.5 transition ${
-              ucSecretActive
-                ? "bg-blue-9 text-white shadow-sm"
-                : "text-slate-11 hover:text-slate-12 dark:text-drac-foreground/80 dark:hover:text-drac-foreground"
-            }`}
-            onClick={() => onUpdateState({ authSecretMode: "uc_secret" })}
-          >
-            UC credential (Key Vault)
-          </button>
-        </div>
-
-        {(secretScopeActive || ucSecretActive) && (
-          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border/60 bg-background/40 px-3 py-2.5 dark:border-drac-border/50">
-            <label className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-slate-11 dark:text-drac-foreground/80">
-                Databricks profile (optional)
-              </span>
-              <select
-                className={`${SELECT_CLASS} w-52`}
-                value={profile}
-                onChange={(event) => setProfile(event.target.value)}
-              >
-                <option value="">{profilesLoading ? "Loading…" : "No profile selected"}</option>
-                {profiles.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <p className="max-w-sm text-xs text-muted dark:text-drac-muted">
-              Only used to look up workspace suggestions below via "Load from workspace" — every
-              field here also accepts free text, so this can be left unset.
-            </p>
-            {profilesError && <span className="text-xs text-error">{profilesError}</span>}
-          </div>
-        )}
-
-        {secretScopeActive && (
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="flex flex-col gap-2">
-              <span className="text-xs font-medium text-slate-11 dark:text-drac-foreground/80">Secret scope</span>
-              <input
-                type="text"
-                list="auth-secret-scope-suggestions"
-                className={INPUT_CLASS}
-                placeholder="my-scope"
-                value={state.authSecretScope || ""}
-                onChange={(event) => onUpdateState({ authSecretScope: event.target.value })}
-              />
-              <datalist id="auth-secret-scope-suggestions">
-                {scopes.map((scope) => (
-                  <option key={scope} value={scope} />
-                ))}
-              </datalist>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  className="whitespace-nowrap text-xs text-blue-10 underline decoration-dotted disabled:cursor-not-allowed disabled:text-muted disabled:no-underline dark:text-drac-accent"
-                  onClick={loadScopes}
-                  disabled={!profile || scopesLoading}
-                >
-                  {scopesLoading ? "Loading…" : "Load from workspace"}
-                </button>
-                {scopesError && <span className="text-xs text-error">{scopesError}</span>}
-              </div>
-            </label>
-            <label className="flex flex-col gap-2">
-              <span className="text-xs font-medium text-slate-11 dark:text-drac-foreground/80">Secret key</span>
-              <input
-                type="text"
-                list="auth-secret-key-suggestions"
-                className={INPUT_CLASS}
-                placeholder="api-token"
-                value={state.authSecretKey || ""}
-                onChange={(event) => onUpdateState({ authSecretKey: event.target.value })}
-              />
-              <datalist id="auth-secret-key-suggestions">
-                {keys.map((key) => (
-                  <option key={key} value={key} />
-                ))}
-              </datalist>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  className="whitespace-nowrap text-xs text-blue-10 underline decoration-dotted disabled:cursor-not-allowed disabled:text-muted disabled:no-underline dark:text-drac-accent"
-                  onClick={loadKeys}
-                  disabled={!profile || !state.authSecretScope || keysLoading}
-                >
-                  {keysLoading ? "Loading…" : "Load from workspace"}
-                </button>
-                {keysError && <span className="text-xs text-error">{keysError}</span>}
-              </div>
-            </label>
-          </div>
-        )}
-
-        {ucSecretActive && (
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="flex flex-col gap-2">
-              <span className="text-xs font-medium text-slate-11 dark:text-drac-foreground/80">
-                UC service credential
-              </span>
-              <input
-                type="text"
-                list="auth-uc-credential-suggestions"
-                className={INPUT_CLASS}
-                placeholder="my-service-credential"
-                value={state.authUcCredential || ""}
-                onChange={(event) => onUpdateState({ authUcCredential: event.target.value })}
-              />
-              <datalist id="auth-uc-credential-suggestions">
-                {credentials.map((credential) => (
-                  <option key={credential} value={credential} />
-                ))}
-              </datalist>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  className="whitespace-nowrap text-xs text-blue-10 underline decoration-dotted disabled:cursor-not-allowed disabled:text-muted disabled:no-underline dark:text-drac-accent"
-                  onClick={loadCredentials}
-                  disabled={!profile || credentialsLoading}
-                >
-                  {credentialsLoading ? "Loading…" : "Load from workspace"}
-                </button>
-                {credentialsError && <span className="text-xs text-error">{credentialsError}</span>}
-              </div>
-            </label>
-            <label className="flex flex-col gap-2">
-              <span className="text-xs font-medium text-slate-11 dark:text-drac-foreground/80">
-                Key Vault URL
-              </span>
-              <input
-                type="text"
-                className={INPUT_CLASS}
-                placeholder="https://my-vault.vault.azure.net/"
-                value={state.authUcVaultUrl || ""}
-                onChange={(event) => onUpdateState({ authUcVaultUrl: event.target.value })}
-              />
-            </label>
-            <label className="flex flex-col gap-2 md:col-span-2">
-              <span className="text-xs font-medium text-slate-11 dark:text-drac-foreground/80">Secret name</span>
-              <input
-                type="text"
-                className={INPUT_CLASS}
-                placeholder="api-token"
-                value={state.authUcSecretName || ""}
-                onChange={(event) => onUpdateState({ authUcSecretName: event.target.value })}
-              />
-            </label>
-          </div>
-        )}
-      </div>
-    ),
-    [
-      secretScopeActive,
-      ucSecretActive,
-      profile,
-      setProfile,
-      profiles,
-      profilesLoading,
-      profilesError,
-      scopes,
-      scopesLoading,
-      scopesError,
-      loadScopes,
-      keys,
-      keysLoading,
-      keysError,
-      loadKeys,
-      state.authSecretScope,
-      state.authSecretKey,
-      credentials,
-      credentialsLoading,
-      credentialsError,
-      loadCredentials,
-      state.authUcCredential,
-      state.authUcVaultUrl,
-      state.authUcSecretName,
-      onUpdateState,
-    ],
-  );
 
   const handleAuthTypeChange = React.useCallback(
     (nextType: ConfigFormState["authType"]) => {
@@ -429,232 +225,290 @@ export const AuthenticationSection: React.FC<AuthenticationSectionProps> = ({
     [onUpdateState, setBearerToken],
   );
 
-  return (
+  const previewSuffix = workspaceBacked ? " — preview value (optional)" : "";
+
+  const secretSource = (
     <div className="space-y-3">
-      <button
-        type="button"
-        className="flex w-full items-center justify-between rounded-lg border border-border bg-background px-4 py-3 text-left text-sm font-medium text-slate-12 hover:border-blue-7 hover:bg-blue-3/20 dark:hover:bg-drac-selection/40 transition-colors duration-200"
-        onClick={() => setIsOpen((value) => !value)}
-        aria-expanded={isOpen}
-        aria-controls={AUTH_TOGGLE_ID}
+      <Field
+        as="div"
+        label="Secret source"
+        tooltip="Where the exported bundle reads this secret from. Preview only: nothing is exported (REPLACE_ME placeholder). Secret scope: Databricks secret scope + key. UC credential: Unity Catalog service credential + Azure Key Vault secret."
       >
-        <span className="flex items-center gap-2">
-          Authentication
-          <span className="text-xs font-normal text-muted">
-            (optional{state.authType !== "none" ? `: ${state.authType}` : ""})
-          </span>
-        </span>
-        <span className={`transition-transform duration-200 ${isOpen ? "rotate-90" : ""}`}>
-          <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-            <path d="M7.25 3.75a.75.75 0 0 1 1.06 0l5 5a.75.75 0 0 1 0 1.06l-5 5a.75.75 0 1 1-1.06-1.06L11.69 10 7.25 5.56a.75.75 0 0 1 0-1.06Z" />
-          </svg>
-        </span>
-      </button>
+        <RadioRow
+          name="auth-secret-mode"
+          value={state.authSecretMode}
+          options={SECRET_SOURCE_OPTIONS}
+          onChange={(authSecretMode) => onUpdateState({ authSecretMode })}
+        />
+      </Field>
 
-      {isOpen && (
-        <div
-          id={AUTH_TOGGLE_ID}
-          className="space-y-5 rounded-xl border border-border/60 dark:border-drac-border/60 bg-surface/70 dark:bg-[#1f232b]/80 backdrop-blur-sm p-5 shadow-inner transition ring-1 ring-border/40 dark:ring-drac-border/30 animate-in fade-in duration-200"
-        >
-          <div className="grid gap-5 md:grid-cols-2">
-            <label className="flex flex-col gap-2">
-              <div className="flex items-center gap-1">
-                <span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Auth Type</span>
-                <InfoTooltip text="Authentication method applied to each request. Not persisted in the saved config." />
-              </div>
-              <div className="relative">
-                <select
-                  className="w-full rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm appearance-none pr-9 transition-all focus:border-blue-7 dark:focus:border-drac-accent focus:outline-none"
-                  value={state.authType}
-                  onChange={(event) => handleAuthTypeChange(event.target.value as ConfigFormState["authType"])}
-                >
-                  <option value="none">None</option>
-                  <option value="bearer">Bearer Token</option>
-                  <option value="api_key">API Key</option>
-                  <option value="oauth2">OAuth 2.0 (Client Credentials)</option>
-                </select>
-                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-10 dark:text-drac-muted">
-                  <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-                    <path d="M5.8 7.5a.75.75 0 0 1 1.05-.2L10 9.2l3.15-1.9a.75.75 0 0 1 .75 1.3l-3.5 2.11a.75.75 0 0 1-.76 0L5.99 8.6a.75.75 0 0 1-.2-1.1Z" />
-                  </svg>
-                </span>
-              </div>
-            </label>
-
-            {state.authType === "bearer" && (
-              <>
-                <label className="flex flex-col gap-2">
-                  <div className="flex items-center gap-1">
-                    <span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">
-                      {secretScopeActive || ucSecretActive ? "Bearer Token — preview value (optional)" : "Bearer Token"}
-                    </span>
-                    <InfoTooltip text="Secret token sent as Authorization header." />
-                  </div>
-                  <input
-                    type="password"
-                    className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
-                    placeholder="your-token-here"
-                    value={state.authToken}
-                    onChange={(event) => handleBearerTokenChange(event.target.value)}
-                  />
-                  <span className="text-xs text-muted dark:text-drac-muted">{SECRET_NOT_SAVED_HINT}</span>
-                </label>
-                {renderSecretSourcePicker()}
-              </>
-            )}
-
-            {state.authType === "api_key" && (
-              <div className="grid gap-5 md:grid-cols-2">
-                <label className="flex flex-col gap-2">
-                  <div className="flex items-center gap-1">
-                    <span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Placement</span>
-                    <InfoTooltip text="Whether the API key is sent as a request header or a query parameter." />
-                  </div>
-                  <div className="relative">
-                    <select
-                      className="w-full rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm appearance-none pr-9 transition-all focus:border-blue-7 dark:focus:border-drac-accent focus:outline-none"
-                      value={state.authApiKeyIn || "header"}
-                      onChange={(event) =>
-                        onUpdateState({ authApiKeyIn: event.target.value as ConfigFormState["authApiKeyIn"] })
-                      }
-                    >
-                      <option value="header">Header</option>
-                      <option value="query">Query parameter</option>
-                    </select>
-                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-10 dark:text-drac-muted">
-                      <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-                        <path d="M5.8 7.5a.75.75 0 0 1 1.05-.2L10 9.2l3.15-1.9a.75.75 0 0 1 .75 1.3l-3.5 2.11a.75.75 0 0 1-.76 0L5.99 8.6a.75.75 0 0 1-.2-1.1Z" />
-                      </svg>
-                    </span>
-                  </div>
-                </label>
-                <label className="flex flex-col gap-2">
-                  <div className="flex items-center gap-1">
-                    <span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">
-                      {state.authApiKeyIn === "query" ? "Query Param Name" : "Header Name"}
-                    </span>
-                    <InfoTooltip text="Name of the header or query parameter that will carry the API key at runtime." />
-                  </div>
-                  <input
-                    type="text"
-                    className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
-                    placeholder={state.authApiKeyIn === "query" ? "api_key" : "X-API-Key"}
-                    value={state.authApiKeyName || ""}
-                    onChange={(event) => onUpdateState({ authApiKeyName: event.target.value })}
-                  />
-                </label>
-                <label className="flex flex-col gap-2 md:col-span-2">
-                  <div className="flex items-center gap-1">
-                    <span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">
-                      {secretScopeActive || ucSecretActive ? "API Key — preview value (optional)" : "API Key (secret)"}
-                    </span>
-                    <InfoTooltip text="Secret API key stored only in the browser session for previewing; the exported script gets a REPLACE_ME placeholder instead." />
-                  </div>
-                  <input
-                    type="password"
-                    className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
-                    placeholder="your-api-key"
-                    value={state.authToken}
-                    onChange={(event) => handleBearerTokenChange(event.target.value)}
-                  />
-                  <span className="text-xs text-muted dark:text-drac-muted">{SECRET_NOT_SAVED_HINT}</span>
-                </label>
-                {renderSecretSourcePicker()}
-              </div>
-            )}
-
-            {state.authType === "oauth2" && (
-              <div className="grid gap-5 md:grid-cols-2">
-                <label className="flex flex-col gap-2 md:col-span-1">
-                  <div className="flex items-center gap-1">
-                    <span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Token URL</span>
-                    <InfoTooltip text="OAuth2 token endpoint used for the client credentials grant." />
-                  </div>
-                  <input
-                    type="url"
-                    className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
-                    placeholder="https://example.com/oauth/token"
-                    value={state.authTokenUrl || ''}
-                    onChange={(event) => onUpdateState({ authTokenUrl: event.target.value })}
-                  />
-                </label>
-
-                <label className="flex flex-col gap-2 md:col-span-1">
-                  <div className="flex items-center gap-1">
-                    <span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Client ID</span>
-                    <InfoTooltip text="Public client identifier used when requesting the token." />
-                  </div>
-                  <input
-                    type="text"
-                    className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
-                    placeholder="client-id"
-                    value={state.authClientId || ''}
-                    onChange={(event) => onUpdateState({ authClientId: event.target.value })}
-                  />
-                </label>
-
-                <label className="flex flex-col gap-2 md:col-span-2">
-                  <div className="flex items-center gap-1">
-                    <span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">
-                      {secretScopeActive || ucSecretActive ? "Client Secret — preview value (optional)" : "Client Secret"}
-                    </span>
-                    <InfoTooltip text="Secret stored only in this session and passed as a runtime option ('oauth_client_secret')." />
-                  </div>
-                  <input
-                    type="password"
-                    className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
-                    placeholder="your-client-secret"
-                    value={state.authToken}
-                    onChange={(event) => handleBearerTokenChange(event.target.value)}
-                  />
-                  <span className="text-xs text-muted dark:text-drac-muted">{SECRET_NOT_SAVED_HINT}</span>
-                </label>
-                {renderSecretSourcePicker()}
-
-                <label className="flex flex-col gap-2">
-                  <div className="flex items-center gap-1">
-                    <span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Scopes</span>
-                    <InfoTooltip text="Optional list of scopes separated by spaces or commas." />
-                  </div>
-                  <input
-                    type="text"
-                    className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
-                    placeholder="read write"
-                    value={state.authScopes || ''}
-                    onChange={(event) => onUpdateState({ authScopes: event.target.value })}
-                  />
-                </label>
-
-                <label className="flex flex-col gap-2">
-                  <div className="flex items-center gap-1">
-                    <span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Audience</span>
-                    <InfoTooltip text="Optional audience parameter included with the token request." />
-                  </div>
-                  <input
-                    type="text"
-                    className="rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
-                    placeholder="https://api.example.com"
-                    value={state.authAudience || ''}
-                    onChange={(event) => onUpdateState({ authAudience: event.target.value })}
-                  />
-                </label>
-
-                <label className="flex flex-col gap-2 md:col-span-2">
-                  <div className="flex items-center gap-1">
-                    <span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Extra Params (JSON)</span>
-                    <InfoTooltip text="Optional JSON object merged into the token request body." />
-                  </div>
-                  <textarea
-                    className="min-h-[90px] rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm leading-snug text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5"
-                    placeholder='{\"resource\": \"https://graph.microsoft.com\"}'
-                    value={state.authExtraParams || ''}
-                    onChange={(event) => onUpdateState({ authExtraParams: event.target.value })}
-                  />
-                </label>
-              </div>
-            )}
-          </div>
+      {secretScopeActive && (
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Secret scope">
+            <input
+              type="text"
+              list="auth-secret-scope-suggestions"
+              className={cx(INPUT, "font-mono text-xs")}
+              placeholder="my-scope"
+              value={state.authSecretScope || ""}
+              onChange={(event) => onUpdateState({ authSecretScope: event.target.value })}
+            />
+            <datalist id="auth-secret-scope-suggestions">
+              {scopes.map((scope) => (
+                <option key={scope} value={scope} />
+              ))}
+            </datalist>
+          </Field>
+          <Field label="Secret key">
+            <input
+              type="text"
+              list="auth-secret-key-suggestions"
+              className={cx(INPUT, "font-mono text-xs")}
+              placeholder="api-token"
+              value={state.authSecretKey || ""}
+              onChange={(event) => onUpdateState({ authSecretKey: event.target.value })}
+            />
+            <datalist id="auth-secret-key-suggestions">
+              {keys.map((key) => (
+                <option key={key} value={key} />
+              ))}
+            </datalist>
+          </Field>
         </div>
+      )}
+
+      {ucSecretActive && (
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="UC service credential">
+            <input
+              type="text"
+              list="auth-uc-credential-suggestions"
+              className={cx(INPUT, "font-mono text-xs")}
+              placeholder="my-service-credential"
+              value={state.authUcCredential || ""}
+              onChange={(event) => onUpdateState({ authUcCredential: event.target.value })}
+            />
+            <datalist id="auth-uc-credential-suggestions">
+              {credentials.map((credential) => (
+                <option key={credential} value={credential} />
+              ))}
+            </datalist>
+          </Field>
+          <Field label="Key Vault URL">
+            <input
+              type="text"
+              className={cx(INPUT, "font-mono text-xs")}
+              placeholder="https://my-vault.vault.azure.net/"
+              value={state.authUcVaultUrl || ""}
+              onChange={(event) => onUpdateState({ authUcVaultUrl: event.target.value })}
+            />
+          </Field>
+          <Field label="Secret name" className="col-span-2">
+            <input
+              type="text"
+              className={cx(INPUT, "font-mono text-xs")}
+              placeholder="api-token"
+              value={state.authUcSecretName || ""}
+              onChange={(event) => onUpdateState({ authUcSecretName: event.target.value })}
+            />
+          </Field>
+        </div>
+      )}
+
+      {workspaceBacked && (
+        <div className="space-y-1.5">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-fg-muted">
+            <span>Load from workspace:</span>
+            {secretScopeActive ? (
+              <>
+                <button type="button" className={BTN_LINK} onClick={loadScopes} disabled={!profile || scopesLoading}>
+                  {scopesLoading ? "Loading scopes…" : "scopes"}
+                </button>
+                <button
+                  type="button"
+                  className={BTN_LINK}
+                  onClick={loadKeys}
+                  disabled={!profile || !state.authSecretScope || keysLoading}
+                >
+                  {keysLoading ? "Loading keys…" : "keys"}
+                </button>
+              </>
+            ) : (
+              <button type="button" className={BTN_LINK} onClick={loadCredentials} disabled={!profile || credentialsLoading}>
+                {credentialsLoading ? "Loading credentials…" : "service credentials"}
+              </button>
+            )}
+            <label className="inline-flex items-center gap-1.5">
+              <span>using profile</span>
+              <span className="relative inline-block">
+                <select
+                  className={cx(SELECT, "h-7 w-44 max-w-[11rem] py-0 pl-2 pr-7 text-xs")}
+                  value={profile}
+                  onChange={(event) => setProfile(event.target.value)}
+                  aria-label="Databricks profile (optional)"
+                >
+                  <option value="">{profilesLoading ? "Loading…" : "none selected"}</option>
+                  {profiles.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="pointer-events-none absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 text-fg-subtle" aria-hidden="true">
+                  <path d="m3.5 6 4.5 4.5L12.5 6" />
+                </svg>
+              </span>
+            </label>
+          </div>
+          <p className="text-xs leading-relaxed text-fg-muted">
+            Optional — the profile only fills the suggestion lists; every field above accepts free text.
+          </p>
+          {(profilesError || scopesError || keysError || credentialsError) && (
+            <p className="text-xs text-error">{profilesError || scopesError || keysError || credentialsError}</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      <Field as="div" label="Authentication" tooltip="Authentication method applied to each request. Secret values are never persisted in the saved config.">
+        <SegmentedControl
+          fill
+          aria-label="Authentication type"
+          value={state.authType}
+          options={AUTH_TYPE_OPTIONS}
+          onChange={handleAuthTypeChange}
+        />
+      </Field>
+
+      {state.authType === "bearer" && (
+        <>
+          <Field label={`Bearer token${previewSuffix}`} tooltip="Secret token sent as Authorization header." help={SECRET_NOT_SAVED_HINT}>
+            <input
+              type="password"
+              className={INPUT}
+              placeholder="your-token-here"
+              value={state.authToken}
+              onChange={(event) => handleBearerTokenChange(event.target.value)}
+              autoComplete="off"
+            />
+          </Field>
+          {secretSource}
+        </>
+      )}
+
+      {state.authType === "api_key" && (
+        <>
+          <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-4">
+            <Field label="Placement" tooltip="Whether the API key is sent as a request header or a query parameter.">
+              <SelectInput
+                value={state.authApiKeyIn || "header"}
+                onChange={(event) => onUpdateState({ authApiKeyIn: event.target.value as ConfigFormState["authApiKeyIn"] })}
+              >
+                <option value="header">Header</option>
+                <option value="query">Query parameter</option>
+              </SelectInput>
+            </Field>
+            <Field
+              label={state.authApiKeyIn === "query" ? "Query param name" : "Header name"}
+              tooltip="Name of the header or query parameter that will carry the API key at runtime."
+            >
+              <input
+                type="text"
+                className={cx(INPUT, "font-mono text-xs")}
+                placeholder={state.authApiKeyIn === "query" ? "api_key" : "X-API-Key"}
+                value={state.authApiKeyName || ""}
+                onChange={(event) => onUpdateState({ authApiKeyName: event.target.value })}
+              />
+            </Field>
+          </div>
+          <Field
+            label={`API key${previewSuffix}`}
+            tooltip="Secret API key stored only in the browser session for previewing; the exported script gets a REPLACE_ME placeholder instead."
+            help={SECRET_NOT_SAVED_HINT}
+          >
+            <input
+              type="password"
+              className={INPUT}
+              placeholder="your-api-key"
+              value={state.authToken}
+              onChange={(event) => handleBearerTokenChange(event.target.value)}
+              autoComplete="off"
+            />
+          </Field>
+          {secretSource}
+        </>
+      )}
+
+      {state.authType === "oauth2" && (
+        <>
+          <Field label="Token URL" tooltip="OAuth2 token endpoint used for the client credentials grant.">
+            <input
+              type="url"
+              className={INPUT}
+              placeholder="https://example.com/oauth/token"
+              value={state.authTokenUrl || ''}
+              onChange={(event) => onUpdateState({ authTokenUrl: event.target.value })}
+            />
+          </Field>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Client ID" tooltip="Public client identifier used when requesting the token.">
+              <input
+                type="text"
+                className={INPUT}
+                placeholder="client-id"
+                value={state.authClientId || ''}
+                onChange={(event) => onUpdateState({ authClientId: event.target.value })}
+              />
+            </Field>
+            <Field
+              label={`Client secret${previewSuffix}`}
+              tooltip="Secret stored only in this session and passed as a runtime option ('oauth_client_secret')."
+              help={SECRET_NOT_SAVED_HINT}
+            >
+              <input
+                type="password"
+                className={INPUT}
+                placeholder="your-client-secret"
+                value={state.authToken}
+                onChange={(event) => handleBearerTokenChange(event.target.value)}
+                autoComplete="off"
+              />
+            </Field>
+          </div>
+          {secretSource}
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Scopes" tooltip="Optional list of scopes separated by spaces or commas.">
+              <input
+                type="text"
+                className={INPUT}
+                placeholder="read write"
+                value={state.authScopes || ''}
+                onChange={(event) => onUpdateState({ authScopes: event.target.value })}
+              />
+            </Field>
+            <Field label="Audience" tooltip="Optional audience parameter included with the token request.">
+              <input
+                type="text"
+                className={INPUT}
+                placeholder="https://api.example.com"
+                value={state.authAudience || ''}
+                onChange={(event) => onUpdateState({ authAudience: event.target.value })}
+              />
+            </Field>
+          </div>
+          <Field label="Extra params (JSON)" tooltip="Optional JSON object merged into the token request body.">
+            <textarea
+              className={cx(TEXTAREA, "min-h-[64px] font-mono text-xs")}
+              rows={2}
+              placeholder='{"resource": "https://graph.microsoft.com"}'
+              value={state.authExtraParams || ''}
+              onChange={(event) => onUpdateState({ authExtraParams: event.target.value })}
+            />
+          </Field>
+        </>
       )}
     </div>
   );

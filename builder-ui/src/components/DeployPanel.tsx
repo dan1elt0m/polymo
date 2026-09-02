@@ -11,7 +11,19 @@ import {
 	runDatabricksPipeline,
 } from "../lib/api";
 import { validateFormState } from "../lib/transform";
-import { InfoTooltip } from "./InfoTooltip";
+import {
+	BTN_GHOST,
+	BTN_LINK,
+	BTN_PRIMARY,
+	BTN_SMALL,
+	Callout,
+	CheckIcon,
+	CheckboxRow,
+	Field,
+	INPUT,
+	SelectInput,
+	cx,
+} from "./ui/primitives";
 
 const DEFAULT_PROJECT_DIR = "~/polymo-projects";
 // Sentinel <option> value that swaps the schema field from a select (list of
@@ -27,12 +39,53 @@ function describeError(error: unknown): string {
 	return error instanceof Error ? error.message : String(error ?? "Request failed");
 }
 
-const SELECT_CLASS =
-	"w-full rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm appearance-none pr-9 transition-all focus:border-blue-7 dark:focus:border-drac-accent focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed";
-const INPUT_CLASS =
-	"rounded-lg border border-border bg-background/70 dark:bg-[#272d38] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm focus-visible:border-blue-7 dark:border-drac-border transition-all focus-visible:ring-1 focus-visible:ring-blue-5 disabled:opacity-60 disabled:cursor-not-allowed";
-const BUTTON_CLASS =
-	"inline-flex items-center gap-1 rounded-full bg-blue-9 px-5 py-2 text-sm font-semibold text-white shadow-soft transition hover:bg-blue-10 disabled:opacity-50 disabled:cursor-not-allowed";
+type StepStatus = "done" | "active" | "blocked";
+
+interface StepProps {
+	index: number;
+	title: string;
+	status: StepStatus;
+	/** Short state line under the title (e.g. the chosen profile). */
+	detail?: React.ReactNode;
+	/** Why the step is blocked, shown instead of the body. */
+	blockedHint?: string;
+	last?: boolean;
+	children?: React.ReactNode;
+}
+
+const Step: React.FC<StepProps> = ({ index, title, status, detail, blockedHint, last, children }) => (
+	<li className="relative flex gap-4" data-step-status={status}>
+		{!last && (
+			<span
+				className={cx("absolute left-[11px] top-7 h-[calc(100%-12px)] w-px", status === "done" ? "bg-accent/60" : "bg-border")}
+				aria-hidden="true"
+			/>
+		)}
+		<span
+			className={cx(
+				"relative z-10 mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold tabular-nums",
+				status === "done" && "border-accent bg-accent text-accent-fg",
+				status === "active" && "border-accent bg-surface text-accent-text ring-4 ring-accent/15",
+				status === "blocked" && "border-border bg-surface text-fg-subtle",
+			)}
+			aria-hidden="true"
+		>
+			{status === "done" ? <CheckIcon className="h-3 w-3" /> : index}
+		</span>
+		<div className={cx("min-w-0 flex-1", last ? "pb-1" : "pb-6")}>
+			<div className="flex min-h-[28px] flex-wrap items-baseline gap-x-3 gap-y-0.5">
+				<h3 className={cx("text-sm font-semibold", status === "blocked" ? "text-fg-muted" : "text-fg")}>{title}</h3>
+				<span className="sr-only">{status === "done" ? "completed" : status === "active" ? "current step" : "not yet available"}</span>
+				{detail && <span className="truncate font-mono text-[11px] text-fg-muted">{detail}</span>}
+			</div>
+			{status === "blocked" ? (
+				blockedHint && <p className="mt-1 text-xs text-fg-subtle">{blockedHint}</p>
+			) : (
+				<div className="mt-3 space-y-3">{children}</div>
+			)}
+		</div>
+	</li>
+);
 
 export const DeployPanel: React.FC = () => {
 	const configFormState = useAtomValue(configFormStateAtom);
@@ -67,6 +120,7 @@ export const DeployPanel: React.FC = () => {
 	const [deploying, setDeploying] = React.useState(false);
 	const [lastDeployOk, setLastDeployOk] = React.useState(false);
 	const [running, setRunning] = React.useState(false);
+	const [lastRunOk, setLastRunOk] = React.useState(false);
 
 	const [validationErrors, setValidationErrors] = React.useState<string[]>([]);
 
@@ -88,6 +142,7 @@ export const DeployPanel: React.FC = () => {
 	React.useEffect(() => {
 		setProjectPath(null);
 		setLastDeployOk(false);
+		setLastRunOk(false);
 	}, [projectName, projectDir]);
 
 	// Clear a stale bootstrap validation message once the underlying
@@ -200,6 +255,7 @@ export const DeployPanel: React.FC = () => {
 		setBootstrapping(true);
 		setProjectPath(null);
 		setLastDeployOk(false);
+		setLastRunOk(false);
 		appendLog(`$ bootstrap ${projectName.trim()} into ${projectDir.trim()}`);
 		try {
 			const res = await bootstrapDatabricksProject({
@@ -225,6 +281,7 @@ export const DeployPanel: React.FC = () => {
 		if (!projectPath) return;
 		setDeploying(true);
 		setLastDeployOk(false);
+		setLastRunOk(false);
 		appendLog(`$ databricks bundle deploy${profile ? ` --profile ${profile}` : ""}`);
 		try {
 			const res = await deployDatabricksBundle({ project_path: projectPath, profile: profile || undefined });
@@ -241,11 +298,13 @@ export const DeployPanel: React.FC = () => {
 	const handleRun = React.useCallback(async () => {
 		if (!projectPath) return;
 		setRunning(true);
+		setLastRunOk(false);
 		appendLog(`$ databricks bundle run${profile ? ` --profile ${profile}` : ""}`);
 		try {
 			const res = await runDatabricksPipeline({ project_path: projectPath, profile: profile || undefined });
 			appendLog(res.output || "(no output)");
 			appendLog(res.ok ? "Run succeeded." : "Run failed.");
+			setLastRunOk(res.ok);
 		} catch (err) {
 			appendLog(`Run failed: ${describeError(err)}`);
 		} finally {
@@ -253,210 +312,232 @@ export const DeployPanel: React.FC = () => {
 		}
 	}, [projectPath, profile, appendLog]);
 
+	// Step statuses derive purely from the existing state — nothing new is
+	// tracked beyond `lastRunOk`, which only paints the last step green.
+	const targetDone = !!catalog && !!schema;
+	const profileStatus: StepStatus = profile ? "done" : "active";
+	const targetStatus: StepStatus = !profile ? "blocked" : targetDone ? "done" : "active";
+	const bootstrapStatus: StepStatus = !targetDone ? "blocked" : projectPath ? "done" : "active";
+	const deployStatus: StepStatus = !projectPath ? "blocked" : lastDeployOk ? "done" : "active";
+	const runStatus: StepStatus = !lastDeployOk ? "blocked" : lastRunOk ? "done" : "active";
+
 	return (
-		<div className="space-y-5">
-			<p className="text-xs text-muted dark:text-drac-muted">
-				Bootstraps a Databricks Asset Bundle project from the current configuration, then deploys and runs
-				it via the local <code>databricks</code> CLI (reads <code>~/.databrickscfg</code>).
+		<div className="flex h-full min-h-0 flex-col gap-5">
+			<p className="text-xs leading-relaxed text-fg-muted">
+				Bootstraps a Databricks Asset Bundle project from the current configuration, then deploys and runs it
+				via the local <code className="font-mono">databricks</code> CLI (reads <code className="font-mono">~/.databrickscfg</code>).
 			</p>
 
-			<div className="grid gap-5 md:grid-cols-2">
-				<label className="flex flex-col gap-2">
-					<div className="flex items-center gap-1">
-						<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Profile</span>
-						<InfoTooltip text="Databricks CLI profile from ~/.databrickscfg, used to browse catalogs/schemas and to run deploy/run." />
-					</div>
-					<select
-						className={SELECT_CLASS}
-						value={profile}
-						disabled={profilesLoading}
-						onChange={(event) => setProfile(event.target.value)}
+			<ol className="flex flex-col" aria-label="Deployment steps">
+				<Step index={1} title="Profile" status={profileStatus} detail={profile || undefined}>
+					<Field
+						as="div"
+						label="Databricks CLI profile"
+						tooltip="Databricks CLI profile from ~/.databrickscfg, used to browse catalogs/schemas and to run deploy/run."
+						error={profilesError ?? undefined}
 					>
-						<option value="">{profilesLoading ? "Loading…" : "Select profile"}</option>
-						{profiles.map((name) => (
-							<option key={name} value={name}>
-								{name}
-							</option>
-						))}
-					</select>
-					{profilesError && <span className="text-xs text-error">{profilesError}</span>}
-					{profilesLoaded && !profilesLoading && !profilesError && profiles.length === 0 && (
-						<span className="text-xs text-warning">
-							No profiles found in <code>~/.databrickscfg</code>. Run{" "}
-							<code>databricks configure</code> (or add a profile manually), then{" "}
-							<button type="button" className="underline" onClick={fetchProfiles}>
-								retry
-							</button>
-							.
-						</span>
-					)}
-				</label>
-
-				<label className="flex flex-col gap-2">
-					<div className="flex items-center gap-1">
-						<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Catalog</span>
-						<InfoTooltip text="Unity Catalog catalog the bundled pipeline writes to." />
-					</div>
-					<select
-						className={SELECT_CLASS}
-						value={catalog}
-						disabled={!profile || catalogsLoading}
-						onChange={(event) => setCatalog(event.target.value)}
-					>
-						<option value="">{catalogsLoading ? "Loading…" : "Select catalog"}</option>
-						{catalogs.map((name) => (
-							<option key={name} value={name}>
-								{name}
-							</option>
-						))}
-					</select>
-					{catalogsError && <span className="text-xs text-error">{catalogsError}</span>}
-				</label>
-
-				<label className="flex flex-col gap-2">
-					<div className="flex items-center gap-1">
-						<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Schema</span>
-						<InfoTooltip text="Unity Catalog schema (within the selected catalog) the bundled pipeline writes to. Pipelines can create a schema that doesn't exist yet — pick 'Custom schema…' to name a new one." />
-					</div>
-					{schemaMode === "custom" ? (
-						<div className="flex items-center gap-2">
-							<input
-								type="text"
-								className={`${INPUT_CLASS} flex-1`}
-								placeholder="new-schema-name"
-								value={schema}
-								autoFocus
-								disabled={!catalog}
-								onChange={(event) => setSchema(event.target.value)}
-							/>
-							<button
-								type="button"
-								className="whitespace-nowrap text-xs text-muted underline dark:text-drac-muted"
-								onClick={() => {
-									setSchemaMode("select");
-									setSchema("");
-								}}
-							>
-								Back to list
-							</button>
-						</div>
-					) : (
-						<select
-							className={SELECT_CLASS}
-							value={schema}
-							disabled={!catalog || schemasLoading}
-							onChange={(event) => {
-								if (event.target.value === CUSTOM_SCHEMA_VALUE) {
-									setSchemaMode("custom");
-									setSchema("");
-								} else {
-									setSchema(event.target.value);
-								}
-							}}
-						>
-							<option value="">{schemasLoading ? "Loading…" : "Select schema"}</option>
-							{schemas.map((name) => (
+						<SelectInput value={profile} disabled={profilesLoading} onChange={(event) => setProfile(event.target.value)}>
+							<option value="">{profilesLoading ? "Loading…" : "Select profile"}</option>
+							{profiles.map((name) => (
 								<option key={name} value={name}>
 									{name}
 								</option>
 							))}
-							<option value={CUSTOM_SCHEMA_VALUE}>Custom schema… (create new)</option>
-						</select>
+						</SelectInput>
+					</Field>
+					{profilesLoaded && !profilesLoading && !profilesError && profiles.length === 0 && (
+						<Callout tone="warning">
+							No profiles found in <code className="font-mono">~/.databrickscfg</code>. Run{" "}
+							<code className="font-mono">databricks configure</code> (or add a profile manually), then{" "}
+							<button type="button" className="underline" onClick={fetchProfiles}>
+								retry
+							</button>
+							.
+						</Callout>
 					)}
-					{schemaMode === "custom" && (
-						<span className="text-xs text-muted dark:text-drac-muted">
-							This schema will be created on deploy if it doesn't already exist.
-						</span>
-					)}
-					{schemasError && <span className="text-xs text-error">{schemasError}</span>}
-				</label>
+				</Step>
 
-				<label className="flex flex-col gap-2">
-					<div className="flex items-center gap-1">
-						<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Project name</span>
-						<InfoTooltip text="Name of the bundle project directory and pipeline. Defaults to the stream's table name." />
-					</div>
-					<input
-						type="text"
-						className={INPUT_CLASS}
-						placeholder="my-connector"
-						value={projectName}
-						onChange={(event) => {
-							setProjectNameTouched(true);
-							setProjectName(event.target.value);
-						}}
-					/>
-				</label>
-
-				<label className="flex flex-col gap-2 md:col-span-2">
-					<div className="flex items-center gap-1">
-						<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">
-							Project directory
-						</span>
-						<InfoTooltip text="Local directory the bundle project is written into, under a folder named after the project." />
-					</div>
-					<input
-						type="text"
-						className={INPUT_CLASS}
-						placeholder={DEFAULT_PROJECT_DIR}
-						value={projectDir}
-						onChange={(event) => setProjectDir(event.target.value)}
-					/>
-				</label>
-			</div>
-
-			<label className="flex items-center gap-2 text-sm text-slate-11 dark:text-drac-foreground/80">
-				<input
-					type="checkbox"
-					checked={overwrite}
-					onChange={(event) => setOverwrite(event.target.checked)}
-					className="h-4 w-4 rounded border-border"
-				/>
-				Overwrite bundle files in existing folder — other files are left in place
-			</label>
-
-			{validationErrors.length > 0 && (
-				<div
-					className="flex items-start gap-2 rounded-md border border-error/40 bg-red-3/60 dark:bg-drac-red/25 dark:border-drac-red/40 px-3 py-2 text-xs text-error shadow-sm"
-					data-status="error"
+				<Step
+					index={2}
+					title="Target"
+					status={targetStatus}
+					detail={targetDone ? `${catalog}.${schema}` : undefined}
+					blockedHint="Pick a profile first."
 				>
-					<span className="mt-0.5 inline-block h-2 w-2 flex-shrink-0 rounded-full bg-error" />
-					<div className="leading-snug">
-						<p className="font-medium">Fix the configuration before bootstrapping:</p>
-						<ul className="list-disc pl-4">
-							{validationErrors.map((error) => (
-								<li key={error}>{error}</li>
-							))}
-						</ul>
+					<div className="grid grid-cols-2 gap-4">
+						<Field label="Catalog" tooltip="Unity Catalog catalog the bundled pipeline writes to." error={catalogsError ?? undefined}>
+							<SelectInput value={catalog} disabled={!profile || catalogsLoading} onChange={(event) => setCatalog(event.target.value)}>
+								<option value="">{catalogsLoading ? "Loading…" : "Select catalog"}</option>
+								{catalogs.map((name) => (
+									<option key={name} value={name}>
+										{name}
+									</option>
+								))}
+							</SelectInput>
+						</Field>
+						<Field
+							label="Schema"
+							tooltip="Unity Catalog schema (within the selected catalog) the bundled pipeline writes to. Pipelines can create a schema that doesn't exist yet — pick 'Custom schema…' to name a new one."
+							error={schemasError ?? undefined}
+							help={schemaMode === "custom" ? "Created on deploy if it doesn't exist yet." : undefined}
+						>
+							{schemaMode === "custom" ? (
+								<div className="flex items-center gap-2">
+									<input
+										type="text"
+										className={cx(INPUT, "font-mono text-xs")}
+										placeholder="new-schema-name"
+										value={schema}
+										autoFocus
+										disabled={!catalog}
+										onChange={(event) => setSchema(event.target.value)}
+									/>
+									<button
+										type="button"
+										className={cx(BTN_LINK, "shrink-0")}
+										onClick={() => {
+											setSchemaMode("select");
+											setSchema("");
+										}}
+									>
+										List
+									</button>
+								</div>
+							) : (
+								<SelectInput
+									value={schema}
+									disabled={!catalog || schemasLoading}
+									onChange={(event) => {
+										if (event.target.value === CUSTOM_SCHEMA_VALUE) {
+											setSchemaMode("custom");
+											setSchema("");
+										} else {
+											setSchema(event.target.value);
+										}
+									}}
+								>
+									<option value="">{schemasLoading ? "Loading…" : "Select schema"}</option>
+									{schemas.map((name) => (
+										<option key={name} value={name}>
+											{name}
+										</option>
+									))}
+									<option value={CUSTOM_SCHEMA_VALUE}>Custom schema… (create new)</option>
+								</SelectInput>
+							)}
+						</Field>
 					</div>
+				</Step>
+
+				<Step
+					index={3}
+					title="Bootstrap"
+					status={bootstrapStatus}
+					detail={projectPath ?? undefined}
+					blockedHint="Choose a catalog and schema first."
+				>
+					<div className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-4">
+						<Field label="Project name" tooltip="Name of the bundle project directory and pipeline. Defaults to the stream's table name.">
+							<input
+								type="text"
+								className={cx(INPUT, "font-mono text-xs")}
+								placeholder="my-connector"
+								value={projectName}
+								onChange={(event) => {
+									setProjectNameTouched(true);
+									setProjectName(event.target.value);
+								}}
+							/>
+						</Field>
+						<Field label="Project directory" tooltip="Local directory the bundle project is written into, under a folder named after the project.">
+							<input
+								type="text"
+								className={cx(INPUT, "font-mono text-xs")}
+								placeholder={DEFAULT_PROJECT_DIR}
+								value={projectDir}
+								onChange={(event) => setProjectDir(event.target.value)}
+							/>
+						</Field>
+					</div>
+					<CheckboxRow
+						label="Overwrite bundle files in an existing folder"
+						description="Other files in the folder are left in place."
+						checked={overwrite}
+						onChange={(event) => setOverwrite(event.target.checked)}
+					/>
+					{validationErrors.length > 0 && (
+						<Callout tone="error">
+							<p className="font-medium">Fix the configuration before bootstrapping:</p>
+							<ul className="list-disc pl-4">
+								{validationErrors.map((error) => (
+									<li key={error}>{error}</li>
+								))}
+							</ul>
+						</Callout>
+					)}
+					<div className="flex items-center gap-3">
+						<button
+							type="button"
+							className={cx(projectPath ? BTN_GHOST : BTN_PRIMARY, BTN_SMALL)}
+							onClick={handleBootstrap}
+							disabled={!canBootstrap}
+						>
+							{bootstrapping ? "Bootstrapping…" : projectPath ? "Bootstrap again" : "Bootstrap project"}
+						</button>
+					</div>
+				</Step>
+
+				<Step index={4} title="Deploy" status={deployStatus} blockedHint="Bootstrap the project first.">
+					<div className="flex flex-wrap items-center gap-3">
+						<button
+							type="button"
+							className={cx(lastDeployOk ? BTN_GHOST : BTN_PRIMARY, BTN_SMALL)}
+							onClick={handleDeploy}
+							disabled={!canDeploy}
+						>
+							{deploying ? "Deploying…" : lastDeployOk ? "Deploy again" : "Deploy bundle"}
+						</button>
+						<code className="truncate font-mono text-[11px] text-fg-muted">
+							databricks bundle deploy{profile ? ` --profile ${profile}` : ""}
+						</code>
+					</div>
+				</Step>
+
+				<Step index={5} title="Run" status={runStatus} blockedHint="Deploy the bundle first." last>
+					<div className="flex flex-wrap items-center gap-3">
+						<button
+							type="button"
+							className={cx(lastRunOk ? BTN_GHOST : BTN_PRIMARY, BTN_SMALL)}
+							onClick={handleRun}
+							disabled={!canRun}
+						>
+							{running ? "Running…" : lastRunOk ? "Run again" : "Run pipeline"}
+						</button>
+						<code className="truncate font-mono text-[11px] text-fg-muted">
+							databricks bundle run{profile ? ` --profile ${profile}` : ""}
+						</code>
+					</div>
+				</Step>
+			</ol>
+
+			<div className="flex min-h-[200px] flex-1 flex-col overflow-hidden rounded-lg border border-border bg-field">
+				<div className="flex h-8 shrink-0 items-center justify-between border-b border-border px-3">
+					<span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-fg-muted">CLI output</span>
+					<button
+						type="button"
+						className={cx(BTN_LINK, "text-fg-muted")}
+						onClick={() => setLog([])}
+						disabled={log.length === 0}
+					>
+						Clear
+					</button>
 				</div>
-			)}
-
-			<div className="flex flex-wrap items-center gap-3">
-				<button type="button" className={BUTTON_CLASS} onClick={handleBootstrap} disabled={!canBootstrap}>
-					{bootstrapping ? "Bootstrapping…" : "Bootstrap"}
-				</button>
-				<button type="button" className={BUTTON_CLASS} onClick={handleDeploy} disabled={!canDeploy}>
-					{deploying ? "Deploying…" : "Deploy"}
-				</button>
-				<button type="button" className={BUTTON_CLASS} onClick={handleRun} disabled={!canRun}>
-					{running ? "Running…" : "Run"}
-				</button>
-				{projectPath && (
-					<span className="text-xs text-muted dark:text-drac-muted truncate" title={projectPath}>
-						{projectPath}
-					</span>
-				)}
-			</div>
-
-			<div className="flex flex-col gap-2">
-				<span className="text-sm font-medium text-slate-11 dark:text-drac-foreground/90">Output</span>
 				<pre
 					ref={logRef}
-					className="h-64 w-full overflow-auto rounded-2xl border border-border bg-background dark:bg-drac-surface px-4 py-3 font-mono text-xs text-slate-12 dark:text-drac-foreground leading-5 shadow-soft whitespace-pre-wrap break-words"
+					className="scroll-thin m-0 min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded-none border-0 bg-transparent px-3 py-2.5 font-mono text-xs leading-5 text-fg"
 					aria-label="Deploy output log"
 				>
-					{log.length > 0 ? log.join("\n\n") : "// Bootstrap, deploy, and run output will appear here."}
+					{log.length > 0 ? log.join("\n\n") : <span className="text-fg-subtle">// Bootstrap, deploy, and run output will appear here.</span>}
 				</pre>
 			</div>
 		</div>

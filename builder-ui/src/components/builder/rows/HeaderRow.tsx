@@ -1,6 +1,6 @@
 import React from "react";
-import { InfoTooltip } from "../../InfoTooltip";
 import { InputWithCursorPosition } from "../../InputWithCursorPosition";
+import { KeyValueRow } from "../../ui/primitives";
 
 export interface HeaderRowProps {
   originalKey: string;
@@ -30,51 +30,46 @@ export const HeaderRow: React.FC<HeaderRowProps> = ({
   }, [tempKey, originalKey, value, onUpdateKey]);
 
   return (
-    <li className="group relative rounded-xl border border-border/60 dark:border-drac-border/60 bg-background/60 dark:bg-[#262c35] backdrop-blur-sm px-4 py-4 shadow-inner transition-all duration-200 hover:border-blue-7/60 dark:hover:border-drac-accent/60 hover:shadow-sm">
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="flex flex-col gap-1.5">
-          <label className="text-[11px] tracking-wide text-muted dark:text-drac-muted font-medium flex items-center gap-1">
-            Header Name <InfoTooltip text="Header sent on every request." />
-          </label>
-          <InputWithCursorPosition
-            type="text"
-            className="rounded-lg border border-border dark:border-drac-border bg-background/70 dark:bg-[#303745] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm transition-all focus-visible:border-blue-7 dark:focus-visible:border-drac-accent focus-visible:ring-1 focus-visible:ring-blue-5 dark:focus-visible:ring-drac-accent/40 group-hover:border-blue-7/50"
-            placeholder="X-Api-Key"
-            value={tempKey}
-            onChange={(e) => setTempKey(e.target.value)}
-            onBlur={commitIfChanged}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                (e.target as HTMLInputElement).blur();
-              }
-            }}
-          />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <label className="text-[11px] tracking-wide text-muted dark:text-drac-muted font-medium flex items-center gap-1">
-            Value <InfoTooltip text="Header value, supports secrets via {{ runtime.option }}." />
-          </label>
-          <InputWithCursorPosition
-            type="text"
-            className="rounded-lg border border-border dark:border-drac-border bg-background/70 dark:bg-[#303745] px-4 py-2.5 text-sm text-slate-12 dark:text-drac-foreground shadow-sm transition-all focus-visible:border-blue-7 dark:focus-visible:border-drac-accent focus-visible:ring-1 focus-visible:ring-blue-5 dark:focus-visible:ring-drac-accent/40 group-hover:border-blue-7/50"
-            placeholder="{{ options.api_key }}"
-            value={value}
-            onValueChange={(newValue) => onUpdateValue(originalKey, originalKey, newValue)}
-          />
-        </div>
-      </div>
-      <button
-        type="button"
-        className="absolute -right-2 -top-2 inline-flex h-8 w-8 items-center justify-center rounded-full border border-border/60 dark:border-drac-border bg-background/80 dark:bg-[#2d3541] text-slate-11 dark:text-drac-muted opacity-0 shadow-sm backdrop-blur transition-all duration-200 hover:text-red-10 hover:border-red-7 hover:bg-red-3/60 dark:hover:text-drac-red dark:hover:border-drac-red/80 dark:hover:bg-[#383f4c] group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-7"
-        onClick={() => onRemove(originalKey)}
-        aria-label={`Remove header ${originalKey}`}
-      >
-        <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-          <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
-        </svg>
-      </button>
-    </li>
+    <KeyValueRow
+      keyLabel="Header name"
+      keyPlaceholder="X-Api-Key"
+      keyTooltip="Header sent on every request."
+      valuePlaceholder="{{ options.api_key }}"
+      valueTooltip="Header value, supports secrets via {{ options.key }}."
+      tempKey={tempKey}
+      value={value}
+      onTempKeyChange={setTempKey}
+      onCommitKey={commitIfChanged}
+      onValueChange={(next) => onUpdateValue(originalKey, originalKey, next)}
+      onRemove={() => onRemove(originalKey)}
+      removeLabel={`Remove header ${originalKey}`}
+      renderKey={(className) => (
+        <InputWithCursorPosition
+          type="text"
+          className={className}
+          placeholder="X-Api-Key"
+          aria-label="Header name"
+          value={tempKey}
+          onChange={(e) => setTempKey(e.target.value)}
+          onBlur={commitIfChanged}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              (e.target as HTMLInputElement).blur();
+            }
+          }}
+        />
+      )}
+      renderValue={(className) => (
+        <InputWithCursorPosition
+          type="text"
+          className={className}
+          placeholder="{{ options.api_key }}"
+          aria-label="Header value"
+          value={value}
+          onValueChange={(newValue) => onUpdateValue(originalKey, originalKey, newValue)}
+        />
+      )}
+    />
   );
 };
-

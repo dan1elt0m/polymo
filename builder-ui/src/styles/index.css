@@ -1,11 +1,79 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-:root { color-scheme: light dark; }
+/* ------------------------------------------------------------------
+   Design tokens. One set of semantic colours, expressed as RGB triplets
+   so Tailwind's alpha modifiers keep working (see tailwind.config.ts).
+   Light values on :root, Dracula-ish dark values on .dark. Components
+   use `bg-surface`, `text-fg-muted`, `border-border` … and never need a
+   `dark:` variant for these — the token flips with the theme.
+   ------------------------------------------------------------------ */
+@layer base {
+  :root {
+    color-scheme: light;
+    --c-bg: 250 249 251;            /* mauve2 */
+    --c-surface: 253 252 253;       /* mauve1 */
+    --c-field: 255 255 255;
+    --c-raised: 242 239 243;        /* mauve3 */
+    --c-border: 219 216 224;        /* mauve6 */
+    --c-border-strong: 188 186 199; /* mauve8 */
+    --c-fg: 33 31 38;               /* mauve12 */
+    --c-fg-muted: 101 99 109;       /* mauve11 — 5.2:1 on surface */
+    --c-fg-subtle: 132 130 142;     /* mauve10 — placeholders */
+    --c-accent: 0 144 255;          /* blue9 */
+    --c-accent-hover: 5 136 240;    /* blue10 */
+    --c-accent-fg: 255 255 255;
+    --c-accent-text: 13 116 206;    /* blue11 */
+    --c-accent-soft: 230 244 254;   /* blue3 */
+    --c-accent-ring: 142 200 246;   /* blue7 */
+    --c-success: 33 131 88;         /* green11 */
+    --c-warning: 171 100 0;         /* amber11 */
+    --c-error: 206 44 49;           /* red11 */
+    --c-shadow: 15 23 42;
+  }
 
-body { @apply bg-background text-background-foreground font-sans antialiased transition-colors; }
+  .dark {
+    color-scheme: dark;
+    --c-bg: 40 42 54;               /* dracula base */
+    --c-surface: 48 50 65;
+    --c-field: 38 40 55;
+    --c-raised: 58 61 79;
+    --c-border: 68 71 90;           /* dracula current line */
+    --c-border-strong: 91 95 122;
+    --c-fg: 248 248 242;            /* dracula foreground */
+    --c-fg-muted: 163 171 204;      /* brightened comment — 5.5:1 on surface */
+    --c-fg-subtle: 139 147 181;
+    --c-accent: 0 144 255;
+    --c-accent-hover: 46 160 255;
+    --c-accent-fg: 255 255 255;
+    --c-accent-text: 189 147 249;   /* dracula purple */
+    --c-accent-soft: 59 53 82;
+    --c-accent-ring: 189 147 249;
+    --c-success: 80 250 123;        /* dracula green */
+    --c-warning: 255 184 108;       /* dracula orange */
+    --c-error: 255 107 107;
+    --c-shadow: 0 0 0;
+  }
+
+  html, body, #root { height: 100%; }
+  body { @apply bg-background text-fg font-sans antialiased; }
+
+  ::placeholder { @apply text-fg-subtle; }
+
+  /* Native selects/inputs pick up the theme's field colour for their popups. */
+  select, input, textarea { color-scheme: inherit; }
+
+  /* Keyboard focus: one ring, everywhere. Inputs draw their own border
+     highlight so they only get the ring when navigated by keyboard. */
+  button:focus-visible, a:focus-visible, [role="separator"]:focus-visible, [role="radio"]:focus-visible {
+    @apply outline-none ring-2 ring-accent-ring ring-offset-2 ring-offset-surface;
+  }
+  input:focus-visible, textarea:focus-visible, select:focus-visible {
+    @apply outline-none;
+  }
+}
 
 /* THEME TRANSITION */
 .theme-fade { animation: theme-fade 240ms ease-out; }
@@ -15,43 +83,42 @@ body { @apply bg-background text-background-foreground font-sans antialiased tra
 .animate-param-enter { animation: param-enter 220ms ease-out; }
 @keyframes param-enter { 0% { opacity:0; transform:scale(.97) translateY(4px);} 100% { opacity:1; transform:scale(1) translateY(0);} }
 
-/* Modern select styling */
-.modern-select { @apply w-full appearance-none rounded-lg border border-border bg-background px-3 py-2 pr-9 text-sm text-slate-12 shadow-sm transition focus-visible:border-blue-7 focus-visible:outline-none dark:border-drac-border dark:bg-drac-surface dark:text-drac-foreground dark:focus-visible:border-drac-accent; }
-
-/* Inputs / form elements */
-.dark input:not([type=checkbox]), .dark textarea, .dark select { @apply bg-drac-surface border-drac-border text-drac-foreground placeholder-drac-muted; }
-.dark ::placeholder { @apply text-drac-muted; }
-
-/* Dracula surface overrides */
-.dark .bg-background { background-color: theme('colors.drac.base') !important; }
-.dark .bg-surface { background-color: theme('colors.drac.surface') !important; }
-.dark .border-border { border-color: theme('colors.drac.border') !important; }
-.dark .text-muted { color: theme('colors.drac.muted') !important; }
-.dark .shadow-soft { box-shadow: 0 10px 40px -15px rgba(0,0,0,0.65); }
-
-/* Force readable foreground on slate utility text in dark mode */
-.dark .text-slate-12, .dark .text-slate-11, .dark .text-slate-10 { color: theme('colors.drac.foreground') !important; }
-.dark .text-slate-9, .dark .text-slate-8 { color: theme('colors.drac.muted') !important; }
-
-/* Card hover subtle elevation in dark */
-.dark .group:hover.bg-background\/60 { background-color: rgba(72,76,94,0.55) !important; }
-
 .radix-scroll-area-scrollbar { @apply flex select-none touch-none p-0.5 bg-transparent transition-colors duration-150 ease-out; }
-.radix-scroll-area-thumb { @apply flex-1 rounded-full bg-mauve-8 hover:bg-mauve-9 dark:bg-drac-border dark:hover:bg-drac-muted; }
-
-button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { @apply outline-none ring-2 ring-blue-7 ring-offset-2 ring-offset-surface dark:ring-drac-accent dark:ring-offset-drac-surface; }
+.radix-scroll-area-thumb { @apply flex-1 rounded-full bg-border-strong hover:bg-fg-subtle; }
 
 [data-status="success"] { @apply text-success; }
 [data-status="warn"], [data-status="warning"] { @apply text-warning; }
 [data-status="error"] { @apply text-error; }
-[data-status="info"] { @apply text-blue-11 dark:text-drac-accent; }
+[data-status="info"] { @apply text-accent-text; }
 
-pre { @apply bg-slate-2 dark:bg-drac-surface rounded-lg p-4 text-sm overflow-x-auto text-slate-12 dark:text-drac-foreground; }
+pre { @apply bg-field rounded-lg p-4 text-sm overflow-x-auto text-fg; }
 
-/* TABLE header dark mode tweaks */
-.dark table thead tr { background-color: rgba(255,255,255,0.04) !important; }
-.dark table tbody tr.even\:bg-slate-2\/40 { background-color: rgba(255,255,255,0.02) !important; }
-.dark table tbody tr:hover { background-color: rgba(189,147,249,0.12) !important; }
+/* Pane toolbars: each pane is an inline-size container, so labels can
+   shorten themselves when the pane (not the viewport) gets narrow. */
+.pane { container-type: inline-size; }
+.label-short { display: none; }
+@container (max-width: 520px) {
+  .label-long { display: none; }
+  .label-short { display: inline; }
+}
+/* Preview header: below ~680px the status pill would be squeezed between
+   the title and the actions, so it drops to its own line under the title. */
+@container (max-width: 680px) {
+  .status-slot { order: 10; flex-basis: 100%; }
+}
+
+/* Field grids that fold from 3/4 columns to 2 when the pane is narrow,
+   so labels never wrap mid-word. */
+.fields-3, .fields-4 { display: grid; gap: 1rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@container (min-width: 520px) { .fields-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@container (min-width: 580px) { .fields-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+
+/* Thin, theme-aware scrollbars for the panes that scroll internally. */
+.scroll-thin { scrollbar-width: thin; scrollbar-color: rgb(var(--c-border-strong) / 0.7) transparent; }
+.scroll-thin::-webkit-scrollbar { width: 10px; height: 10px; }
+.scroll-thin::-webkit-scrollbar-track { background: transparent; }
+.scroll-thin::-webkit-scrollbar-thumb { background: rgb(var(--c-border-strong) / 0.6); border-radius: 6px; border: 2px solid transparent; background-clip: padding-box; }
+.scroll-thin::-webkit-scrollbar-thumb:hover { background: rgb(var(--c-fg-subtle) / 0.7); background-clip: padding-box; border: 2px solid transparent; }
 
 /* Prism (Dracula) minimal tokens */
 .prism-container { @apply relative h-full font-mono text-sm; }
@@ -70,68 +137,30 @@ pre { @apply bg-slate-2 dark:bg-drac-surface rounded-lg p-4 text-sm overflow-x-a
 /* YAML Editor Enhancements */
 .prism-highlight { position: relative; --ch: 0.62ch; }
 .prism-highlight .editor-line { position: relative; padding-left: 0; }
-.prism-highlight .editor-line::before { content: attr(data-line); position: absolute; left: -0.75rem; transform: translateX(-100%); width: 3rem; text-align: right; padding-right: 0.75rem; color: #64748b; font-size: 0.75rem; line-height: 1.25rem; font-variant-numeric: tabular-nums; opacity: 0.65; }
-.dark .prism-highlight .editor-line::before { color: theme('colors.drac.muted'); opacity: 0.55; }
+.prism-highlight .editor-line::before { content: attr(data-line); position: absolute; left: -0.75rem; transform: translateX(-100%); width: 3rem; text-align: right; padding-right: 0.75rem; color: rgb(var(--c-fg-subtle)); font-size: 0.75rem; line-height: 1.25rem; font-variant-numeric: tabular-nums; opacity: 0.65; }
 .prism-highlight .editor-line.error { background: rgba(255,85,85,0.10); box-shadow: inset 0 0 0 1px rgba(255,85,85,0.35); }
 .dark .prism-highlight .editor-line.error { background: rgba(255,85,85,0.17); box-shadow: inset 0 0 0 1px rgba(255,85,85,0.45); }
 .prism-highlight .editor-line .col-marker { position: absolute; top: 0; bottom: 0; width: 2px; background: #ff5555; left: calc(var(--col) * var(--ch)); pointer-events: none; opacity: 0.4; }
 .dark .prism-highlight .editor-line .col-marker { background: #ff5555; opacity: 0.55; }
 .prism-highlight .editor-line .err-char { background: linear-gradient(transparent 70%, rgba(255,85,85,0.55) 70%); border-radius: 2px; }
 .dark .prism-highlight .editor-line .err-char { background: linear-gradient(transparent 65%, rgba(255,85,85,0.75) 65%); }
-/* Improve scrollbars inside editor */
-.prism-highlight::-webkit-scrollbar { width: 10px; height: 10px; }
-.prism-highlight::-webkit-scrollbar-track { background: transparent; }
-.prism-highlight::-webkit-scrollbar-thumb { background: rgba(100,116,139,0.35); border-radius: 6px; }
-.dark .prism-highlight::-webkit-scrollbar-thumb { background: rgba(248,248,242,0.20); }
-.prism-highlight::-webkit-scrollbar-thumb:hover { background: rgba(100,116,139,0.55); }
-.dark .prism-highlight::-webkit-scrollbar-thumb:hover { background: rgba(248,248,242,0.35); }
-/* Reduce pointer events on overlayed highlight so textarea captures clicks */
 .prism-highlight { pointer-events: none; }
 .prism-highlight .editor-line, .prism-highlight .line-content { pointer-events: none; }
-/* Ensure textarea text visible (transparent highlight text) */
-.prism-editor { color: transparent; text-shadow: none; }
-.dark .prism-editor { color: transparent; }
-/* Caret highly visible */
-.prism-editor { caret-color: #111; }
-.dark .prism-editor { caret-color: #f8f8f2; }
+.prism-editor { color: transparent; text-shadow: none; caret-color: rgb(var(--c-fg)); }
 
 /* Tooltip animation */
 [role=tooltip] { animation: fadeIn 120ms ease-out; }
 @keyframes fadeIn { from { opacity: 0; transform: translate(-50%, 4px); } to { opacity: 1; transform: translate(-50%, 0); } }
 
-/* Utility accents */
-.dark .btn-accent { @apply bg-drac-accent text-drac-foreground hover:bg-drac-accent2; }
-.dark .border-accent { @apply border-drac-accent; }
-
-/* Validate button flash animations */
+/* Validate button flash. Animations win over the button's own utility
+   colours without needing !important; the tokens make it theme-aware. */
 .validate-flash-success { animation: validateFlashSuccess 4000ms ease-in-out forwards; }
 .validate-flash-error { animation: validateFlashError 4000ms ease-in-out forwards; }
-@keyframes validateFlashSuccess { 0%, 85% { background: theme('colors.success'); color:#fff; } 100% { background: transparent; color: inherit; } }
-@keyframes validateFlashError { 0%, 85% { background: theme('colors.error'); color:#fff; } 100% { background: transparent; color: inherit; } }
-
-/* Dark mode override animations for validate flashes */
-.dark button.validate-flash-success,
-.dark .validate-flash-success { animation: darkValidateFlashSuccess 4000ms ease-in-out forwards; position: relative; }
-.dark button.validate-flash-error,
-.dark .validate-flash-error { animation: darkValidateFlashError 4000ms ease-in-out forwards; position: relative; }
-
-.dark button.validate-flash-success::after,
-.dark .validate-flash-success::after,
-.dark button.validate-flash-error::after,
-.dark .validate-flash-error::after { content:''; position:absolute; inset:0; border-radius:inherit; pointer-events:none; }
-
-.dark button.validate-flash-success::after,
-.dark .validate-flash-success::after { background: radial-gradient(circle at 30% 30%, rgba(80,250,123,0.35), rgba(80,250,123,0.05)); }
-.dark button.validate-flash-error::after,
-.dark .validate-flash-error::after { background: radial-gradient(circle at 30% 30%, rgba(255,85,85,0.40), rgba(255,85,85,0.06)); }
-
-@keyframes darkValidateFlashSuccess {
-  0%,85% { background-color: rgba(80,250,123,0.25) !important; color:#fff !important; border-color: rgba(80,250,123,0.55) !important; box-shadow:0 0 0 0 rgba(80,250,123,0.6),0 0 16px 4px rgba(80,250,123,0.35); }
-  100% { background-color: transparent !important; color: inherit !important; border-color: var(--border-color,rgba(100,100,120,0.4)) !important; box-shadow:none; }
+@keyframes validateFlashSuccess {
+  0%, 85% { background-color: rgb(var(--c-success) / 0.18); color: rgb(var(--c-success)); border-color: rgb(var(--c-success) / 0.6); }
+  100% { background-color: transparent; color: inherit; border-color: rgb(var(--c-border)); }
 }
-@keyframes darkValidateFlashError {
-  0%,85% { background-color: rgba(255,85,85,0.28) !important; color:#fff !important; border-color: rgba(255,85,85,0.55) !important; box-shadow:0 0 0 0 rgba(255,85,85,0.6),0 0 16px 4px rgba(255,85,85,0.38); }
-  100% { background-color: transparent !important; color: inherit !important; border-color: var(--border-color,rgba(100,100,120,0.4)) !important; box-shadow:none; }
+@keyframes validateFlashError {
+  0%, 85% { background-color: rgb(var(--c-error) / 0.16); color: rgb(var(--c-error)); border-color: rgb(var(--c-error) / 0.6); }
+  100% { background-color: transparent; color: inherit; border-color: rgb(var(--c-border)); }
 }
-
-/* Subtle dark mode hover pulse for primary action buttons */

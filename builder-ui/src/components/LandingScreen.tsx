@@ -132,10 +132,10 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
   };
 
   return (
-    <div className="h-full w-full flex flex-col items-center justify-center p-6 gap-12">
+    <div className="min-h-full w-full flex flex-col items-center justify-center p-6 gap-12">
       <div className="text-center space-y-3">
         <div className="flex justify-center mb-6">
-          <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-blue-5 shadow-soft overflow-hidden dark:bg-blue-7/40">
+          <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-accent-soft shadow-soft overflow-hidden">
             <img
               src={import.meta.env.DEV ? "/favicon.ico" : "/static/favicon.ico"}
               alt="polymo Logo"
@@ -143,26 +143,26 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
             />
           </div>
         </div>
-        <h1 className="text-2xl font-bold text-slate-12 dark:text-drac-foreground">Polymo Connector Builder</h1>
-        <p className="text-muted dark:text-drac-muted max-w-md mx-auto">
+        <h1 className="text-2xl font-bold text-fg">Polymo Connector Builder</h1>
+        <p className="text-fg-muted max-w-md mx-auto">
           Create and configure REST API connectors with an easy-to-use visual editor
         </p>
       </div>
 
       {workingState && onResumeWorking && (
         <div
-          className="w-full max-w-4xl mx-auto rounded-xl border-2 border-blue-7 bg-blue-3/30 dark:border-drac-accent dark:bg-blue-9/15 px-6 py-5 shadow-soft flex flex-wrap items-center justify-between gap-4"
+          className="w-full max-w-4xl mx-auto rounded-xl border-2 border-accent bg-accent-soft/60 px-6 py-5 shadow-soft flex flex-wrap items-center justify-between gap-4"
           data-testid="resume-working-state-card"
         >
           <div className="flex items-start gap-3">
-            <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-9/15 dark:bg-blue-9/25">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-11 dark:text-drac-accent" viewBox="0 0 20 20" fill="currentColor">
+            <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent/15">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-accent-text" viewBox="0 0 20 20" fill="currentColor">
                 <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
               </svg>
             </div>
             <div>
-              <p className="text-base font-semibold text-slate-12 dark:text-drac-foreground">Resume where you left off</p>
-              <p className="text-sm text-muted dark:text-drac-muted">
+              <p className="text-base font-semibold text-fg">Resume where you left off</p>
+              <p className="text-sm text-fg-muted">
                 {workingState.label} · saved {formatDate(workingState.savedAt)}
               </p>
             </div>
@@ -172,7 +172,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
               <button
                 type="button"
                 onClick={onDiscardWorking}
-                className="rounded-full px-3 py-1.5 text-xs font-medium text-muted hover:text-slate-12 dark:text-drac-muted dark:hover:text-drac-foreground transition"
+                className="rounded-full px-3 py-1.5 text-xs font-medium text-fg-muted hover:text-fg transition"
               >
                 Discard
               </button>
@@ -180,7 +180,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
             <button
               type="button"
               onClick={onResumeWorking}
-              className="inline-flex items-center gap-1.5 rounded-full bg-blue-9 px-4 py-2 text-sm font-semibold text-white shadow-soft transition hover:bg-blue-10"
+              className="inline-flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-accent-fg shadow-soft transition hover:bg-accent-hover"
               data-testid="resume-working-state"
             >
               Resume
@@ -193,32 +193,32 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
         <button
           type="button"
           onClick={handleStartFromScratch}
-          className="flex flex-col gap-4 items-center rounded-xl border border-border hover:border-blue-7 dark:border-drac-border dark:hover:border-drac-accent bg-surface/90 dark:bg-[#282a36]/70 p-6 transition cursor-pointer group"
+          className="flex flex-col gap-4 items-center rounded-xl border border-border hover:border-accent bg-surface p-6 transition cursor-pointer group"
         >
-          <div className="h-12 w-12 rounded-full bg-blue-4/50 dark:bg-blue-9/20 flex items-center justify-center group-hover:bg-blue-5/80 dark:group-hover:bg-blue-9/30 transition">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-blue-9 dark:text-blue-9" viewBox="0 0 20 20" fill="currentColor">
+          <div className="h-12 w-12 rounded-full bg-accent-soft flex items-center justify-center group-hover:bg-accent/20 transition">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-accent" viewBox="0 0 20 20" fill="currentColor">
               <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
             </svg>
           </div>
-          <h2 className="text-lg font-semibold text-slate-12 dark:text-drac-foreground">Start from scratch</h2>
-          <p className="text-sm text-muted dark:text-drac-muted text-center">
+          <h2 className="text-lg font-semibold text-fg">Start from scratch</h2>
+          <p className="text-sm text-fg-muted text-center">
             Create a new connector with the default configuration
           </p>
         </button>
 
-        <div className="flex flex-col gap-4 items-center rounded-xl border border-border hover:border-blue-7 dark:border-drac-border dark:hover:border-drac-accent bg-surface/90 dark:bg-[#282a36]/70 p-6 transition group">
-          <div className="h-12 w-12 rounded-full bg-blue-4/50 dark:bg-blue-9/20 flex items-center justify-center group-hover:bg-blue-5/80 dark:group-hover:bg-blue-9/30 transition">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-blue-9 dark:text-blue-9" viewBox="0 0 20 20" fill="currentColor">
+        <div className="flex flex-col gap-4 items-center rounded-xl border border-border hover:border-accent bg-surface p-6 transition group">
+          <div className="h-12 w-12 rounded-full bg-accent-soft flex items-center justify-center group-hover:bg-accent/20 transition">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-accent" viewBox="0 0 20 20" fill="currentColor">
               <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clipRule="evenodd" />
             </svg>
           </div>
-          <h2 className="text-lg font-semibold text-slate-12 dark:text-drac-foreground">Import Connector</h2>
+          <h2 className="text-lg font-semibold text-fg">Import Connector</h2>
           <div className="w-full space-y-3">
             <button
               type="button"
               onClick={handleUploadClick}
               disabled={isUploading}
-              className="w-full flex items-center justify-center gap-2 rounded-lg border border-border bg-background/70 px-4 py-2.5 text-sm font-medium text-slate-12 hover:border-blue-7 hover:text-blue-11 transition dark:border-drac-border/70 dark:bg-[#1f232b]/80 dark:text-drac-foreground dark:hover:border-drac-accent dark:hover:text-drac-accent disabled:opacity-50"
+              className="w-full flex items-center justify-center gap-2 rounded-lg border border-border bg-field px-4 py-2.5 text-sm font-medium text-fg hover:border-accent hover:text-accent-text transition disabled:opacity-50"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                 <path fillRule="evenodd" d="M5.5 17a4.5 4.5 0 01-1.44-8.765 4.5 4.5 0 018.302-3.046 3.5 3.5 0 014.504 4.272A4 4 0 0115 17H5.5zm3.75-2.75a.75.75 0 001.5 0V9.66l1.95 2.1a.75.75 0 101.1-1.02l-3.25-3.5a.75.75 0 00-1.1 0l-3.25 3.5a.75.75 0 101.1 1.02l1.95-2.1v4.59z" clipRule="evenodd" />
@@ -236,17 +236,17 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
           />
         </div>
 
-        <div className="flex flex-col gap-4 items-center rounded-xl border border-border hover:border-blue-7 dark:border-drac-border dark:hover:border-drac-accent bg-surface/90 dark:bg-[#282a36]/70 p-6 transition">
-          <div className="h-12 w-12 rounded-full bg-blue-4/50 dark:bg-blue-9/20 flex items-center justify-center">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-blue-9 dark:text-blue-9" viewBox="0 0 20 20" fill="currentColor">
+        <div className="flex flex-col gap-4 items-center rounded-xl border border-border hover:border-accent bg-surface p-6 transition">
+          <div className="h-12 w-12 rounded-full bg-accent-soft flex items-center justify-center">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-accent" viewBox="0 0 20 20" fill="currentColor">
               <path d="M4.5 3a.5.5 0 0 0-.5.5V5h-.5A1.5 1.5 0 0 0 2 6.5v9A1.5 1.5 0 0 0 3.5 17h9a1.5 1.5 0 0 0 1.5-1.5V15h1.5a1.5 1.5 0 0 0 1.5-1.5v-9A1.5 1.5 0 0 0 15.5 3h-11ZM3 6.5A.5.5 0 0 1 3.5 6H5v9H3.5a.5.5 0 0 1-.5-.5v-8Zm5 9V6h-2v9h2Zm1 0h2V6h-2v9Zm5 0V6h1.5a.5.5 0 0 1 .5.5v8a.5.5 0 0 1-.5.5H14Z" />
             </svg>
           </div>
-          <h2 className="text-lg font-semibold text-slate-12 dark:text-drac-foreground">Start from an example</h2>
+          <h2 className="text-lg font-semibold text-fg">Start from an example</h2>
           <div className="relative w-full">
             <button
               type="button"
-              className="flex w-full items-center justify-between rounded-lg border border-border/70 bg-background/70 px-4 py-2 text-sm text-slate-12 hover:border-blue-7 hover:text-blue-11 transition dark:border-drac-border/70 dark:bg-[#1f232b]/80 dark:text-drac-foreground dark:hover:border-drac-accent dark:hover:text-drac-accent"
+              className="flex w-full items-center justify-between rounded-lg border border-border/70 bg-field px-4 py-2 text-sm text-fg hover:border-accent hover:text-accent-text transition"
               onClick={() => {
                 const dropdown = document.getElementById("example-dropdown");
                 dropdown?.classList.toggle("hidden");
@@ -260,7 +260,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
             </button>
             <div
               id="example-dropdown"
-              className="absolute left-0 z-10 mt-2 w-full rounded-lg border border-border bg-background shadow-lg hidden"
+              className="absolute left-0 z-10 mt-2 w-full rounded-lg border border-border bg-field shadow-lg hidden"
             >
               <div className="max-h-60 rounded-lg border-t border-border/70 overflow-auto">
                 {EXAMPLE_CONNECTORS.map((example) => (
@@ -268,12 +268,12 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
                     key={example.path}
                     type="button"
                     onClick={() => handleLoadExample(example.path, example.name)}
-                    className="flex w-full items-center justify-between rounded-lg border-b border-border/70 bg-background px-4 py-2 text-sm text-slate-12 hover:bg-blue-5/10 transition dark:border-drac-border/70 dark:bg-[#1f232b]/80 dark:text-drac-foreground dark:hover:bg-blue-9/10"
+                    className="flex w-full items-center justify-between rounded-lg border-b border-border/70 bg-field px-4 py-2 text-sm text-fg hover:bg-raised transition"
                     data-testid={`landing-example-${exampleTestId(example.name)}`}
                   >
                     <div className="flex flex-col">
                       <span className="font-medium">{example.name}</span>
-                      <span className="text-xs text-muted dark:text-drac-muted">
+                      <span className="text-xs text-fg-muted">
                         {example.description}
                       </span>
                     </div>
@@ -289,19 +289,19 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
       </div>
 
       {error && (
-        <div className="rounded-lg border border-red-6 bg-red-3/20 px-4 py-3 text-sm text-red-11 max-w-3xl w-full">
+        <div className="rounded-lg border border-error/40 bg-error/10 px-4 py-3 text-sm text-error max-w-3xl w-full">
           {error}
         </div>
       )}
 
       <section className="w-full max-w-4xl space-y-4">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold text-slate-12 dark:text-drac-foreground">Saved connectors</h2>
+          <h2 className="text-lg font-semibold text-fg">Saved connectors</h2>
           {savedConnectors.length > 0 && (
             <button
               type="button"
               onClick={handleStartFromScratch}
-              className="inline-flex items-center gap-1.5 rounded-full border border-border/70 bg-background/80 px-3 py-1.5 text-xs font-medium text-slate-12 hover:border-blue-7 hover:text-blue-11 transition dark:border-drac-border/70 dark:bg-[#1f232b]/80 dark:text-drac-foreground dark:hover:border-drac-accent dark:hover:text-drac-accent"
+              className="inline-flex items-center gap-1.5 rounded-full border border-border/70 bg-field px-3 py-1.5 text-xs font-medium text-fg hover:border-accent hover:text-accent-text transition"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
                 <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
@@ -312,7 +312,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
         </div>
 
         {savedConnectors.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border/70 bg-surface/60 dark:bg-[#282a36]/50 px-6 py-10 text-center text-sm text-muted dark:text-drac-muted">
+          <div className="rounded-xl border border-dashed border-border/70 bg-surface px-6 py-10 text-center text-sm text-fg-muted">
             Saved connectors will appear here automatically. Start a new connector or import a config file to begin.
           </div>
         ) : (
@@ -322,22 +322,22 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
               return (
                 <li
                   key={connector.id}
-                  className="rounded-xl border border-border/70 bg-background/80 dark:bg-[#282a36]/70 px-5 py-4 shadow-sm flex flex-col gap-3"
+                  className="rounded-xl border border-border/70 bg-field px-5 py-4 shadow-sm flex flex-col gap-3"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="flex flex-col">
                       <div className="flex items-center gap-2">
-                        <p className="text-base font-medium text-slate-12 dark:text-drac-foreground">{connector.name}</p>
+                        <p className="text-base font-medium text-fg">{connector.name}</p>
                         {/* Rename button removed per requirement */}
                       </div>
-                      <span className="text-xs text-muted dark:text-drac-muted">
+                      <span className="text-xs text-fg-muted">
                         Last updated {formatDate(connector.updatedAt)}
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-3 py-1.5 text-xs font-medium text-slate-12 hover:border-blue-7 hover:text-blue-11"
+                        className="inline-flex items-center gap-1 rounded-full border border-border bg-field px-3 py-1.5 text-xs font-medium text-fg hover:border-accent hover:text-accent-text"
                         onClick={() => onSelectSaved(connector.id)}
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
@@ -347,7 +347,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
                       </button>
                       <button
                         type="button"
-                        className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-3 py-1.5 text-xs font-medium text-slate-12 hover:border-blue-7 hover:text-blue-11"
+                        className="inline-flex items-center gap-1 rounded-full border border-border bg-field px-3 py-1.5 text-xs font-medium text-fg hover:border-accent hover:text-accent-text"
                         onClick={() => onExportSaved(connector.id)}
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
@@ -357,7 +357,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
                       </button>
                       <button
                         type="button"
-                        className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-3 py-1.5 text-xs font-medium text-red-10 hover:border-red-7 hover:text-red-9"
+                        className="inline-flex items-center gap-1 rounded-full border border-border bg-field px-3 py-1.5 text-xs font-medium text-error hover:border-error/60"
                         onClick={() => onDeleteSaved(connector.id)}
                         aria-label={`Delete ${connector.name}`}
                       >
