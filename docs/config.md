@@ -293,19 +293,10 @@ no effect on generated code.
 `total_pages_path` / `total_pages_header` (under **Partition-aware
 pagination hints**) let the generated script know when to stop without
 waiting for an empty page — it's an extra stop condition, evaluated inside
-the same sequential fetch loop.
-
-!!! note "No more Spark-side partition planning"
-    In the old runtime, these hints (plus `total_records_path` /
-    `total_records_header`) let the Spark data source estimate the page
-    count up front and fan reads out across executors — one partition per
-    page. Codegen has no such planner: a `pagination`-strategy connector
-    always runs as a single sequential loop in the generated script.
-    `total_pages_*` still trims the loop early; `total_records_*` is
-    accepted for config compatibility but has no effect on generated code.
-    If you need real parallelism, use `param_range` or `endpoints`
-    partitioning instead (below) — those *do* generate a parallel
-    fan-out, one `InputPartition` per window.
+the same sequential fetch loop. Together with `total_records_path` /
+`total_records_header` they also drive the `pagination` partition strategy,
+which plans one Spark partition per page from them — see
+[Partitioning](#partitioning) below.
 
 ## How the batch table reads
 
@@ -318,11 +309,11 @@ returns the DDL, its `reader()` builds a `_Reader`) and a
 `_Reader(DataSourceReader)` whose `read()` calls `fetch_records()` and
 yields one tuple per record; the table body is just
 `spark.read.format("<name>_source").load()`. When the connector has no
-windows, `_Reader` reads everything in a single partition; when it does
-(`param_range` / `endpoints`, see [Partitioning](#partitioning) below),
-`_Reader.partitions()` returns one `InputPartition` per window and `read()`
-fetches only that window's records — Spark runs each partition on whichever
-executor it schedules it to, in parallel.
+partition strategy, `_Reader` reads everything in a single partition; when
+it does (see [Partitioning](#partitioning) below), `_Reader.partitions()`
+returns one `InputPartition` per window or page and `read()` fetches only
+that partition's records — Spark runs each partition on whichever executor
+it schedules it to, in parallel.
 
 ## Partitioning
 
@@ -330,8 +321,20 @@ Set a **Partition strategy** (`stream.partition.strategy`) to change how
 the generated `@dp.table` function fetches data:
 
 - **none** (default) — plain sequential fetch, as above.
-- **pagination** — same sequential fetch; this strategy exists for
-  compatibility but does not change codegen (see the note above).
+- **pagination** — one partition per page, planned at read time. The
+  driver (`_Reader.partitions()`) fetches the first page once through a
+  generated `_probe_total_pages()`, resolves the page count from the
+  pagination hints, and returns one `InputPartition` per page; each
+  partition's `read()` then fetches exactly that page via `fetch_page()`
+  (`page = start_page + i` for page pagination, `offset = start_offset +
+  i * page_size` for offset pagination). Requires page or offset
+  pagination with a `page_size` and at least one hint — otherwise the
+  generated script is the plain sequential loop and contains no probe code
+  at all. Hint precedence is the 0.x one: `total_pages_path`, then
+  `total_pages_header`, then `total_records_path`, then
+  `total_records_header` (records become `ceil(total / page_size)`
+  pages). A hint that resolves to nothing, or to 0 or 1 pages, falls back
+  to a single partition that reads the whole stream sequentially.
 - **param_range** — generates one static request "window" per value at
   generation time; the inline Data Source (see
   [above](#how-the-batch-table-reads)) turns each into its own
@@ -341,43 +344,78 @@ the generated `@dp.table` function fetches data:
   ranges). `value_template` / `extra_template` shape how each value is
   injected into request parameters.
 - **endpoints** — one window per path. Each entry is `/path` or
-  `name:/path`. Also parallelized, one partition per endpoint.
+  `name:/path`. Also parallelized, one partition per endpoint. Windows
+  carry only the `path`; **generated records are flat, with no
+  `endpoint_name` field or `data` wrapper** — see [Endpoints partitioning
+  changed](migration-1.0.md#behavioral-differences-to-check-for) if you're
+  migrating a 0.x `endpoints` connector.
 
-Only `param_range` and `endpoints` produce this parallel fan-out, because
-only they can be fully expanded into a literal list of windows at generation
-time — see [Endpoints partitioning changed](migration-1.0.md#behavioral-differences-to-check-for)
-if you're migrating a 0.x `endpoints` connector: **generated records are
-flat, with no `endpoint_name` field or `data` wrapper.**
+Partition strategies are batch-only; a streaming table with any strategy
+other than `none` is rejected at generation time.
 
 ## Incremental sync
 
-Fill in **Mode**, **Cursor param**, and **Cursor field**
-(`stream.incremental.mode` / `cursor_param` / `cursor_field`) to make the
-generated script track a cursor between runs:
+Fill in **Cursor param** and **Cursor field** (`stream.incremental.cursor_param`
+/ `cursor_field`) to make the generated script track a cursor between runs;
+**Mode** is a free-text label stored alongside the cursor. The remaining
+options mirror the 0.x reader options of the same name, now as config:
 
-- Before each request, the script reads the last cursor value from a local
-  `<stream-name>_state.json` file next to itself (created automatically) and
-  sends it via `cursor_param`.
-- After the run, the newest value of `cursor_field` seen across the fetched
-  records is written back to that file — from inside the inline Data
-  Source's `read()` (see [How the batch table
-  reads](#how-the-batch-table-reads) above), which tracks the max locally
-  as it yields records and writes it once done.
-- For `param_range` / `endpoints` connectors, `read()` runs once per
-  partition/window, so each partition tracks and writes its own max
-  independently; with more than one partition, whichever partition finishes
-  last wins. Batch tables re-fetch everything on every run regardless of
-  the cursor, so a stale write only costs some redundant fetching next
-  time, not missed data. `STATE_PATH` must point somewhere every
-  partition's executor can reach (e.g. a Databricks Volume — see the note
-  below) for state to be read back correctly on the next run.
+| Option (`stream.incremental.*`) | Generated constant | Default | Meaning |
+|---|---|---|---|
+| `cursor_param` | `CURSOR_PARAM` | — | Query parameter the stored cursor is sent as. Applied with `setdefault`, so an explicit `stream.params` entry (or a partition window's `extra_params`) with the same name wins. |
+| `cursor_field` | `CURSOR_FIELD` | — | Response field whose highest value becomes the next cursor. Dotted paths (`meta.updated_at`) walk nested objects. |
+| `mode` | — | `null` | Free-text label written into the state entry (`updated_at`, `created_at`, ...). |
+| `state_path` | `STATE_PATH` | `<stream>_state.json` next to the script | Where the cursor lives. A plain path or `file://` URL is a local file — `/Volumes/main/raw/state/orders.json` on Databricks (FUSE) is the usual choice, since every executor must reach it. Any other URL scheme (`s3://`, `gs://`, `abfss://`, `dbfs://`) goes through [fsspec](https://filesystem-spec.readthedocs.io/); install the matching backend (`s3fs`, `gcsfs`, `adlfs`) on the cluster. |
+| `start_value` | `START_VALUE` | `None` | Seed sent as the cursor while nothing is stored yet. Ignored once the state file has a value. |
+| `state_key` | `STATE_KEY` | `<stream>@<base_url>` | Entry key inside the state file, so several connectors can share one file. |
 
-The Incremental panel also has **State path**, **Start value**, **State
-key**, and **Keep in memory** fields. These only affect what the **Preview**
-panel does when test-fetching incrementally — they are not part of the
-generated script, which always uses the fixed `<stream-name>_state.json`
-path described above. Edit the generated `STATE_PATH` constant by hand if
-you need it to point elsewhere (e.g. a Databricks Volume path).
+The state file is a JSON document with one entry per key, merged into on
+every write (other keys are preserved):
+
+```json
+{
+  "streams": {
+    "issues@https://api.github.com": {
+      "cursor_param": "since",
+      "cursor_field": "updated_at",
+      "cursor_value": "2024-03-22T18:15:00Z",
+      "mode": "updated_at",
+      "updated_at": "2024-03-22T18:16:05Z"
+    }
+  }
+}
+```
+
+Reading is lenient — a 0.x state file is picked up as-is: the entry may sit
+under `streams` or at the top level, may be a dict with `cursor_value` (or
+the older `value`) or a bare scalar; a missing file or unparseable JSON
+simply means "no cursor yet" (and `start_value` applies).
+
+How the generated code uses it:
+
+- `fetch_records()` (and `fetch_page()` for the `pagination` strategy)
+  reads the cursor once up front — the stored value, else `START_VALUE` —
+  and sends it as `CURSOR_PARAM` on every page of the run.
+- The inline Data Source's `read()` tracks the **maximum** `cursor_field`
+  value it yields (compared as strings — ISO timestamps sort correctly;
+  zero-pad numeric cursors) and commits it once the partition is done.
+  This is the one deliberate difference from the 0.x runtime, which kept
+  the *last-seen* value.
+- The commit is monotone: `_write_state()` re-reads the stored value and
+  only writes when the new cursor is higher. With `param_range`,
+  `endpoints` or `pagination` partitioning, `read()` runs once per
+  partition on whichever executor owns it, so partitions may commit in any
+  order — the file still ends at the global maximum, and a partition that
+  saw nothing newer never regresses it. A local `state_path` therefore has
+  to be one every executor can reach (a Volume path), or use a remote URL.
+- For the `pagination` strategy the driver resolves the cursor once in
+  `partitions()` and hands the same value to the probe and to every page
+  partition, so all pages of a run are fetched against the cursor the page
+  count was planned with.
+
+The Builder's **Preview** never touches your state: it generates the same
+`fetch_records()` against a throwaway state path, so it always shows a
+first run (seeded from `start_value` if set) and never writes a file.
 
 ## Error handling & retries
 
