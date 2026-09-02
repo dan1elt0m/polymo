@@ -5,7 +5,7 @@ from polymo.config import AuthConfig, PaginationConfig, PartitionConfig
 from tests.codegen.helpers import assert_hygiene, make_config, run_generated
 
 
-def test_api_key_header_placeholder_and_comment_present():
+def test_api_key_header_placeholder_present():
     config = make_config(
         base_url="https://x",
         auth=AuthConfig(type="api_key", api_key_in="header", api_key_name="X-API-Key"),
@@ -13,11 +13,10 @@ def test_api_key_header_placeholder_and_comment_present():
     core = generate_core(config)
     assert_hygiene(core)
     assert 'API_KEY: str = "REPLACE_ME"' in core
-    assert "dbutils.secrets.get" in core  # recommendation comment
     assert 'session.headers["X-API-Key"] = API_KEY' in core
 
 
-def test_api_key_query_placeholder_and_comment_present():
+def test_api_key_query_placeholder_present():
     config = make_config(
         base_url="https://x",
         auth=AuthConfig(type="api_key", api_key_in="query", api_key_name="api_key"),
@@ -25,7 +24,6 @@ def test_api_key_query_placeholder_and_comment_present():
     core = generate_core(config)
     assert_hygiene(core)
     assert 'API_KEY: str = "REPLACE_ME"' in core
-    assert "dbutils.secrets.get" in core
     assert 'params["api_key"] = API_KEY' in core
     # header form must not be emitted for query placement
     assert "session.headers[" not in core

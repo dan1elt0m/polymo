@@ -5,14 +5,13 @@ from polymo.config import AuthConfig
 from tests.codegen.helpers import make_config, run_generated
 
 
-def test_bearer_placeholder_and_comment_present():
+def test_bearer_placeholder_present_and_no_secret_leak():
     config = make_config(
         base_url="https://x", auth=AuthConfig(type="bearer", token="s3cret")
     )
     core = generate_core(config)
     assert 'API_TOKEN: str = "REPLACE_ME"' in core
     assert "s3cret" not in core
-    assert "dbutils.secrets.get" in core  # recommendation comment
 
 
 def test_bearer_header_sent(http_server):

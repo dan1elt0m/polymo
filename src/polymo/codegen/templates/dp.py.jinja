@@ -14,11 +14,6 @@ from pyspark.sql.datasource import DataSource, SimpleDataSourceStreamReader  # n
 
 class _Reader(SimpleDataSourceStreamReader):
     def __init__(self, schema: Any) -> None:
-        # Spark hands simpleStreamReader() a real StructType (same as the
-        # batch DataSourceReader gets) — deriving column names from it
-        # avoids naively splitting the SCHEMA string on commas, which would
-        # corrupt on any comma inside a type (DECIMAL(p,s), and any nested
-        # ARRAY/MAP/STRUCT).
         self._columns: list[str] = [field.name for field in schema.fields]
 
     def initialOffset(self) -> dict[str, Any]:
@@ -107,28 +102,12 @@ class _Reader(DataSourceReader):
             yield tuple(_cell(record.get(column)) for column in self._columns)
 {% endif %}
 {% if incremental_mode %}
-        # read() runs per partition on the executor that owns it, so each
-        # partition writes its own max cursor independently; whichever
-        # partition finishes last wins. Batch tables re-fetch fully each
-        # run, so a stale cursor only costs redundant fetching, not missed
-        # data. STATE_PATH must point somewhere every executor can reach
-        # (e.g. a Databricks Volume, per the comment on it above) for this
-        # to work at all.
         _write_state(cursor)
 {% endif %}
 
 
 {% if not schema_ddl %}
 def _cell(value: Any) -> Any:
-    """Nested structures become JSON strings; scalars pass through.
-
-    Only used with an inferred schema — inference never produces a
-    STRUCT/ARRAY/MAP column, so a dict/list value here would otherwise
-    crash the read; JSON-encoding it into a STRING is the safe fallback.
-    An explicit schema skips this: a STRUCT/ARRAY/MAP column needs the
-    real structure, not a JSON string, so those values pass through as-is
-    (see the schema-mode branch above).
-    """
     if isinstance(value, (dict, list)):
         import json
 
@@ -140,9 +119,6 @@ def _cell(value: Any) -> Any:
 spark.dataSource.register(RestSource)
 
 
-{% if partition_strategy == "pagination" %}
-# partition strategy "pagination" runs sequentially in generated scripts
-{% endif %}
 @dp.table(name={{ table_name_repr }})
 def {{ func_name }}():
     return spark.read.format("{{ func_name }}_source").load()

@@ -183,6 +183,44 @@ def _py_literal(value: Any) -> str:
 
 
 _REPLACE_ME_RHS = '"REPLACE_ME"'
+_NONE_RHS = "None"
+
+
+def _not_installed_message(var: str) -> str:
+    """Error text for a bundle secret slot that never got a resolved value.
+
+    Used both by `_raise_not_installed` (the generated `RuntimeError` guard)
+    and by `tests.codegen.test_bundle` to assert on the exact message.
+    """
+    return (
+        f"{var} was not installed by the pipeline — resolve secrets on the "
+        "driver and pass them as reader options"
+    )
+
+
+def _raise_not_installed(var: str, indent: str = "    ") -> str:
+    """Render a `if VAR is None: raise RuntimeError(...)` guard block.
+
+    Used at every point a bundle-mode `str | None` secret slot (see
+    `*_optional`/`rebuild_guard_vars` in `_context`) is actually read, so a
+    pipeline that forgot to resolve and install the secret fails loudly
+    instead of silently sending `None`/a stale value to the real API.
+    `indent` is the base indentation the call site needs (the block's own
+    lines nest one level deeper); the message is split across two adjacent
+    string literals, mirroring `_dbx_secret`'s own raise, to keep the line
+    length reasonable regardless of how long `var` is.
+    """
+    message = _not_installed_message(var)
+    split_at = message.rfind(" ", 0, 60)
+    if split_at == -1:
+        split_at = len(message)
+    first, second = message[: split_at + 1], message[split_at + 1 :]
+    lines = [f"{indent}if {var} is None:", f"{indent}    raise RuntimeError("]
+    lines.append(f"{indent}        {json.dumps(first, ensure_ascii=False)}")
+    if second:
+        lines.append(f"{indent}        {json.dumps(second, ensure_ascii=False)}")
+    lines.append(f"{indent}    )")
+    return "\n".join(lines)
 
 
 def _dbx_secret_call(ref: SecretRef) -> str:
@@ -213,17 +251,6 @@ def _bundle_secret_call(ref: SecretRef | UcSecretRef) -> str:
         f"client._uc_secret({_py_literal(ref.credential)}, "
         f"{_py_literal(ref.vault_url)}, {_py_literal(ref.secret_name)})"
     )
-
-
-def _comment_escape(value: str) -> str:
-    """Make a value safe to interpolate into a `#`-style comment.
-
-    A `#` comment runs to the end of its physical line, so an embedded
-    newline in the value would let text after it land on its own line as
-    live Python instead of comment text. Collapsing newlines to spaces
-    keeps the whole value on one comment line no matter what it contains.
-    """
-    return " ".join(value.splitlines())
 
 
 def _doc_escape(value: str) -> str:
@@ -541,35 +568,58 @@ def _context(config: RestSourceConfig, *, for_bundle: bool = False) -> Dict[str,
     page_param = stream.pagination.page_param or "page"
     scope = " ".join(auth.scope)
 
-    def _auth_secret_rhs(auth_type: str) -> str:
+    def _auth_secret_rhs(auth_type: str) -> Tuple[str, str, bool]:
         """RHS for one auth secret slot: `_dbx_secret(...)`, `_uc_secret(...)`,
         or the `"REPLACE_ME"` placeholder. `secret`/`uc_secret` are mutually
         exclusive (enforced in `AuthConfig` parsing), so at most one applies.
-        Always `"REPLACE_ME"` when `for_bundle` — see the docstring above.
-        """
-        if auth.type != auth_type or for_bundle:
-            return _REPLACE_ME_RHS
-        if auth.secret:
-            return _dbx_secret_call(auth.secret)
-        if auth.uc_secret:
-            return _uc_secret_call(auth.uc_secret)
-        return _REPLACE_ME_RHS
 
-    api_token_rhs = _auth_secret_rhs("bearer")
-    api_key_rhs = _auth_secret_rhs("api_key")
-    client_secret_rhs = _auth_secret_rhs("oauth2")
+        When `for_bundle` and a ref is present, the slot can't hold either
+        the call (session-less worker, see the docstring above) or a
+        harmless-looking `"REPLACE_ME"` (which would ship the literal string
+        to the real API instead of failing loudly) — it gets `None` instead,
+        typed `str | None`, with a `RuntimeError` guard at the point of use
+        (see `*_optional` below) so a pipeline that forgot to resolve and
+        install the secret fails clearly instead of leaking a placeholder.
+        Returns `(rhs, type_annotation, optional)`.
+        """
+        if auth.type != auth_type:
+            return _REPLACE_ME_RHS, "str", False
+        if for_bundle:
+            if auth.secret or auth.uc_secret:
+                return _NONE_RHS, "str | None", True
+            return _REPLACE_ME_RHS, "str", False
+        if auth.secret:
+            return _dbx_secret_call(auth.secret), "str", False
+        if auth.uc_secret:
+            return _uc_secret_call(auth.uc_secret), "str", False
+        return _REPLACE_ME_RHS, "str", False
+
+    api_token_rhs, api_token_type, api_token_optional = _auth_secret_rhs("bearer")
+    api_key_rhs, api_key_type, api_key_optional = _auth_secret_rhs("api_key")
+    client_secret_rhs, client_secret_type, client_secret_optional = _auth_secret_rhs(
+        "oauth2"
+    )
+
+    def _option_placeholder_spec(var: str) -> Tuple[str, str, str]:
+        """Returns `(var, rhs, type_annotation)` for one OPT_* placeholder.
+
+        Mirrors `_auth_secret_rhs` above: a ref-backed slot renders as
+        `None`/`str | None` when `for_bundle` (guarded in
+        `_rebuild_option_literals`, see `rebuild_guard_vars` below), or as a
+        direct `_dbx_secret(...)` call otherwise; an unreferenced or
+        ref-less slot always stays the `"REPLACE_ME"` placeholder.
+        """
+        ref = option_placeholder_refs.get(var)
+        if for_bundle:
+            if ref is not None:
+                return var, _NONE_RHS, "str | None"
+            return var, _REPLACE_ME_RHS, "str"
+        if ref is not None:
+            return var, _dbx_secret_call(ref), "str"
+        return var, _REPLACE_ME_RHS, "str"
+
     option_placeholder_specs = [
-        (
-            var,
-            _REPLACE_ME_RHS
-            if for_bundle
-            else (
-                _dbx_secret_call(option_placeholder_refs[var])
-                if var in option_placeholder_refs
-                else _REPLACE_ME_RHS
-            ),
-        )
-        for var in option_placeholders
+        _option_placeholder_spec(var) for var in option_placeholders
     ]
     # option_secrets (the `{{ options.* }}` placeholder path) stays
     # scope-only — see the docstring on `StreamConfig.option_secrets` — so
@@ -619,13 +669,24 @@ def _context(config: RestSourceConfig, *, for_bundle: bool = False) -> Dict[str,
     # unaffected.
     secret_backed_option_vars = set(option_placeholder_refs.keys())
     rebuild_option_globals: List[str] = []
+    rebuild_marker_names: set = set()
     if for_bundle:
         if _marker_names(path) & secret_backed_option_vars:
             rebuild_option_globals.append("PATH")
+            rebuild_marker_names |= _marker_names(path)
         if _marker_names(params) & secret_backed_option_vars:
             rebuild_option_globals.append("PARAMS")
+            rebuild_marker_names |= _marker_names(params)
         if _marker_names(headers) & secret_backed_option_vars:
             rebuild_option_globals.append("HEADERS")
+            rebuild_marker_names |= _marker_names(headers)
+    # Which of the OPT_* vars rebuilt above are still None (never installed
+    # by the pipeline) needs a RuntimeError guard right before the rebuild —
+    # see `_not_installed_message` and `core.py.jinja`'s
+    # `_rebuild_option_literals`. Scoped to just the vars that are both
+    # ref-backed (optional=True, so really can be None) and actually
+    # referenced by one of the literals being rebuilt.
+    rebuild_guard_vars = sorted(rebuild_marker_names & secret_backed_option_vars)
     return {
         "auth_type": auth.type,
         "token_url": auth.token_url,
@@ -650,17 +711,24 @@ def _context(config: RestSourceConfig, *, for_bundle: bool = False) -> Dict[str,
         "option_placeholders": option_placeholders,
         "option_placeholder_specs": option_placeholder_specs,
         "api_token_rhs": api_token_rhs,
+        "api_token_type": api_token_type,
+        "api_token_optional": api_token_optional,
         "api_key_rhs": api_key_rhs,
+        "api_key_type": api_key_type,
+        "api_key_optional": api_key_optional,
         "client_secret_rhs": client_secret_rhs,
+        "client_secret_type": client_secret_type,
+        "client_secret_optional": client_secret_optional,
+        "raise_not_installed": _raise_not_installed,
         "has_secret_refs": has_secret_refs,
         "has_uc_secret_refs": has_uc_secret_refs,
         "bundle_secret_slots": bundle_secret_slots,
         "rebuild_option_globals": rebuild_option_globals,
+        "rebuild_guard_vars": rebuild_guard_vars,
         "schema_ddl": stream.schema,
         "stream_name": stream.name,
         "stream_name_repr": _py_literal(stream.name),
         "stream_name_doc": _doc_escape(stream.name),
-        "stream_name_comment": _comment_escape(stream.name),
         "state_path_repr": _py_literal(f"{stream.name}_state.json"),
         "func_name": _identifier(stream.name),
         # Databricks requires unquoted SQL identifiers for dp table names.

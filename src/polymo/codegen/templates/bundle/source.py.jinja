@@ -1,10 +1,14 @@
-"""{{ stream_name_doc }} — Spark DataSource (Databricks Asset Bundle).
-
-Built on the fetch/schema helpers in `{{ bundle_pkg }}.client`; edit this
-file freely — it is not read by polymo again.
-"""
+"""Spark DataSource for {{ stream_name_doc }}."""
 
 from typing import Any, Iterator
+
+{% if streaming %}
+from pyspark.sql.datasource import DataSource, SimpleDataSourceStreamReader
+{% elif has_windows %}
+from pyspark.sql.datasource import DataSource, DataSourceReader, InputPartition
+{% else %}
+from pyspark.sql.datasource import DataSource, DataSourceReader
+{% endif %}
 
 from .client import {{ bundle_imports | join(", ") }}
 {% if bundle_secret_slots %}
@@ -17,44 +21,18 @@ SCHEMA: str = {{ schema_ddl | tojson }}
 {% endif %}
 {% if bundle_secret_slots %}
 def _apply_secret_options(options: Any) -> None:
-    """Install driver-resolved secrets onto `{{ bundle_pkg }}.client`'s module
-    globals (see `pipelines/{{ func_name }}.py`, which resolves them driver-side
-    and threads them through as DataSource reader options — a bare
-    module-level `_dbx_secret(...)`/`_uc_secret(...)` call in `client.py`
-    would fail here: every Spark Python worker gets its own fresh
-    `{{ bundle_pkg }}.client` import, with no SparkSession/dbutils available).
-    Called from `schema()` and `reader()`/`simpleStreamReader()` below so
-    both schema inference and the actual read see the real value, on
-    whichever process (driver or worker) ends up running them. `options` is
-    Spark's case-insensitive options mapping — keys always come back
-    lowercased, so the slot name is reconstructed via `.upper()` (every
-    slot this generator ever names — API_TOKEN/API_KEY/CLIENT_SECRET/OPT_*
-    — is uppercase by construction).
-    """
-    prefix = "polymo_secret_"
+    prefix = "secret_"
     for key, value in options.items():
         if key.lower().startswith(prefix):
             setattr(_client, key[len(prefix) :].upper(), value)
 {% if rebuild_option_globals %}
-    # PATH/PARAMS/HEADERS above embed one of these OPT_* values inside an
-    # f-string/dict literal that already evaluated at import time (with the
-    # "REPLACE_ME" placeholder) — the setattr above never reaches it, so
-    # rebuild those literals now that the real value is installed.
     _client._rebuild_option_literals()
 {% endif %}
 
 {% endif %}
 {% if streaming %}
-from pyspark.sql.datasource import DataSource, SimpleDataSourceStreamReader  # noqa: E402
-
-
 class _Reader(SimpleDataSourceStreamReader):
     def __init__(self, schema: Any) -> None:
-        # Spark hands simpleStreamReader() a real StructType (same as the
-        # batch DataSourceReader gets) — deriving column names from it
-        # avoids naively splitting the SCHEMA string on commas, which would
-        # corrupt on any comma inside a type (DECIMAL(p,s), and any nested
-        # ARRAY/MAP/STRUCT).
         self._columns: list[str] = [field.name for field in schema.fields]
 
     def initialOffset(self) -> dict[str, Any]:
@@ -92,13 +70,6 @@ class {{ source_class_name }}(DataSource):
 {% endif %}
         return _Reader(schema)
 {% else %}
-{% if has_windows %}
-from pyspark.sql.datasource import DataSource, DataSourceReader, InputPartition  # noqa: E402
-{% else %}
-from pyspark.sql.datasource import DataSource, DataSourceReader  # noqa: E402
-{% endif %}
-
-
 class {{ source_class_name }}(DataSource):
     @classmethod
     def name(cls) -> str:
@@ -147,28 +118,12 @@ class _Reader(DataSourceReader):
             yield tuple(_cell(record.get(column)) for column in self._columns)
 {% endif %}
 {% if incremental_mode %}
-        # read() runs per partition on the executor that owns it, so each
-        # partition writes its own max cursor independently; whichever
-        # partition finishes last wins. Batch tables re-fetch fully each
-        # run, so a stale cursor only costs redundant fetching, not missed
-        # data. STATE_PATH must point somewhere every executor can reach
-        # (e.g. a Databricks Volume, per the comment on it above) for this
-        # to work at all.
         _write_state(cursor)
 {% endif %}
 
 
 {% if not schema_ddl %}
 def _cell(value: Any) -> Any:
-    """Nested structures become JSON strings; scalars pass through.
-
-    Only used with an inferred schema — inference never produces a
-    STRUCT/ARRAY/MAP column, so a dict/list value here would otherwise
-    crash the read; JSON-encoding it into a STRING is the safe fallback.
-    An explicit schema skips this: a STRUCT/ARRAY/MAP column needs the
-    real structure, not a JSON string, so those values pass through as-is
-    (see the schema-mode branch above).
-    """
     if isinstance(value, (dict, list)):
         import json
 

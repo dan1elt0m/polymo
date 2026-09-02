@@ -73,13 +73,12 @@ def test_stream_name_with_quote_is_escaped_everywhere():
     assert 'STATE_PATH: str = "po\\"sts_state.json"' in script
 
 
-def test_stream_name_with_newline_does_not_break_out_of_comment():
-    # A `#` comment runs to end-of-line, so an embedded newline in a value
-    # interpolated into one could turn the rest of the value into a live,
-    # uncommented statement on the next line instead of staying comment
-    # text. `import os` is itself valid Python (unlike a stray quote it
-    # wouldn't be caught by ast.parse), so assert on the actual line count
-    # instead of relying on assert_hygiene to catch it.
+def test_stream_name_with_newline_is_escaped_in_module_docstring():
+    # The stream name lands in the one-line module docstring
+    # (`"""Lakeflow Declarative Pipelines connector for <name>."""`) via
+    # `_doc_escape`, not in any `#` comment (generated output has none left
+    # that interpolate config values) — a raw embedded newline there would
+    # otherwise break out of the triple-quoted docstring.
     config = make_config(
         base_url="https://api.example.com",
         name="posts\nimport os",
@@ -94,7 +93,9 @@ def test_stream_name_with_newline_does_not_break_out_of_comment():
     # exactly the one legitimate top-level `import os` the incremental
     # template emits; the malicious payload must not add a second one
     assert len(bare_import_os) == 1
-    assert any("posts import os" in line for line in lines)
+    assert (
+        '"""Lakeflow Declarative Pipelines connector for posts\nimport os."""' in script
+    )
 
 
 def test_oauth_fields_with_quotes_are_escaped():

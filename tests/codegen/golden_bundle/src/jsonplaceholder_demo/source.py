@@ -1,15 +1,10 @@
-"""posts — Spark DataSource (Databricks Asset Bundle).
-
-Built on the fetch/schema helpers in `jsonplaceholder_demo.client`; edit this
-file freely — it is not read by polymo again.
-"""
+"""Spark DataSource for posts."""
 
 from typing import Any, Iterator
 
+from pyspark.sql.datasource import DataSource, DataSourceReader
+
 from .client import fetch_records, _infer_schema
-
-from pyspark.sql.datasource import DataSource, DataSourceReader  # noqa: E402
-
 
 class JsonplaceholderDemoSource(DataSource):
     @classmethod
@@ -34,15 +29,6 @@ class _Reader(DataSourceReader):
 
 
 def _cell(value: Any) -> Any:
-    """Nested structures become JSON strings; scalars pass through.
-
-    Only used with an inferred schema — inference never produces a
-    STRUCT/ARRAY/MAP column, so a dict/list value here would otherwise
-    crash the read; JSON-encoding it into a STRING is the safe fallback.
-    An explicit schema skips this: a STRUCT/ARRAY/MAP column needs the
-    real structure, not a JSON string, so those values pass through as-is
-    (see the schema-mode branch above).
-    """
     if isinstance(value, (dict, list)):
         import json
 

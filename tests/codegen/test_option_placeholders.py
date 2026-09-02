@@ -23,16 +23,6 @@ def test_missing_option_becomes_placeholder_variable():
     )
 
 
-def test_missing_option_placeholder_present_in_dbutils_comment():
-    config = make_config(
-        base_url="https://x",
-        headers={"Authorization": "Basic {{ options.api_key_b64 }}"},
-    )
-    core = generate_core(config)
-    assert "dbutils.secrets.get" in core
-    assert "{{ options.* }}" in core
-
-
 def test_missing_option_placeholder_used_at_request_time(http_server):
     def route(query, headers, body):
         assert headers.get("Authorization") == "Basic abc"

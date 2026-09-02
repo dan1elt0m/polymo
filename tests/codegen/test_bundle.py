@@ -103,12 +103,14 @@ def test_client_byte_equals_generate_core(case):
 def test_client_diverges_from_generate_core_when_secret_ref_present():
     """The byte-equality invariant above only holds when there's nothing
     secret-ref-shaped to render differently — see `generator._context`'s
-    docstring for why. A bundle's `client.py` keeps the `"REPLACE_ME"`
-    placeholder for a secret-ref slot (never a direct `_dbx_secret(...)`
-    call), on purpose: `src/<pkg>` ships as a wheel, so a module-level
-    secret call there would run on a session-less Spark worker. This is a
-    static-content regression test for that divergence; the executor
-    simulation (`test_bundle_wheel_secret_ref_resolved_driver_side_and_shipped_via_options`)
+    docstring for why. A bundle's `client.py` keeps a secret-ref slot typed
+    `str | None = None` (never a direct `_dbx_secret(...)` call, and never
+    the harmless-looking `"REPLACE_ME"` either — that would ship the
+    literal string to the real API instead of failing loudly), on purpose:
+    `src/<pkg>` ships as a wheel, so a module-level secret call there would
+    run on a session-less Spark worker. This is a static-content regression
+    test for that divergence; the executor simulation
+    (`test_bundle_wheel_secret_ref_resolved_driver_side_and_shipped_via_options`)
     proves the driver-side replacement actually works end to end.
     """
     from polymo.codegen.generator import _context, _ENV
@@ -124,7 +126,7 @@ def test_client_diverges_from_generate_core_when_secret_ref_present():
     standalone_core = generate_core(config)
 
     assert bundle_client != standalone_core
-    assert 'API_TOKEN: str = "REPLACE_ME"' in bundle_client
+    assert "API_TOKEN: str | None = None" in bundle_client
     assert '_dbx_secret("my-scope", "my-key")' in standalone_core
     assert '_dbx_secret("my-scope", "my-key")' not in bundle_client
     # the helper function itself is still emitted in both — only the
@@ -448,12 +450,15 @@ def test_bundle_wheel_installs_client_and_source_for_the_executor(
 # A module-level `API_TOKEN: str = _dbx_secret(...)`/`_uc_secret(...)` call in
 # `client.py` (the by-value-pickling-era design) would therefore raise on
 # EVERY read once bundled as a wheel. The fix: bundles' `client.py` keeps its
-# secret-ref slots as plain "REPLACE_ME" placeholders (the helper function
-# defs are still emitted); `pipelines/<stream>.py` resolves the ref
-# driver-side (the only place with a session) and threads the value through
-# as a DataSource reader option (`polymo_secret_<VAR>`); `<pkg>.source`
-# installs it onto `<pkg>.client`'s globals — in `schema()` AND `reader()`,
-# so schema inference is covered too — before any fetch call runs.
+# secret-ref slots typed `str | None = None` (the helper function defs are
+# still emitted); `pipelines/<stream>.py` resolves the ref driver-side (the
+# only place with a session) and threads the value through as a DataSource
+# reader option (`secret_<VAR>`); `<pkg>.source` installs it onto
+# `<pkg>.client`'s globals — in `schema()` AND `reader()`, so schema
+# inference is covered too — before any fetch call runs. If a slot is still
+# `None` once the fetch path actually reads it (the pipeline never resolved
+# and installed it), the generated code raises a `RuntimeError` naming the
+# slot instead of silently sending `None`/a placeholder to the real API.
 #
 # Simulated with the same two-subprocess wheel setup as above, but standing
 # in for the driver's resolution step by constructing the DataSource
@@ -463,8 +468,8 @@ def test_bundle_wheel_installs_client_and_source_for_the_executor(
 # exercising the `.upper()` reconstruction in `_apply_secret_options`
 # exactly as it would see it for real). The negative control (no secret
 # option at all) proves the positive result genuinely depends on the options
-# channel: with nothing supplied, the request goes out with the unresolved
-# "REPLACE_ME" placeholder instead of silently succeeding some other way.
+# channel: with nothing supplied, the read raises instead of silently
+# succeeding some other way.
 
 _LOAD_FROM_WHEEL_WITH_SECRET_SCRIPT = """
 import importlib
@@ -534,7 +539,7 @@ def test_bundle_wheel_secret_ref_resolved_driver_side_and_shipped_via_options(
     # session-less worker). pipelines/posts.py resolves it driver-side
     # instead.
     client_py = files[f"src/{pkg}/client.py"]
-    assert 'API_TOKEN: str = "REPLACE_ME"' in client_py
+    assert "API_TOKEN: str | None = None" in client_py
     assert '_dbx_secret("my-scope", "my-key")' not in client_py
     assert (
         "def _dbx_secret(" in client_py
@@ -577,18 +582,24 @@ def test_bundle_wheel_secret_ref_resolved_driver_side_and_shipped_via_options(
     # --- positive: the driver-resolved secret arrives as a reader option,
     # pre-lowercased exactly like Spark's real CaseInsensitiveDict would
     # hand it over.
-    positive = load({"polymo_secret_api_token": "resolved-secret-value"})
+    positive = load({"secret_api_token": "resolved-secret-value"})
     assert positive.returncode == 0, positive.stderr
     assert json.loads(positive.stdout) == [[1, "hello"]]
     assert seen_auth_headers[-1] == "Bearer resolved-secret-value"
 
-    # --- negative control: no secret option supplied at all -> the request
-    # goes out with the unresolved "REPLACE_ME" placeholder instead of the
-    # real secret, proving the positive result above genuinely depends on
-    # the options channel.
+    # --- negative control: no secret option supplied at all -> API_TOKEN is
+    # still None when the fetch path reads it, so the read raises instead of
+    # silently sending "None"/a placeholder to the real API, proving the
+    # positive result above genuinely depends on the options channel.
     negative = load({})
-    assert negative.returncode == 0, negative.stderr
-    assert seen_auth_headers[-1] == "Bearer REPLACE_ME"
+    assert negative.returncode != 0
+    assert "RuntimeError" in negative.stderr
+    assert (
+        "API_TOKEN was not installed by the pipeline — resolve secrets on"
+        " the driver and pass them as reader options"
+    ) in negative.stderr
+    # no second request ever reached the server — the guard raised first
+    assert len(seen_auth_headers) == 1
 
 
 # --- executor wheel simulation: OPT_* placeholders inside HEADERS/PARAMS/PATH
@@ -596,12 +607,12 @@ def test_bundle_wheel_secret_ref_resolved_driver_side_and_shipped_via_options(
 # the driver-resolved value onto the `OPT_*` module global itself, but
 # HEADERS/PARAMS/PATH that embed that placeholder (e.g. a header
 # `{"X-Tenant": "{{ options.tenant_id }}"}`) are dict/f-string literals
-# evaluated ONCE at import time, with the "REPLACE_ME" placeholder still in
-# effect then — the later setattr never reaches them, so a bundled read
-# would silently ship "REPLACE_ME" to the real API instead of the resolved
-# secret. `core.py.jinja` emits `_rebuild_option_literals()`, re-evaluating
-# exactly those literals, called from `_apply_secret_options` right after
-# the setattr loop.
+# evaluated ONCE at import time, with `OPT_*` still `None` then — the later
+# setattr never reaches them, so a bundled read would silently ship "None"
+# to the real API instead of the resolved secret. `core.py.jinja` emits
+# `_rebuild_option_literals()`, re-evaluating exactly those literals (with a
+# `RuntimeError` guard if the value is still `None`), called from
+# `_apply_secret_options` right after the setattr loop.
 
 
 def test_bundle_wheel_option_placeholders_in_headers_and_params_resolved(
@@ -631,9 +642,9 @@ def test_bundle_wheel_option_placeholders_in_headers_and_params_resolved(
     source_class_name = f"{_pascal_case(pkg)}Source"
 
     client_py = files[f"src/{pkg}/client.py"]
-    # the module-level literals still carry the placeholder at import time...
-    assert 'OPT_TENANT_ID: str = "REPLACE_ME"' in client_py
-    assert 'OPT_TEAM_ID: str = "REPLACE_ME"' in client_py
+    # the module-level literals are still None at import time...
+    assert "OPT_TENANT_ID: str | None = None" in client_py
+    assert "OPT_TEAM_ID: str | None = None" in client_py
     # ...but the rebuild function that re-evaluates HEADERS/PARAMS after a
     # driver-resolved value lands is emitted alongside them
     assert "def _rebuild_option_literals(" in client_py
@@ -674,24 +685,30 @@ def test_bundle_wheel_option_placeholders_in_headers_and_params_resolved(
     # hand them over.
     positive = load(
         {
-            "polymo_secret_opt_tenant_id": "real-tenant",
-            "polymo_secret_opt_team_id": "real-team",
+            "secret_opt_tenant_id": "real-tenant",
+            "secret_opt_team_id": "real-team",
         }
     )
     assert positive.returncode == 0, positive.stderr
     assert json.loads(positive.stdout) == [[1, "hello"]]
     assert seen_requests[-1]["headers"].get("X-Tenant") == "real-tenant"
     assert seen_requests[-1]["query"].get("team") == "real-team"
-    assert "REPLACE_ME" not in json.dumps(seen_requests[-1])
 
-    # --- negative control: no options supplied at all -> the request goes
-    # out with the unresolved "REPLACE_ME" placeholders instead of the real
-    # values, proving the positive result above genuinely depends on the
-    # options channel (and on the rebuild actually running).
+    # --- negative control: no options supplied at all -> both OPT_* vars are
+    # still None when the rebuild runs, so it raises instead of silently
+    # shipping "None" to the real API, proving the positive result above
+    # genuinely depends on the options channel (and on the rebuild actually
+    # running). OPT_TEAM_ID sorts before OPT_TENANT_ID (see
+    # `rebuild_guard_vars` in `generator._context`), so its guard fires
+    # first.
     negative = load({})
-    assert negative.returncode == 0, negative.stderr
-    assert seen_requests[-1]["headers"].get("X-Tenant") == "REPLACE_ME"
-    assert seen_requests[-1]["query"].get("team") == "REPLACE_ME"
+    assert negative.returncode != 0
+    assert "RuntimeError" in negative.stderr
+    assert (
+        "OPT_TEAM_ID was not installed by the pipeline — resolve secrets on"
+        " the driver and pass them as reader options"
+    ) in negative.stderr
+    assert len(seen_requests) == 1
 
 
 def test_bundle_wheel_option_placeholder_in_path_resolved(tmp_path, http_server):
@@ -699,7 +716,6 @@ def test_bundle_wheel_option_placeholder_in_path_resolved(tmp_path, http_server)
         return 200, [{"id": 1, "title": "hello"}], {}
 
     http_server.routes["/tenants/real-tenant/posts"] = ok_route
-    http_server.routes["/tenants/REPLACE_ME/posts"] = ok_route
 
     config = make_config(
         base_url=http_server.url,
@@ -747,17 +763,23 @@ def test_bundle_wheel_option_placeholder_in_path_resolved(tmp_path, http_server)
 
     # --- positive: the driver-resolved tenant id arrives as a reader
     # option; the request path actually reaching the mock server must carry
-    # the resolved segment, not the frozen-at-import "REPLACE_ME" one.
-    positive = load({"polymo_secret_opt_tenant_id": "real-tenant"})
+    # the resolved segment, not the frozen-at-import `None` one.
+    positive = load({"secret_opt_tenant_id": "real-tenant"})
     assert positive.returncode == 0, positive.stderr
     assert json.loads(positive.stdout) == [[1, "hello"]]
     assert http_server.log[-1][1] == "/tenants/real-tenant/posts"
 
-    # --- negative control: no option supplied -> the unresolved
-    # placeholder path is what actually goes out.
+    # --- negative control: no option supplied -> OPT_TENANT_ID is still
+    # None when the rebuild runs, so it raises instead of a request ever
+    # going out with an unresolved path segment.
     negative = load({})
-    assert negative.returncode == 0, negative.stderr
-    assert http_server.log[-1][1] == "/tenants/REPLACE_ME/posts"
+    assert negative.returncode != 0
+    assert "RuntimeError" in negative.stderr
+    assert (
+        "OPT_TENANT_ID was not installed by the pipeline — resolve secrets"
+        " on the driver and pass them as reader options"
+    ) in negative.stderr
+    assert http_server.log[-1][1] == "/tenants/real-tenant/posts"
 
 
 # --- databricks.yml -----------------------------------------------------------
@@ -781,7 +803,7 @@ def test_databricks_yml_parses_with_expected_resource_keys():
     assert pipeline["catalog"] == "main"
     assert pipeline["schema"] == "raw"
     assert pipeline["serverless"] is True
-    assert pipeline["root_path"] == "src"
+    assert pipeline["root_path"] == "${workspace.file_path}"
     assert pipeline["libraries"] == [{"glob": {"include": "pipelines/posts.py"}}]
     assert pipeline["environment"]["dependencies"] == [
         "${workspace.root_path}/artifacts/.internal/*.whl"

@@ -36,7 +36,6 @@ def test_batch_without_schema_infers_schema_by_sampling():
     # sampling, not the full stream — an explicit schema is recommended
     # precisely to avoid paying this cost / risk on every run
     assert "islice(fetch_records(), 50)" in script
-    assert "explicit schema recommended" in script.lower()
 
 
 def test_windowed_batch_partitions_over_windows():

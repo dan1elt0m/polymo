@@ -54,8 +54,9 @@ def test_endpoints_windows_incremental_schema_tracks_cursor_per_partition():
     # single driver-side list of rows to compute a cursor from. Instead
     # `read()` tracks its own partition-local max of `cursor_field` in a
     # plain local variable and calls `_write_state()` once it's done
-    # yielding — see the comment above that call in the generated script for
-    # the last-writer-wins caveat with multiple partitions.
+    # yielding — with multiple partitions, whichever one finishes last wins
+    # (batch tables re-fetch fully each run, so that only costs redundant
+    # fetching, never missed data).
     config = make_config(
         base_url="https://api.example.com",
         partition=PartitionConfig(strategy="endpoints", endpoints=("/a", "/b")),
@@ -74,7 +75,6 @@ def test_endpoints_windows_incremental_schema_tracks_cursor_per_partition():
     assert 'record.get("updated")' in dp_section
     assert "_write_state(cursor)" in dp_section
     assert 'LAST_CURSOR["value"]' not in dp_section
-    assert "# records are not tagged with their source endpoint" in script
 
     # LAST_CURSOR is dead module state for windowed configs: fetch_records
     # runs on executors, so a module-level LAST_CURSOR mutated there is never

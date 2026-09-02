@@ -1,41 +1,22 @@
-"""{{ stream_name_doc }} — Lakeflow Declarative Pipeline source (Databricks Asset Bundle).
+"""Lakeflow Declarative Pipeline for {{ stream_name_doc }}."""
 
-Registers the `{{ source_class_name }}` data source from `{{ bundle_pkg }}.source`
-(built on `{{ bundle_pkg }}.client`) and wires it to a `@dp.table`; edit this
-file freely — it is not read by polymo again.
-"""
-
-from pyspark import pipelines as dp  # noqa: E402
-from pyspark.sql import SparkSession  # noqa: E402
+from pyspark import pipelines as dp
+from pyspark.sql import SparkSession
 {% if bundle_secret_slots %}
-from {{ bundle_pkg }} import client  # noqa: E402
+from {{ bundle_pkg }} import client
 {% endif %}
-from {{ bundle_pkg }}.source import {{ source_class_name }}  # noqa: E402
+from {{ bundle_pkg }}.source import {{ source_class_name }}
 
-# `databricks.yml` builds `src/{{ bundle_pkg }}` into a wheel and installs it via
-# the pipeline's `environment.dependencies`, so `{{ bundle_pkg }}` is importable
-# on the driver AND every executor — no by-value pickling needed.
 spark = SparkSession.getActiveSession()
 spark.dataSource.register({{ source_class_name }})
 {% if bundle_secret_slots %}
 
-# Secret refs (Databricks secret scope / UC service credential) are resolved
-# HERE, on the driver — this file only ever runs on the driver, so it's the
-# only place with a Spark session and dbutils. `{{ bundle_pkg }}.client`'s own
-# module-level constants stay "REPLACE_ME" placeholders: since src/{{ bundle_pkg }}
-# ships as an installed wheel, every Spark Python worker reconstructs the
-# registered DataSource with a fresh `import {{ bundle_pkg }}.client` (by-reference
-# pickling), which runs with no session/dbutils available — a module-level
-# secret call there would fail on every read. The resolved values below are
-# threaded through as DataSource reader options instead (plain strings,
-# which Spark does ship to workers); {{ bundle_pkg }}.source installs them onto
-# {{ bundle_pkg }}.client's globals on each worker before the first fetch.
 _resolved_secrets = {
 {% for var, call_expr in bundle_secret_slots %}
     {{ var | tojson }}: {{ call_expr }},
 {% endfor %}
 }
-_secret_options = {f"polymo_secret_{key}": value for key, value in _resolved_secrets.items()}
+_secret_options = {f"secret_{key}": value for key, value in _resolved_secrets.items()}
 {% endif %}
 
 
@@ -44,9 +25,6 @@ _secret_options = {f"polymo_secret_{key}": value for key, value in _resolved_sec
 def {{ func_name }}():
     return spark.readStream.format("{{ func_name }}_stream"){% if bundle_secret_slots %}.options(**_secret_options){% endif %}.load()
 {% else %}
-{% if partition_strategy == "pagination" %}
-# partition strategy "pagination" runs sequentially in generated scripts
-{% endif %}
 @dp.table(name={{ table_name_repr }})
 def {{ func_name }}():
     return spark.read.format("{{ func_name }}_source"){% if bundle_secret_slots %}.options(**_secret_options){% endif %}.load()

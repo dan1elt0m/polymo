@@ -71,8 +71,8 @@ connector.
 - **None** (default) — no auth added to requests.
 - **Bearer Token** — the generated script gets an `API_TOKEN = "REPLACE_ME"`
   constant near the top; edit it in place (or swap it for a secret-store
-  lookup — the generated comment shows a Databricks example) before
-  running the script. Maps to `source.auth.type = "bearer"`.
+  lookup, e.g. `dbutils.secrets.get(...)`) before running the script. Maps
+  to `source.auth.type = "bearer"`.
 - **API Key** — a first-class auth type. Choose a **Placement** (Header or
   Query parameter) and a **Name** (e.g. `X-API-Key` for a header, or
   `api_key` for a query parameter). Maps to
@@ -157,16 +157,25 @@ by `databricks secrets list-scopes`/`list-secrets` for the profile chosen on
 the [Deploy tab](builder-ui.md#deploy-to-databricks)). See
 [Deploy to Databricks → Secrets](builder-ui.md#secrets) for the UI walkthrough.
 
-**At deploy time**, this reference travels unchanged into a bundle project:
-`src/<pkg>/client.py` — the file the [Deploy tab](builder-ui.md#deploy-to-databricks)
-bootstraps under a project's `src/` directory — is exactly the same
-`generate_core()` output described above, `_dbx_secret` call included. Since
-that call resolves the secret from `dbutils` on the driver, it only works
-once the pipeline actually runs on a Databricks cluster
-(`databricks bundle run`); nothing about deploying the bundle itself
+**At deploy time**, this reference resolves differently in a bundle project
+than in the exported script above. `src/<pkg>/client.py` — the file the
+[Deploy tab](builder-ui.md#deploy-to-databricks) bootstraps under a
+project's `src/` directory — ships as an installed wheel, so Spark
+reconstructs its `DataSource` on every executor with a fresh
+`import <pkg>.client` and no Spark session available; a module-level
+`_dbx_secret(...)` call there would fail on every read. So a secret-ref slot
+in `client.py` is instead typed `API_TOKEN: str | None = None` (the
+`_dbx_secret` helper function itself is still generated, just not called at
+module scope), and `pipelines/<stream>.py` — which only ever runs on the
+driver — calls it there and threads the resolved value through as a
+DataSource reader option (`secret_api_token`, etc.), which `src/<pkg>/source.py`
+installs onto `client`'s globals before the first fetch. If a slot is still
+`None` once the fetch path actually needs it, the generated code raises a
+clear `RuntimeError` naming the slot instead of silently sending `None` to
+the real API. Nothing about deploying the bundle itself
 (`databricks bundle deploy`) touches secret values — deploy only uploads
-source files and cluster/pipeline definitions, it does not execute the
-pipeline or evaluate `_dbx_secret`.
+source files and cluster/pipeline definitions; the secret is resolved only
+once the pipeline actually runs (`databricks bundle run`).
 
 ### UC service-credential secret references
 
@@ -216,13 +225,16 @@ Vault)** and fill in the credential, vault URL, and secret name. See
 [Deploy to Databricks → Secrets](builder-ui.md#secrets) for the UI
 walkthrough.
 
-**At deploy time**, this reference travels the same way a Databricks
-secret-scope reference does: unchanged, into `src/<pkg>/client.py`, resolved
-only once the pipeline actually runs (never at `databricks bundle deploy`
-time). The generated `pyproject.toml` adds `azure-keyvault-secrets` as a
-dependency automatically whenever a `uc_secret` reference is present, so the
-built wheel (see [Deploy to Databricks → Project bootstrap](builder-ui.md#project-bootstrap))
-carries what `_uc_secret` needs.
+**At deploy time**, this reference resolves the same way a Databricks
+secret-scope reference does (see above): `src/<pkg>/client.py` keeps the
+slot typed `str | None = None`, and `pipelines/<stream>.py` calls
+`_uc_secret` driver-side and threads the resolved value through as a
+DataSource reader option, resolved only once the pipeline actually runs
+(never at `databricks bundle deploy` time). The generated `pyproject.toml`
+adds `azure-keyvault-secrets` as a dependency automatically whenever a
+`uc_secret` reference is present, so the built wheel (see [Deploy to
+Databricks → Project bootstrap](builder-ui.md#project-bootstrap)) carries
+what `_uc_secret` needs.
 
 ## Query parameters & headers
 
@@ -360,8 +372,7 @@ key**, and **Keep in memory** fields. These only affect what the **Preview**
 panel does when test-fetching incrementally — they are not part of the
 generated script, which always uses the fixed `<stream-name>_state.json`
 path described above. Edit the generated `STATE_PATH` constant by hand if
-you need it to point elsewhere (the generated comment shows a Databricks
-Volume path as an example).
+you need it to point elsewhere (e.g. a Databricks Volume path).
 
 ## Error handling & retries
 

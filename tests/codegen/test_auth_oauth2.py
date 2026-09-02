@@ -60,7 +60,6 @@ def test_oauth2_placeholder_and_no_secret_leak():
     core = generate_core(config)
     assert 'CLIENT_SECRET: str = "REPLACE_ME"' in core
     assert "s3cret" not in core
-    assert "dbutils.secrets.get" in core
 
 
 def test_oauth2_missing_token_url_raises():

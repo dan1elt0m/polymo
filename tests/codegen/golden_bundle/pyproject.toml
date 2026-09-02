@@ -6,12 +6,6 @@ dependencies = [
     "requests>=2.31",
 ]
 
-# uv_build understands the `src/jsonplaceholder_demo` layout natively (project name ==
-# package name, already a valid identifier — see `_identifier` in
-# polymo.codegen.generator), so no extra [tool.uv.build-backend] config is
-# needed. `databricks.yml`'s `artifacts.default.build` runs `uv build
-# --wheel` against this file at deploy time; the pipeline resource's
-# `environment.dependencies` then installs the built wheel.
 [build-system]
 requires = ["uv_build>=0.7.19,<1.0"]
 build-backend = "uv_build"

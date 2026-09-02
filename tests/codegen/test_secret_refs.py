@@ -105,8 +105,7 @@ def test_helper_body_matches_spec_exactly():
     )
     core = generate_core(config)
     assert_hygiene(core)
-    expected = '''def _dbx_secret(scope: str, key: str) -> str:
-    """Resolve a Databricks secret on the driver."""
+    expected = """def _dbx_secret(scope: str, key: str) -> str:
     try:
         from pyspark.dbutils import DBUtils  # type: ignore[import]
         from pyspark.sql import SparkSession
@@ -119,7 +118,7 @@ def test_helper_body_matches_spec_exactly():
         raise RuntimeError(
             f"could not resolve Databricks secret {scope}/{key}: {exc}. "
             "Outside Databricks, replace this call with the literal value."
-        ) from exc'''
+        ) from exc"""
     assert expected in core
 
 
