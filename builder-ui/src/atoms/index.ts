@@ -1,6 +1,6 @@
 import { atom } from "jotai";
 import { atomWithStorage, createJSONStorage } from "jotai/utils";
-import type { ConfigFormState, SampleState, StatusState, SavedConnector } from "../types";
+import type { ConfigFormState, SampleState, StatusState, SavedConnector, WorkingState } from "../types";
 import { INITIAL_FORM_STATE } from "../lib/initial-data";
 import { formStateToConfig } from "../lib/transform";
 import {
@@ -276,4 +276,19 @@ export const activeConnectorIdAtom = atomWithStorage<string | null>(
 	'polymo.active_connector_id.v1',
 	null,
 	activeConnectorStorage,
+);
+
+// Snapshot of the in-progress editor session, kept separate from
+// savedConnectors so an imported-but-unsaved (or just-edited) config
+// survives a reload even before the periodic save-to-savedConnectors sync
+// runs. Never holds formState.authToken — callers must strip it before
+// writing (see App.tsx's working-state sync effect).
+const workingStateStorage = typeof window !== 'undefined'
+	? createJSONStorage<WorkingState | null>(() => localStorage)
+	: undefined;
+
+export const workingStateAtom = atomWithStorage<WorkingState | null>(
+	'polymo.working_state.v1',
+	null,
+	workingStateStorage,
 );

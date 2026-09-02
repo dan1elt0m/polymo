@@ -295,6 +295,20 @@ export interface SavedConnector {
   readerOptions: Record<string, string>;
 }
 
+// A snapshot of the in-progress editor session (not yet — or not recently —
+// saved), persisted separately from `savedConnectors` so an imported or
+// freshly-edited config survives a reload even before/between saves. Never
+// carries `formState.authToken`: preview secrets are session-only and are
+// stripped before this is written to storage (see bug: silent work loss on
+// reload).
+export interface WorkingState {
+  formState: ConfigFormState;
+  readerOptions: Record<string, string>;
+  builderView: 'ui' | 'code' | 'deploy';
+  activeConnectorId: string | null;
+  savedAt: string;
+}
+
 // Added interfaces used by atoms and components
 export interface StatusState {
   tone: 'info' | 'success' | 'warn' | 'error';

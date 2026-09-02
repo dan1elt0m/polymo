@@ -1,6 +1,6 @@
 import React from "react";
 import * as Tabs from "@radix-ui/react-tabs";
-import { useAtom, useAtomValue } from "jotai";
+import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import {
 	configFormStateAtom,
 	builderViewAtom,
@@ -17,6 +17,7 @@ import {
 	readerOptionsAtom,
 	savedConnectorsAtom,
 	activeConnectorIdAtom,
+	workingStateAtom,
 	DEFAULT_SAMPLE_STATE,
 } from "./atoms";
 import { configToFormState, formStateToConfig, validateFormState, findUnresolvedOptionPlaceholders } from "./lib/transform";
@@ -27,7 +28,7 @@ import { DeployPanel } from "./components/DeployPanel";
 import { SamplePreview } from "./components/SamplePreview";
 import { ThemeMenu } from "./components/ThemeMenu";
 import { LandingScreen } from "./components/LandingScreen";
-import type { ConfigFormState, ValidationResponse, RestSourceConfig, SavedConnector } from "./types";
+import type { ConfigFormState, ValidationResponse, RestSourceConfig, SavedConnector, WorkingState } from "./types";
 import { MAX_SAMPLE_ROWS, SAMPLE_VIEWS } from "./lib/constants";
 import { INITIAL_FORM_STATE } from "./lib/initial-data";
 import { createId } from "./lib/id";
@@ -39,6 +40,23 @@ const createSampleState = () => JSON.parse(JSON.stringify(DEFAULT_SAMPLE_STATE))
 
 const stripExtension = (name: string): string =>
 	name.replace(/\.polymo\.json$/i, '').replace(/\.[^.]+$/, '').trim();
+
+// Every raw stored formState (a saved connector loaded from localStorage, or
+// a resumed working-state snapshot) must be defaults-merged before it enters
+// live state: the schema has grown new fields over time (e.g. authSecretMode,
+// authUcCredential), and an older persisted blob missing them would otherwise
+// crash code that reads them without optional chaining (see
+// validateFormState's formState.authToken.trim()). This also guarantees a
+// scrubbed authToken always resolves to '' rather than undefined.
+const mergeFormStateDefaults = (raw: Partial<ConfigFormState> | null | undefined): ConfigFormState => ({
+	...INITIAL_FORM_STATE,
+	...(raw ?? {}),
+});
+
+// Preview secrets (formState.authToken) must never be written to
+// localStorage — they're session-only. Call this right before persisting
+// any formState into savedConnectors or workingState.
+const scrubAuthToken = (state: ConfigFormState): ConfigFormState => ({ ...state, authToken: '' });
 
 const App: React.FC = () => {
 	const [showLandingScreen, setShowLandingScreen] = React.useState(true);
@@ -54,9 +72,11 @@ const App: React.FC = () => {
 	const configPayload = useAtomValue(configPayloadAtom);
 	const [generatedCode, setGeneratedCode] = useAtom(generatedCodeAtom);
 	const bearerToken = useAtomValue(bearerTokenAtom); // moved from inside handlePreview
+	const setBearerToken = useSetAtom(bearerTokenAtom);
 	const runtimeOptions = useAtomValue(runtimeOptionsAtom);
 	const [savedConnectors, setSavedConnectors] = useAtom(savedConnectorsAtom);
 	const [activeConnectorId, setActiveConnectorId] = useAtom(activeConnectorIdAtom);
+	const [workingState, setWorkingState] = useAtom(workingStateAtom);
 	const [showSaveModal, setShowSaveModal] = React.useState(false);
 	const [saveFileName, setSaveFileName] = React.useState(`config${CONFIG_FILE_EXTENSION}`);
 	const [saveDirHandle, setSaveDirHandle] = React.useState<any | null>(null); // directory handle
@@ -122,14 +142,22 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 	const loadConnector = React.useCallback(
 		(connector: SavedConnector, options?: { message?: string }) => {
 			resetWorkingState();
-			const effectiveFormState = cloneFormState(connector.formState);
+			// Defaults-merge in case this connector was persisted by an older
+			// schema version, then scrub any secret that older code may have
+			// written into storage before saved connectors stopped persisting it.
+			const effectiveFormState = scrubAuthToken(mergeFormStateDefaults(cloneFormState(connector.formState)));
 			setActiveConnectorId(connector.id);
 			setConfigFormState(effectiveFormState);
+			setBearerToken('');
 			setLastEdited(connector.lastEdited);
 			setBuilderView(
 				connector.builderView === 'code' || connector.builderView === 'deploy' ? connector.builderView : 'ui',
 			);
 			setReaderOptions({ ...connector.readerOptions });
+			// Loading a connector is an explicit "work on something else" action —
+			// drop any stale resumable draft so the landing screen doesn't offer
+			// to resume into a session the user just navigated away from.
+			setWorkingState(null);
 			setStatus({ tone: 'info', message: options?.message ?? `Loaded ${connector.name}` });
 			updateSaveFileName(connector.name);
 			setShowLandingScreen(false);
@@ -139,12 +167,14 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 		[
 			resetWorkingState,
 			setActiveConnectorId,
+			setBearerToken,
 			setBuilderView,
 			setConfigFormState,
 			setLastEdited,
 			setReaderOptions,
 			setShowLandingScreen,
 			setStatus,
+			setWorkingState,
 			updateSaveFileName,
 		],
 	);
@@ -164,7 +194,7 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 				name: uniqueName,
 				createdAt: now,
 				updatedAt: now,
-				formState: cloneFormState(options?.formState ?? INITIAL_FORM_STATE),
+				formState: scrubAuthToken(mergeFormStateDefaults(cloneFormState(options?.formState ?? INITIAL_FORM_STATE))),
 				lastEdited: 'ui',
 				builderView: options?.builderView ?? 'ui',
 				readerOptions: { ...(options?.readerOptions ?? {}) },
@@ -219,6 +249,11 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 			if (removed) {
 				setStatus({ tone: 'info', message: `Deleted ${removed.name}` });
 			}
+			if (workingState?.activeConnectorId === id) {
+				// Don't leave a "Resume where you left off" card pointing at a
+				// connector that no longer exists.
+				setWorkingState(null);
+			}
 			if (id === activeConnectorId) {
 				// If we're currently on the landing screen, don't auto-load another connector.
 				if (showLandingScreen) {
@@ -233,7 +268,7 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 				}
 			}
 		},
-		[activeConnectorId, loadConnector, savedConnectors, setActiveConnectorId, setSavedConnectors, setShowLandingScreen, setStatus, showLandingScreen],
+		[activeConnectorId, loadConnector, savedConnectors, setActiveConnectorId, setSavedConnectors, setShowLandingScreen, setStatus, setWorkingState, showLandingScreen, workingState],
 	);
 
 	const handleExportSavedConnector = React.useCallback(
@@ -243,7 +278,7 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 			try {
 				// Saved configs may be incomplete work-in-progress; export the raw
 				// config dict as-is rather than requiring it to validate first.
-				const configDict = formStateToConfig(connector.formState);
+				const configDict = formStateToConfig(mergeFormStateDefaults(connector.formState));
 				const contents = JSON.stringify(configDict, null, 2);
 				const blob = new Blob([contents], { type: 'application/json' });
 				const link = document.createElement('a');
@@ -307,6 +342,60 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 		[savedConnectors],
 	);
 
+	// Drives the landing screen's "Resume where you left off" card. Only
+	// surfaced once something was actually configured — a working-state
+	// snapshot of an untouched blank form isn't worth resuming into.
+	const workingStateSummary = React.useMemo(() => {
+		if (!workingState) return null;
+		const fs = workingState.formState;
+		const hasContent = !!(fs.baseUrl?.trim() || fs.streamPath?.trim() || fs.streamName?.trim());
+		if (!hasContent) return null;
+		const linkedConnector = workingState.activeConnectorId
+			? savedConnectors.find((entry) => entry.id === workingState.activeConnectorId)
+			: undefined;
+		const label = linkedConnector?.name
+			|| fs.streamName?.trim()
+			|| fs.streamPath?.trim()
+			|| fs.baseUrl?.trim()
+			|| 'Untitled connector';
+		return { label, savedAt: workingState.savedAt };
+	}, [savedConnectors, workingState]);
+
+	const handleResumeWorkingState = React.useCallback(() => {
+		if (!workingState) return;
+		resetWorkingState();
+		const restoredFormState = mergeFormStateDefaults(cloneFormState(workingState.formState));
+		setConfigFormState(restoredFormState);
+		// The working state never carries authToken (session-only secret) —
+		// make sure no stale preview value lingers from a prior session either.
+		setBearerToken('');
+		setActiveConnectorId(workingState.activeConnectorId);
+		setBuilderView(workingState.builderView);
+		setReaderOptions({ ...workingState.readerOptions });
+		setLastEdited('ui');
+		updateSaveFileName(restoredFormState.streamName || restoredFormState.streamPath || 'config');
+		setStatus({ tone: 'info', message: 'Resumed your last working session — re-enter any preview secret.' });
+		setShowLandingScreen(false);
+		setIsRenamingConnector(false);
+		setConnectorNameDraft('');
+	}, [
+		resetWorkingState,
+		setActiveConnectorId,
+		setBearerToken,
+		setBuilderView,
+		setConfigFormState,
+		setLastEdited,
+		setReaderOptions,
+		setShowLandingScreen,
+		setStatus,
+		updateSaveFileName,
+		workingState,
+	]);
+
+	const handleDiscardWorkingState = React.useCallback(() => {
+		setWorkingState(null);
+	}, [setWorkingState]);
+
 	React.useEffect(() => {
 		setIsRenamingConnector(false);
 		setConnectorNameDraft('');
@@ -321,7 +410,9 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 				if (entry.id !== activeConnectorId) return entry;
 				return {
 					...entry,
-					formState: cloneFormState(configFormState),
+					// Saved connectors never carry the preview secret — it's
+					// session-only, scrubbed before this hits localStorage.
+					formState: scrubAuthToken(cloneFormState(configFormState)),
 					lastEdited,
 					builderView,
 					readerOptions: { ...readerOptions },
@@ -331,6 +422,28 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 		}, 400);
 		return () => window.clearTimeout(handle);
 	}, [activeConnectorId, builderView, configFormState, lastEdited, readerOptions, setSavedConnectors, showLandingScreen]);
+
+	// Snapshot the in-progress editor session into workingStateAtom
+	// (localStorage) any time it changes, debounced ~500ms, whenever the
+	// editor is actually open. This is the fix for imported-but-unsaved
+	// work vanishing on reload: unlike the savedConnectors sync above (which
+	// only ever touches the entry matching activeConnectorId once one
+	// exists), this always captures the live editor state, independent of
+	// whether/when a save has happened. authToken is stripped — preview
+	// secrets are never written to storage.
+	React.useEffect(() => {
+		if (showLandingScreen) return;
+		const handle = window.setTimeout(() => {
+			setWorkingState({
+				formState: scrubAuthToken(cloneFormState(configFormState)),
+				readerOptions: { ...readerOptions },
+				builderView,
+				activeConnectorId,
+				savedAt: new Date().toISOString(),
+			});
+		}, 500);
+		return () => window.clearTimeout(handle);
+	}, [activeConnectorId, builderView, configFormState, readerOptions, setWorkingState, showLandingScreen]);
 
 	// Instead, just mark initialLoadRef consumed once after first render
 	React.useEffect(() => { if (initialLoadRef.current) initialLoadRef.current = false; }, []);
@@ -806,6 +919,9 @@ const filePickerSupported = !!(winRef && typeof winRef.showSaveFilePicker === 'f
 						onSelectSaved={handleSelectSavedConnector}
 						onDeleteSaved={handleDeleteSavedConnector}
 						onExportSaved={handleExportSavedConnector}
+						workingState={workingStateSummary}
+						onResumeWorking={handleResumeWorkingState}
+						onDiscardWorking={handleDiscardWorkingState}
 					/>
 				) : (
 					<>

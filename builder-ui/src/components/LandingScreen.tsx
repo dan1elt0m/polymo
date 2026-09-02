@@ -29,6 +29,11 @@ interface SavedConnectorSummary {
   updatedAt: string;
 }
 
+interface WorkingStateSummary {
+  label: string;
+  savedAt: string;
+}
+
 interface LandingScreenProps {
   onStartNew: () => void;
   onImportConfig: (config: RestSourceConfig, options?: { suggestedName?: string }) => void;
@@ -36,6 +41,9 @@ interface LandingScreenProps {
   onSelectSaved: (id: string) => void;
   onDeleteSaved: (id: string) => void;
   onExportSaved: (id: string) => void;
+  workingState?: WorkingStateSummary | null;
+  onResumeWorking?: () => void;
+  onDiscardWorking?: () => void;
 }
 
 const formatDate = (value: string): string => {
@@ -58,6 +66,9 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
   onSelectSaved,
   onDeleteSaved,
   onExportSaved,
+  workingState,
+  onResumeWorking,
+  onDiscardWorking,
 }) => {
   const [isUploading, setIsUploading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -137,6 +148,46 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
           Create and configure REST API connectors with an easy-to-use visual editor
         </p>
       </div>
+
+      {workingState && onResumeWorking && (
+        <div
+          className="w-full max-w-4xl mx-auto rounded-xl border-2 border-blue-7 bg-blue-3/30 dark:border-drac-accent dark:bg-blue-9/15 px-6 py-5 shadow-soft flex flex-wrap items-center justify-between gap-4"
+          data-testid="resume-working-state-card"
+        >
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-9/15 dark:bg-blue-9/25">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-11 dark:text-drac-accent" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
+              </svg>
+            </div>
+            <div>
+              <p className="text-base font-semibold text-slate-12 dark:text-drac-foreground">Resume where you left off</p>
+              <p className="text-sm text-muted dark:text-drac-muted">
+                {workingState.label} · saved {formatDate(workingState.savedAt)}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {onDiscardWorking && (
+              <button
+                type="button"
+                onClick={onDiscardWorking}
+                className="rounded-full px-3 py-1.5 text-xs font-medium text-muted hover:text-slate-12 dark:text-drac-muted dark:hover:text-drac-foreground transition"
+              >
+                Discard
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onResumeWorking}
+              className="inline-flex items-center gap-1.5 rounded-full bg-blue-9 px-4 py-2 text-sm font-semibold text-white shadow-soft transition hover:bg-blue-10"
+              data-testid="resume-working-state"
+            >
+              Resume
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-4xl mx-auto">
         <button
