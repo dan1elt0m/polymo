@@ -72,22 +72,11 @@ def spark_session():
     is exec'd, letting the *unmodified* `generate()` output run here,
     decorator included, exactly as shipped.
     """
-    import sys
-    import types
-
-    if "pyspark.pipelines" not in sys.modules:
-        fake_pipelines = types.ModuleType("pyspark.pipelines")
-
-        def _table(**_kwargs):
-            def _decorator(func):
-                return func
-
-            return _decorator
-
-        fake_pipelines.table = _table
-        sys.modules["pyspark.pipelines"] = fake_pipelines
-
     from pyspark.sql import SparkSession
+
+    from tests.codegen.helpers import install_fake_pipelines
+
+    install_fake_pipelines()
 
     session = (
         SparkSession.builder.master("local[1]")

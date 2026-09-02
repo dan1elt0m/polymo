@@ -8,6 +8,7 @@ import keyword
 import re
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Mapping, Optional, Tuple
+from urllib.parse import urlparse
 
 from jinja2 import Environment, PackageLoader, StrictUndefined
 
@@ -438,6 +439,51 @@ def _static_windows(config: RestSourceConfig) -> Optional[List[Dict[str, Any]]]:
     return None
 
 
+_LOCAL_STATE_SCHEMES = frozenset({"", "file"})
+
+
+def _resolve_state_path(config: RestSourceConfig) -> Tuple[str, bool]:
+    """Resolve the incremental state location: `(path, needs_fsspec)`.
+
+    Mirrors the 0.x `_IncrementalTracker`: a bare path or a `file://` URL
+    is a plain local file (so `/Volumes/...` and `/dbfs/...` stay POSIX
+    via FUSE), any other URL scheme (`s3://`, `gs://`, `abfss://`, ...)
+    goes through `fsspec`. Decided here, at generation time, so a local
+    path produces zero fsspec code and a remote one gets the fsspec branch.
+    """
+    stream = config.stream
+    raw = stream.incremental.state_path or f"{stream.name}_state.json"
+    parsed = urlparse(raw)
+    if parsed.scheme == "file":
+        return parsed.path, False
+    return raw, parsed.scheme not in _LOCAL_STATE_SCHEMES
+
+
+def _page_partitions(stream) -> bool:
+    """Whether `partition.strategy: pagination` fans out one partition per page.
+
+    Mirrors 0.x `_plan_pagination_partitions`: page/offset pagination with
+    a positive `page_size` and at least one `total_pages_*` /
+    `total_records_*` hint the generated probe can resolve a page count
+    from. Any other shape keeps the sequential loop and generates no probe
+    code at all.
+    """
+    pagination = stream.pagination
+    return (
+        stream.partition.strategy == "pagination"
+        and pagination.type in ("page", "offset")
+        and bool(pagination.page_size)
+        and any(
+            (
+                pagination.total_pages_path,
+                pagination.total_pages_header,
+                pagination.total_records_path,
+                pagination.total_records_header,
+            )
+        )
+    )
+
+
 def _resolved(stream, options):
     """Resolve templates and curly-brace path placeholders at generation time.
 
@@ -567,6 +613,11 @@ def _context(config: RestSourceConfig, *, for_bundle: bool = False) -> Dict[str,
     offset_param = stream.pagination.offset_param or "offset"
     page_param = stream.pagination.page_param or "page"
     scope = " ".join(auth.scope)
+    base_url = config.base_url.rstrip("/")
+    incremental = stream.incremental
+    state_path, state_remote = _resolve_state_path(config)
+    state_key = incremental.state_key or f"{stream.name}@{base_url}"
+    page_partitions = _page_partitions(stream)
 
     def _auth_secret_rhs(auth_type: str) -> Tuple[str, str, bool]:
         """RHS for one auth secret slot: `_dbx_secret(...)`, `_uc_secret(...)`,
@@ -702,8 +753,8 @@ def _context(config: RestSourceConfig, *, for_bundle: bool = False) -> Dict[str,
         "oauth_extra_items": [
             (_py_literal(k), repr(v)) for k, v in auth.extra_params.items()
         ],
-        "base_url": config.base_url.rstrip("/"),
-        "base_url_repr": _py_literal(config.base_url.rstrip("/")),
+        "base_url": base_url,
+        "base_url_repr": _py_literal(base_url),
         "path": path,
         "path_repr": _py_literal(path),
         "params_repr": _py_literal(params),
@@ -729,7 +780,6 @@ def _context(config: RestSourceConfig, *, for_bundle: bool = False) -> Dict[str,
         "stream_name": stream.name,
         "stream_name_repr": _py_literal(stream.name),
         "stream_name_doc": _doc_escape(stream.name),
-        "state_path_repr": _py_literal(f"{stream.name}_state.json"),
         "func_name": _identifier(stream.name),
         # Databricks requires unquoted SQL identifiers for dp table names.
         "table_name_repr": _py_literal(_identifier(stream.name)),
@@ -758,6 +808,12 @@ def _context(config: RestSourceConfig, *, for_bundle: bool = False) -> Dict[str,
         "total_pages_path": list(stream.pagination.total_pages_path) or None,
         "total_pages_header": stream.pagination.total_pages_header,
         "total_pages_header_repr": _py_literal(stream.pagination.total_pages_header),
+        "total_records_path": list(stream.pagination.total_records_path) or None,
+        "total_records_header": stream.pagination.total_records_header,
+        "total_records_header_repr": _py_literal(
+            stream.pagination.total_records_header
+        ),
+        "page_partitions": page_partitions,
         "cursor_param": stream.pagination.cursor_param or "cursor",
         "cursor_param_repr": _py_literal(stream.pagination.cursor_param or "cursor"),
         "cursor_path": list(stream.pagination.cursor_path) or None,
@@ -765,11 +821,16 @@ def _context(config: RestSourceConfig, *, for_bundle: bool = False) -> Dict[str,
         "cursor_header_repr": _py_literal(stream.pagination.cursor_header),
         "next_url_path": list(stream.pagination.next_url_path) or None,
         "initial_cursor_repr": repr(stream.pagination.initial_cursor),
-        "incremental_mode": stream.incremental.mode,
-        "cursor_param_inc": stream.incremental.cursor_param,
-        "cursor_param_inc_repr": _py_literal(stream.incremental.cursor_param),
-        "cursor_field": stream.incremental.cursor_field,
-        "cursor_field_repr": _py_literal(stream.incremental.cursor_field),
+        "incremental": incremental.enabled,
+        "incremental_mode_repr": _py_literal(incremental.mode),
+        "cursor_param_inc_repr": _py_literal(incremental.cursor_param),
+        "cursor_field_repr": _py_literal(incremental.cursor_field),
+        "cursor_field_dotted": "." in (incremental.cursor_field or ""),
+        "state_path": state_path,
+        "state_path_repr": _py_literal(state_path),
+        "state_remote": state_remote,
+        "state_key_repr": _py_literal(state_key),
+        "start_value_repr": _py_literal(incremental.start_value),
         "windows_repr": _py_literal(windows) if windows is not None else None,
         "has_windows": bool(windows),
         "partition_strategy": partition_strategy,
@@ -809,9 +870,9 @@ def validate_dp_wiring(config: RestSourceConfig) -> None:
         and not stream.pagination.page_size
     ):
         raise CodegenError("streaming with offset pagination requires page_size")
-    if stream.streaming and stream.incremental.mode:
+    if stream.streaming and stream.incremental.enabled:
         raise CodegenError("streaming does not support incremental state")
-    if stream.streaming and _static_windows(config):
+    if stream.streaming and stream.partition.strategy != "none":
         raise CodegenError("streaming does not support partition strategies")
 
 

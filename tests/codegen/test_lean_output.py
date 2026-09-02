@@ -172,6 +172,47 @@ SWEEP_CONFIGS = {
         ),
         schema="id INT, updated STRING",
     ),
+    "incremental_remote_state": make_config(
+        base_url="https://x",
+        incremental=IncrementalConfig(
+            mode="cursor",
+            cursor_param="since",
+            cursor_field="meta.updated",
+            state_path="s3://team/state/posts.json",
+            start_value="2024-01-01T00:00:00Z",
+            state_key="posts-prod",
+        ),
+    ),
+    "pagination_fanout": make_config(
+        base_url="https://x",
+        pagination=PaginationConfig(
+            type="page",
+            page_param="page",
+            limit_param="per_page",
+            page_size=100,
+            total_pages_path=("meta", "pages"),
+            total_pages_header="X-Pages",
+            total_records_path=("meta", "total"),
+            total_records_header="X-Total",
+        ),
+        partition=PartitionConfig(strategy="pagination"),
+        schema="id BIGINT",
+    ),
+    "pagination_fanout_offset_incremental": make_config(
+        base_url="https://x",
+        pagination=PaginationConfig(
+            type="offset",
+            offset_param="offset",
+            limit_param="limit",
+            page_size=50,
+            start_offset=100,
+            total_records_header="X-Total",
+        ),
+        partition=PartitionConfig(strategy="pagination"),
+        incremental=IncrementalConfig(
+            mode="cursor", cursor_param="since", cursor_field="updated"
+        ),
+    ),
     "streaming": make_config(
         base_url="https://x",
         streaming=True,

@@ -4,7 +4,7 @@ from typing import Any, Iterator
 
 {% if streaming %}
 from pyspark.sql.datasource import DataSource, SimpleDataSourceStreamReader
-{% elif has_windows %}
+{% elif has_windows or page_partitions %}
 from pyspark.sql.datasource import DataSource, DataSourceReader, InputPartition
 {% else %}
 from pyspark.sql.datasource import DataSource, DataSourceReader
@@ -126,6 +126,44 @@ class _Reader(DataSourceReader):
         _apply_secret_options(self._secret_options)
 {% endif %}
         records = fetch_records(**WINDOWS[partition.value])
+{% elif page_partitions and incremental %}
+    def partitions(self) -> list[InputPartition]:
+{% if bundle_secret_slots %}
+        _apply_secret_options(self._secret_options)
+{% endif %}
+        state_cursor = _read_state()
+        total = _probe_total_pages(state_cursor)
+        if total is None or total <= 1:
+            return [InputPartition((None, state_cursor))]
+        return [InputPartition((index, state_cursor)) for index in range(total)]
+
+    def read(self, partition) -> Iterator[tuple]:
+{% if bundle_secret_slots %}
+        _apply_secret_options(self._secret_options)
+{% endif %}
+        page_index, state_cursor = partition.value
+        if page_index is None:
+            records = fetch_records()
+        else:
+            records = fetch_page(page_index, state_cursor)
+{% elif page_partitions %}
+    def partitions(self) -> list[InputPartition]:
+{% if bundle_secret_slots %}
+        _apply_secret_options(self._secret_options)
+{% endif %}
+        total = _probe_total_pages()
+        if total is None or total <= 1:
+            return [InputPartition(None)]
+        return [InputPartition(index) for index in range(total)]
+
+    def read(self, partition) -> Iterator[tuple]:
+{% if bundle_secret_slots %}
+        _apply_secret_options(self._secret_options)
+{% endif %}
+        if partition.value is None:
+            records = fetch_records()
+        else:
+            records = fetch_page(partition.value)
 {% else %}
     def read(self, partition) -> Iterator[tuple]:
 {% if bundle_secret_slots %}
@@ -133,12 +171,12 @@ class _Reader(DataSourceReader):
 {% endif %}
         records = fetch_records()
 {% endif %}
-{% if incremental_mode %}
+{% if incremental %}
         cursor = None
 {% endif %}
         for record in records:
-{% if incremental_mode %}
-            value = record.get({{ cursor_field_repr }})
+{% if incremental %}
+            value = _cursor_of(record)
             if value is not None and (cursor is None or value > cursor):
                 cursor = value
 {% endif %}
@@ -147,8 +185,9 @@ class _Reader(DataSourceReader):
 {% else %}
             yield tuple(_cell(record.get(column)) for column in self._columns)
 {% endif %}
-{% if incremental_mode %}
-        _write_state(cursor)
+{% if incremental %}
+        if cursor is not None:
+            _write_state(cursor)
 {% endif %}
 
 

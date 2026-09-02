@@ -47,6 +47,31 @@ CASES = {
         partition=PartitionConfig(strategy="endpoints", endpoints=("/a", "/b")),
         schema="id BIGINT, updated STRING",
     ),
+    "incremental_remote_state": make_config(
+        base_url="https://api.example.com",
+        name="issues",
+        path="/issues",
+        incremental=IncrementalConfig(
+            mode="updated_at",
+            cursor_param="since",
+            cursor_field="updated_at",
+            state_path="s3://team-bucket/state/issues.json",
+            start_value="2024-01-01T00:00:00Z",
+        ),
+        schema="id BIGINT, updated_at STRING",
+    ),
+    "pagination_fanout_page_header": make_config(
+        base_url="https://api.example.com",
+        pagination=PaginationConfig(
+            type="page",
+            page_param="page",
+            limit_param="per_page",
+            page_size=100,
+            total_pages_header="X-Total-Pages",
+        ),
+        partition=PartitionConfig(strategy="pagination"),
+        schema="id BIGINT",
+    ),
     "streaming_page": make_config(
         base_url="https://api.example.com",
         streaming=True,

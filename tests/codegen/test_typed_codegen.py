@@ -102,9 +102,17 @@ def test_incremental_state_helpers_typed():
     assert_hygiene(script)
     ast.parse(script)
     assert "STATE_PATH: str =" in script
-    assert "def _read_state() -> dict[str, Any]:" in script
-    assert "def _write_state(cursor: Any) -> None:" in script
-    assert "LAST_CURSOR: dict[str, Any] =" in script
+    assert "STATE_KEY: str =" in script
+    assert "START_VALUE: str | None =" in script
+    assert "CURSOR_PARAM: str =" in script
+    assert "CURSOR_FIELD: str =" in script
+    assert "def _load_state() -> dict[str, Any]:" in script
+    assert "def _save_state(data: str) -> None:" in script
+    assert "def _stored_cursor(payload: dict[str, Any]) -> str | None:" in script
+    assert "def _read_state() -> str | None:" in script
+    assert "def _write_state(value: str) -> None:" in script
+    assert "def _cursor_of(record: dict[str, Any]) -> str | None:" in script
+    assert "LAST_CURSOR" not in script
 
 
 def test_oauth2_get_token_typed():

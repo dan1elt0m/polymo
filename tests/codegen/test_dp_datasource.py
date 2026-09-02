@@ -3,7 +3,7 @@ from __future__ import annotations
 import ast
 
 from polymo.codegen import generate
-from polymo.config import IncrementalConfig, PartitionConfig
+from polymo.config import IncrementalConfig, PaginationConfig, PartitionConfig
 from tests.codegen.helpers import assert_hygiene, make_config
 
 # Batch @dp.table output must ingest through an inline PySpark custom Data
@@ -78,11 +78,34 @@ def test_incremental_state_written_inside_read():
     reader_section = script.split("class _Reader(DataSourceReader):", 1)[1]
     read_body, _, rest = reader_section.partition("\n\ndef _cell(value: Any) -> Any:")
     assert "def read(self, partition) -> Iterator[tuple]:" in read_body
-    assert 'record.get("updated")' in read_body
-    assert "_write_state(cursor)" in read_body
+    assert "value = _cursor_of(record)" in read_body
+    assert "if cursor is not None:\n            _write_state(cursor)" in read_body
     # the write must be inside read()/the class body, not left dangling in
     # module scope after it
     assert not rest.lstrip().startswith("_write_state")
+
+
+def test_pagination_fanout_batch_partitions_over_pages():
+    config = make_config(
+        base_url="https://x",
+        pagination=PaginationConfig(
+            type="page", page_param="page", page_size=50, total_pages_header="X-Pages"
+        ),
+        partition=PartitionConfig(strategy="pagination"),
+        schema="id BIGINT",
+    )
+    script = generate(config)
+    ast.parse(script)
+    assert_hygiene(script)
+    assert "InputPartition" in script
+    reader_section = script.split("class _Reader(DataSourceReader):", 1)[1]
+    assert "def partitions(self) -> list[InputPartition]:" in reader_section
+    assert "total = _probe_total_pages()" in reader_section
+    assert "return [InputPartition(None)]" in reader_section
+    assert "InputPartition(index) for index in range(total)" in reader_section
+    assert "records = fetch_page(partition.value)" in reader_section
+    assert "records = fetch_records()" in reader_section
+    assert "WINDOWS" not in script
 
 
 def test_incremental_windowed_state_written_inside_read():

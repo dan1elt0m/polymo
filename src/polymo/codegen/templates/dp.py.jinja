@@ -53,7 +53,7 @@ spark.dataSource.register(RestStreamSource)
 def {{ func_name }}():
     return spark.readStream.format("{{ func_name }}_stream").load()
 {% else %}
-{% if has_windows %}
+{% if has_windows or page_partitions %}
 from pyspark.sql.datasource import DataSource, DataSourceReader, InputPartition  # noqa: E402
 {% else %}
 from pyspark.sql.datasource import DataSource, DataSourceReader  # noqa: E402
@@ -83,16 +83,42 @@ class _Reader(DataSourceReader):
 
     def read(self, partition) -> Iterator[tuple]:
         records = fetch_records(**WINDOWS[partition.value])
+{% elif page_partitions and incremental %}
+    def partitions(self) -> list[InputPartition]:
+        state_cursor = _read_state()
+        total = _probe_total_pages(state_cursor)
+        if total is None or total <= 1:
+            return [InputPartition((None, state_cursor))]
+        return [InputPartition((index, state_cursor)) for index in range(total)]
+
+    def read(self, partition) -> Iterator[tuple]:
+        page_index, state_cursor = partition.value
+        if page_index is None:
+            records = fetch_records()
+        else:
+            records = fetch_page(page_index, state_cursor)
+{% elif page_partitions %}
+    def partitions(self) -> list[InputPartition]:
+        total = _probe_total_pages()
+        if total is None or total <= 1:
+            return [InputPartition(None)]
+        return [InputPartition(index) for index in range(total)]
+
+    def read(self, partition) -> Iterator[tuple]:
+        if partition.value is None:
+            records = fetch_records()
+        else:
+            records = fetch_page(partition.value)
 {% else %}
     def read(self, partition) -> Iterator[tuple]:
         records = fetch_records()
 {% endif %}
-{% if incremental_mode %}
+{% if incremental %}
         cursor = None
 {% endif %}
         for record in records:
-{% if incremental_mode %}
-            value = record.get({{ cursor_field_repr }})
+{% if incremental %}
+            value = _cursor_of(record)
             if value is not None and (cursor is None or value > cursor):
                 cursor = value
 {% endif %}
@@ -101,8 +127,9 @@ class _Reader(DataSourceReader):
 {% else %}
             yield tuple(_cell(record.get(column)) for column in self._columns)
 {% endif %}
-{% if incremental_mode %}
-        _write_state(cursor)
+{% if incremental %}
+        if cursor is not None:
+            _write_state(cursor)
 {% endif %}
 
 
