@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-    <em>Turn any REST API into a standalone Lakeflow Declarative Pipelines connector — no runtime, just generated code.</em>
+    <em>Turn any REST API into a standalone Lakeflow Declarative Pipeline, just generated code.</em>
 </p>
 
 <p align="center">
@@ -14,11 +14,12 @@
 
 # Welcome to Polymo
 
-Polymo is a dev-time tool. You describe a REST API in the [Builder UI](docs/builder-ui.md), preview real responses, and export a standalone [Lakeflow Declarative Pipelines](https://docs.databricks.com/aws/en/dlt/) connector. The output is plain, typed Python that only needs `requests`, the standard library, and `pyspark` — nothing is imported from `polymo`, and there is no config file to load at runtime. The generated code is yours: edit it, version it, review it like any other code.
+Setting up API ingestion in Databricks Lakeflow Declarative Pipelines is tricky, because it involves classes and requires knowledge of inner working of declrative pipelines. Polymo is a tool that helps to define the pipeline from a [Builder UI](docs/builder-ui.md), it allows you to preview real responses locally, and export a standalone [Lakeflow Declarative Pipelines](https://docs.databricks.com/aws/en/dlt/) pipeline. `polymo` is never a dependency of the scripts it generates.
+The output is plain Python that only needs `requests`, the standard library, and `pyspark`. Nothing is imported from `polymo`, and there is no config file to load at runtime. The generated code is yours: edit it, version it, review it like any other code.
 
 ## What the builder generates
 
-Pointing the builder at `https://jsonplaceholder.typicode.com/posts` produces a single file. Elided here, the real script also contains the retry/backoff and response-normalization helpers, and there are no comments to strip:
+Pointing the builder at `https://jsonplaceholder.typicode.com/posts` produces a single file. Shown here, the real script also contains the retry/backoff and response-normalization helpers.
 
 ```python
 """Lakeflow Declarative Pipelines connector for posts."""
@@ -57,25 +58,25 @@ def posts():
     return spark.read.format("posts_source").load()
 ```
 
-Every field you fill in — pagination, incremental sync, partitioning, filter pushdown, error handling, headers, query parameters, an explicit schema, XML responses, streaming tables — is baked in as a constant or a small block of specialized code. Options you don't use produce no code at all.
+Every field you fill in: pagination, incremental sync, partitioning, filter pushdown, error handling, headers, query parameters, an explicit schema, XML responses, streaming tables is baked in as a constant or a small block of specialized code. Options you don't use produce no code at all.
 
 <p align="center">
   <a href="docs/ui.png">
-    <img src="docs/ui.png" alt="Polymo Builder UI - connector preview screen" width="860">
+    <img src="docs/ui.png" alt="Polymo Builder UI connector preview screen" width="860">
   </a>
 </p>
 
 ## How does it work?
 
-Open the Builder, describe your API (base URL and path are the only required fields), and press **Preview** to see the DataFrame, the raw records, and the raw API responses side by side. The config panel and the preview share a resizable split; collapse the panel or use focus mode when you want the whole width for the data. When you're happy, switch to the **Generated Code** tab and download the script.
+Open the Builder, describe your API (base URL and path are the only required fields), and press **Preview** to see the DataFrame, the raw records, and the raw API responses side by side. When you're happy, switch to the **Generated Code** tab and download the script or bootstrap a Databricks project.
 
-Ready to run it on Databricks? The **Deploy** tab walks through it in order — Profile → Target → Bootstrap → Deploy → Run:
+Ready to run it on Databricks? The **Deploy** tab walks through it: Select Profile → Target → Bootstrap → Deploy → Run:
 
 1. Pick a Databricks CLI profile, then a catalog and schema (or type a schema name).
 2. **Bootstrap** writes a complete [Databricks Asset Bundle](https://docs.databricks.com/dev-tools/bundles/) project: the connector as an installable package under `src/`, the pipeline under `pipelines/`, and a `databricks.yml` that builds the wheel and attaches it to a serverless pipeline.
 3. **Deploy** and **Run** drive `databricks bundle deploy` and `databricks bundle run` without leaving the Builder, with the CLI output docked below.
 
-Secrets never land in generated code. Each auth field (bearer token, API key, OAuth2 client secret) and any `{{ options.<name> }}` placeholder can reference a Databricks secret scope or a Unity Catalog service credential backed by Azure Key Vault; the pipeline resolves the value on the driver and passes it to the reader, and the Builder redacts it from every preview. Requires the [Databricks CLI](https://docs.databricks.com/dev-tools/cli/) and a `~/.databrickscfg` profile — see [Deploy to Databricks](docs/builder-ui.md#deploy-to-databricks) for the full walkthrough.
+Secrets never land in generated code. Each auth field (bearer token, API key, OAuth2 client secret) and any `{{ options.<name> }}` placeholder can reference a Databricks secret scope or a Unity Catalog service credential backed by Azure Key Vault; the pipeline resolves the value on the driver and passes it to the reader, and the Builder redacts it from every preview. Requires the [Databricks CLI](https://docs.databricks.com/dev-tools/cli/) and a `~/.databrickscfg` profile, see [Deploy to Databricks](docs/builder-ui.md#deploy-to-databricks) for the full walkthrough.
 
 See the [Connector options reference](docs/config.md) for what every Builder field generates, and the [Builder UI walkthrough](docs/builder-ui.md) for a guided tour.
 
@@ -85,9 +86,6 @@ See the [Connector options reference](docs/config.md) for what every Builder fie
 pip install polymo
 ```
 
-This installs everything you need, Builder UI included — FastAPI, Uvicorn, PySpark, PyArrow, and requests all come along.
-
-`polymo` is never a dependency of the scripts it generates.
 
 ## Launch the builder UI
 
@@ -118,7 +116,7 @@ The YAML runtime (`spark.read.format("polymo")`, `PolymoConfig`, `polymo smoke`)
 Read the docs [here](https://dan1elt0m.github.io/polymo/).
 
 Other material:
-- Step by step example: [medium blogpost](https://medium.com/@d.e.tom89/turn-any-rest-api-into-spark-dataframes-in-minutes-with-polymo-028a48113eb1) (written for the 0.x YAML runtime — see the [migration guide](docs/migration-1.0.md) for what changed)
+- Step by step example: [medium blogpost](https://medium.com/@d.e.tom89/turn-any-rest-api-into-spark-dataframes-in-minutes-with-polymo-028a48113eb1) (written for the 0.x YAML runtime, see the [migration guide](docs/migration-1.0.md) for what changed)
 
 ## Contributing
 
