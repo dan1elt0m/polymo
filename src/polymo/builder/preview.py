@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import tempfile
+from dataclasses import replace
 from itertools import islice
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -53,6 +56,35 @@ def _substitute_secret_refs(code: str, token: Optional[str]) -> str:
     return _DBX_SECRET_ASSIGNMENT_RE.sub(_replace, code)
 
 
+def _with_preview_state_path(
+    config: RestSourceConfig, state_dir: str
+) -> RestSourceConfig:
+    """Point an incremental config's state file at a throwaway preview location.
+
+    The generated `fetch_records()` seeds its cursor from `STATE_PATH` (or
+    `START_VALUE` when nothing is stored). A preview must never read the
+    user's real state — a remote `s3://...` path would need fsspec on the
+    builder machine, and a local one would make the preview depend on
+    whatever an earlier run left behind — so the config is regenerated
+    against a file under the preview's temp dir instead. The file is never
+    created: only `_Reader.read()` writes state, and the preview drives
+    `fetch_records()` directly. `START_VALUE` still applies, so the preview
+    shows exactly what a first run would fetch. Done on the config (not by
+    rewriting the `STATE_PATH` line) because the local-vs-fsspec branch is
+    chosen at generation time from the path's scheme.
+    """
+    incremental = config.stream.incremental
+    if not incremental.enabled:
+        return config
+    state_path = os.path.join(state_dir, "state.json")
+    return replace(
+        config,
+        stream=replace(
+            config.stream, incremental=replace(incremental, state_path=state_path)
+        ),
+    )
+
+
 def run_preview(
     config: RestSourceConfig, *, token: Optional[str], limit: int
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
@@ -66,6 +98,15 @@ def run_preview(
     records/raw_pages collected before the failure are still returned so the
     "Raw API" tab can show what happened.
     """
+    with tempfile.TemporaryDirectory(prefix="preview-state-") as state_dir:
+        return _run_preview(
+            _with_preview_state_path(config, state_dir), token=token, limit=limit
+        )
+
+
+def _run_preview(
+    config: RestSourceConfig, *, token: Optional[str], limit: int
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
     code = generate_core(config)
     code = _substitute_secret_refs(code, token)
     namespace: Dict[str, Any] = {}

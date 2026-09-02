@@ -18,6 +18,10 @@ const MANAGED_PARTITION_OPTION_KEYS = new Set([
   "partition_endpoints",
 ]);
 
+// Legacy 0.x reader options that are now Incremental-section fields
+// (`stream.incremental.*`); an older saved connector that still carries them
+// as reader options gets them migrated into the form once. The 0.x
+// `incremental_memory_state` option has no 1.x equivalent and is dropped.
 const SPECIAL_INCREMENTAL_KEYS = [
   "incremental_state_path",
   "incremental_start_value",
@@ -43,9 +47,9 @@ export const ReaderOptionsSection: React.FC<ReaderOptionsSectionProps> = ({
   const summary = React.useMemo(() => {
     const manual = Object.keys(readerOptions).length;
     const total = Object.keys(runtimeOptions).length;
-    const incremental = Math.max(0, total - manual);
+    const derived = Math.max(0, total - manual);
     if (!total) return "none";
-    return `${manual} manual${incremental > 0 ? ` · ${incremental} incremental` : ""}`;
+    return `${manual} manual${derived > 0 ? ` · ${derived} derived` : ""}`;
   }, [readerOptions, runtimeOptions]);
 
   React.useEffect(() => {
@@ -89,9 +93,6 @@ export const ReaderOptionsSection: React.FC<ReaderOptionsSectionProps> = ({
             patch.incrementalStartValue = String(raw ?? "");
           } else if (key === "incremental_state_key") {
             patch.incrementalStateKey = String(raw ?? "");
-          } else if (key === "incremental_memory_state") {
-            const normalized = String(raw ?? "").trim().toLowerCase();
-            patch.incrementalMemoryEnabled = normalized !== "false";
           }
         }
       });
