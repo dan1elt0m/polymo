@@ -1,9 +1,8 @@
 """Tombstone tests for the public API as polymo sheds its runtime surface.
 
-This file grew incrementally across the Phase 3 tasks (see
-docs/superpowers/plans/2026-08-28-codegen-phase3.md): Task 2 removed the
-Spark custom data source, Task 3 removed RestClient, Task 4 removed the YAML
-+ pydantic config API. Task 4 also asserts the final `__all__`.
+The 1.0 pivot removed, in order, the Spark custom data source, RestClient,
+and the YAML + pydantic config API; each removal left a tombstone test here,
+and the final `__all__` is asserted at the end.
 """
 
 import subprocess

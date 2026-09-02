@@ -32,3 +32,7 @@ builder-ui/test-results/
 
 blogs/
 *.tsbuildinfo
+
+# Internal design notes, agent reports and screenshots — never published
+.superpowers/
+docs/superpowers/
