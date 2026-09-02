@@ -1,10 +1,11 @@
 import React from "react";
-import { useAtomValue } from "jotai";
+import { useAtom } from "jotai";
 import type { ConfigFormState } from "../../../types";
 import { InfoTooltip } from "../../InfoTooltip";
 import { databricksProfileAtom } from "../../../atoms";
 import {
   ApiError,
+  listDatabricksProfiles,
   listDatabricksSecretKeys,
   listDatabricksSecretScopes,
   listDatabricksServiceCredentials,
@@ -17,15 +18,19 @@ export interface AuthenticationSectionProps {
 }
 
 const AUTH_TOGGLE_ID = "auth-section";
-// Sentinel <option> value that swaps the credential field from a select
-// (list of the profile's service credentials) to a free-text input — the
-// deploy identity may not be able to list every credential (or one may not
-// exist yet), so the user needs a way to name one, mirroring the Deploy
-// tab's "Custom schema…" affordance.
-const CUSTOM_CREDENTIAL_VALUE = "__custom__";
+
+// Shown under every preview-secret input. Saved connectors never persist
+// the preview secret (it's session-only), so it has to be re-entered after
+// a reload or after resuming/loading a connector.
+const SECRET_NOT_SAVED_HINT =
+  "Not saved with the connector — you'll need to re-enter this after a reload.";
 
 function describeSecretPickerError(error: unknown): string {
-  if (error instanceof ApiError && error.status === 501) {
+  // 501/502 (feature disabled on the backend, or the Databricks CLI call
+  // itself failing) are the two workspace-lookup failure modes surfaced by
+  // /api/databricks/*. Both render inline next to the "Load from workspace"
+  // action; they never disable the free-text inputs.
+  if (error instanceof ApiError && (error.status === 501 || error.status === 502)) {
     return error.message;
   }
   return error instanceof Error ? error.message : String(error ?? "Failed to load");
@@ -49,28 +54,17 @@ export const AuthenticationSection: React.FC<AuthenticationSectionProps> = ({
     }
   }, [state.authType]);
 
-  const profile = useAtomValue(databricksProfileAtom);
-
-  // Secret scopes/keys and service credentials are per-workspace. If the
-  // shared Databricks profile changes (picked in the Deploy tab), a
-  // previously-selected scope/key/credential almost certainly doesn't
-  // exist in the new workspace — clear them all so a stale reference from
-  // the old workspace never ships silently. Cleared unconditionally (not
-  // just in the mode that uses them) since the fields should already be
-  // empty in the other modes, so this is a no-op there; the
-  // `previousProfileRef` skip avoids wiping a value just-loaded from a
-  // saved connector on first mount, when `profile` hasn't actually
-  // "changed" from the user's perspective.
-  const previousProfileRef = React.useRef(profile);
-  React.useEffect(() => {
-    if (previousProfileRef.current !== profile) {
-      if (state.authSecretScope || state.authSecretKey || state.authUcCredential) {
-        onUpdateState({ authSecretScope: "", authSecretKey: "", authUcCredential: "" });
-      }
-      previousProfileRef.current = profile;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile]);
+  // Shared with the Deploy tab's profile picker, but here it's purely
+  // optional: it only powers the "Load from workspace" suggestion buttons
+  // below. Every credential/vault/secret/scope/key field is a plain text
+  // input regardless of whether a profile is set, so nothing in this
+  // section blocks on picking one — that was the bug (the UC credential
+  // picker used to hang whenever no profile had been chosen in the Deploy
+  // tab, since it only offered a <select> with no way to type a value).
+  const [profile, setProfile] = useAtom(databricksProfileAtom);
+  const [profiles, setProfiles] = React.useState<string[]>([]);
+  const [profilesLoading, setProfilesLoading] = React.useState(false);
+  const [profilesError, setProfilesError] = React.useState<string | null>(null);
 
   const [scopes, setScopes] = React.useState<string[]>([]);
   const [scopesLoading, setScopesLoading] = React.useState(false);
@@ -82,104 +76,70 @@ export const AuthenticationSection: React.FC<AuthenticationSectionProps> = ({
   const [credentials, setCredentials] = React.useState<string[]>([]);
   const [credentialsLoading, setCredentialsLoading] = React.useState(false);
   const [credentialsError, setCredentialsError] = React.useState<string | null>(null);
-  // Starts in "custom" mode when a credential is already set (e.g. loaded
-  // from a saved connector) so its value stays visible even before/without
-  // the profile's credential list loading — mirrors the Deploy tab's
-  // schema field, which has the same "may already hold a value the list
-  // doesn't have yet" situation.
-  const [credentialMode, setCredentialMode] = React.useState<"select" | "custom">(() =>
-    state.authUcCredential ? "custom" : "select",
-  );
-
-  // Keep the mode in sync when a saved connector hydrates form state
-  // asynchronously after mount: a credential value the fetched list does
-  // not contain must render in the custom input, not as an unselected
-  // <select> silently holding a value.
-  React.useEffect(() => {
-    if (
-      state.authUcCredential &&
-      credentialMode === "select" &&
-      !credentialsLoading &&
-      !credentials.includes(state.authUcCredential)
-    ) {
-      setCredentialMode("custom");
-    }
-  }, [state.authUcCredential, credentialMode, credentials, credentialsLoading]);
 
   const secretScopeActive = state.authSecretMode === "secret_scope";
   const ucSecretActive = state.authSecretMode === "uc_secret";
 
+  // Lazily fetch the profile list the first time a workspace-backed secret
+  // source is opened, so the inline profile picker below has options
+  // without requiring a trip to the Deploy tab. This is a background
+  // convenience fetch only — it never gates the text inputs.
   React.useEffect(() => {
-    if (!secretScopeActive || !profile) {
-      setScopes([]);
-      setScopesError(null);
-      return;
-    }
+    if (!secretScopeActive && !ucSecretActive) return;
+    if (profilesLoading || profiles.length > 0) return;
     let cancelled = false;
+    setProfilesLoading(true);
+    setProfilesError(null);
+    listDatabricksProfiles()
+      .then((res) => {
+        if (!cancelled) setProfiles(res.profiles);
+      })
+      .catch((err) => {
+        if (!cancelled) setProfilesError(describeSecretPickerError(err));
+      })
+      .finally(() => {
+        if (!cancelled) setProfilesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [secretScopeActive, ucSecretActive]);
+
+  // The three loaders below are explicit, user-triggered ("Load from
+  // workspace") fetches rather than effects that auto-run on profile
+  // change: with no profile selected they simply stay idle (button
+  // disabled) instead of anything hanging, and a 501/502 from the backend
+  // surfaces as inline text next to the button without touching the input.
+  const loadScopes = React.useCallback(() => {
+    if (!profile) return;
     setScopesLoading(true);
     setScopesError(null);
     listDatabricksSecretScopes(profile)
-      .then((res) => {
-        if (!cancelled) setScopes(res.secret_scopes);
-      })
-      .catch((err) => {
-        if (!cancelled) setScopesError(describeSecretPickerError(err));
-      })
-      .finally(() => {
-        if (!cancelled) setScopesLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [secretScopeActive, profile]);
+      .then((res) => setScopes(res.secret_scopes))
+      .catch((err) => setScopesError(describeSecretPickerError(err)))
+      .finally(() => setScopesLoading(false));
+  }, [profile]);
 
-  React.useEffect(() => {
-    if (!secretScopeActive || !profile || !state.authSecretScope) {
-      setKeys([]);
-      setKeysError(null);
-      return;
-    }
-    let cancelled = false;
+  const loadKeys = React.useCallback(() => {
+    if (!profile || !state.authSecretScope) return;
     setKeysLoading(true);
     setKeysError(null);
     listDatabricksSecretKeys(state.authSecretScope, profile)
-      .then((res) => {
-        if (!cancelled) setKeys(res.secret_keys);
-      })
-      .catch((err) => {
-        if (!cancelled) setKeysError(describeSecretPickerError(err));
-      })
-      .finally(() => {
-        if (!cancelled) setKeysLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [secretScopeActive, profile, state.authSecretScope]);
+      .then((res) => setKeys(res.secret_keys))
+      .catch((err) => setKeysError(describeSecretPickerError(err)))
+      .finally(() => setKeysLoading(false));
+  }, [profile, state.authSecretScope]);
 
-  React.useEffect(() => {
-    if (!ucSecretActive || !profile || credentialMode !== "select") {
-      setCredentials([]);
-      setCredentialsError(null);
-      return;
-    }
-    let cancelled = false;
+  const loadCredentials = React.useCallback(() => {
+    if (!profile) return;
     setCredentialsLoading(true);
     setCredentialsError(null);
     listDatabricksServiceCredentials(profile)
-      .then((res) => {
-        if (!cancelled) setCredentials(res.service_credentials);
-      })
-      .catch((err) => {
-        if (!cancelled) setCredentialsError(describeSecretPickerError(err));
-      })
-      .finally(() => {
-        if (!cancelled) setCredentialsLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [ucSecretActive, profile, credentialMode]);
+      .then((res) => setCredentials(res.service_credentials))
+      .catch((err) => setCredentialsError(describeSecretPickerError(err)))
+      .finally(() => setCredentialsLoading(false));
+  }, [profile]);
 
   const renderSecretSourcePicker = React.useCallback(
     () => (
@@ -224,112 +184,129 @@ export const AuthenticationSection: React.FC<AuthenticationSectionProps> = ({
           </button>
         </div>
 
-        {secretScopeActive && (
-          <div className="grid gap-3 md:grid-cols-2">
-            {!profile && (
-              <p className="text-xs text-warning md:col-span-2">
-                Pick a Databricks profile in the Deploy tab first to browse secret scopes and keys.
-              </p>
-            )}
-            <label className="flex flex-col gap-2">
-              <span className="text-xs font-medium text-slate-11 dark:text-drac-foreground/80">Secret scope</span>
+        {(secretScopeActive || ucSecretActive) && (
+          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border/60 bg-background/40 px-3 py-2.5 dark:border-drac-border/50">
+            <label className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium text-slate-11 dark:text-drac-foreground/80">
+                Databricks profile (optional)
+              </span>
               <select
-                className={SELECT_CLASS}
-                value={state.authSecretScope || ""}
-                disabled={!profile || scopesLoading}
-                onChange={(event) => onUpdateState({ authSecretScope: event.target.value, authSecretKey: "" })}
+                className={`${SELECT_CLASS} w-52`}
+                value={profile}
+                onChange={(event) => setProfile(event.target.value)}
               >
-                <option value="">{scopesLoading ? "Loading…" : "Select scope"}</option>
-                {scopes.map((scope) => (
-                  <option key={scope} value={scope}>
-                    {scope}
+                <option value="">{profilesLoading ? "Loading…" : "No profile selected"}</option>
+                {profiles.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
                   </option>
                 ))}
               </select>
-              {scopesError && <span className="text-xs text-error">{scopesError}</span>}
+            </label>
+            <p className="max-w-sm text-xs text-muted dark:text-drac-muted">
+              Only used to look up workspace suggestions below via "Load from workspace" — every
+              field here also accepts free text, so this can be left unset.
+            </p>
+            {profilesError && <span className="text-xs text-error">{profilesError}</span>}
+          </div>
+        )}
+
+        {secretScopeActive && (
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="flex flex-col gap-2">
+              <span className="text-xs font-medium text-slate-11 dark:text-drac-foreground/80">Secret scope</span>
+              <input
+                type="text"
+                list="auth-secret-scope-suggestions"
+                className={INPUT_CLASS}
+                placeholder="my-scope"
+                value={state.authSecretScope || ""}
+                onChange={(event) => onUpdateState({ authSecretScope: event.target.value })}
+              />
+              <datalist id="auth-secret-scope-suggestions">
+                {scopes.map((scope) => (
+                  <option key={scope} value={scope} />
+                ))}
+              </datalist>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="whitespace-nowrap text-xs text-blue-10 underline decoration-dotted disabled:cursor-not-allowed disabled:text-muted disabled:no-underline dark:text-drac-accent"
+                  onClick={loadScopes}
+                  disabled={!profile || scopesLoading}
+                >
+                  {scopesLoading ? "Loading…" : "Load from workspace"}
+                </button>
+                {scopesError && <span className="text-xs text-error">{scopesError}</span>}
+              </div>
             </label>
             <label className="flex flex-col gap-2">
               <span className="text-xs font-medium text-slate-11 dark:text-drac-foreground/80">Secret key</span>
-              <select
-                className={SELECT_CLASS}
+              <input
+                type="text"
+                list="auth-secret-key-suggestions"
+                className={INPUT_CLASS}
+                placeholder="api-token"
                 value={state.authSecretKey || ""}
-                disabled={!state.authSecretScope || keysLoading}
                 onChange={(event) => onUpdateState({ authSecretKey: event.target.value })}
-              >
-                <option value="">{keysLoading ? "Loading…" : "Select key"}</option>
+              />
+              <datalist id="auth-secret-key-suggestions">
                 {keys.map((key) => (
-                  <option key={key} value={key}>
-                    {key}
-                  </option>
+                  <option key={key} value={key} />
                 ))}
-              </select>
-              {keysError && <span className="text-xs text-error">{keysError}</span>}
+              </datalist>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="whitespace-nowrap text-xs text-blue-10 underline decoration-dotted disabled:cursor-not-allowed disabled:text-muted disabled:no-underline dark:text-drac-accent"
+                  onClick={loadKeys}
+                  disabled={!profile || !state.authSecretScope || keysLoading}
+                >
+                  {keysLoading ? "Loading…" : "Load from workspace"}
+                </button>
+                {keysError && <span className="text-xs text-error">{keysError}</span>}
+              </div>
             </label>
           </div>
         )}
 
         {ucSecretActive && (
           <div className="grid gap-3 md:grid-cols-2">
-            {!profile && (
-              <p className="text-xs text-warning md:col-span-2">
-                Pick a Databricks profile in the Deploy tab first to browse service credentials.
-              </p>
-            )}
             <label className="flex flex-col gap-2">
               <span className="text-xs font-medium text-slate-11 dark:text-drac-foreground/80">
                 UC service credential
               </span>
-              {credentialMode === "custom" ? (
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    className={`${INPUT_CLASS} flex-1`}
-                    placeholder="my-service-credential"
-                    value={state.authUcCredential || ""}
-                    onChange={(event) => onUpdateState({ authUcCredential: event.target.value })}
-                  />
-                  <button
-                    type="button"
-                    className="whitespace-nowrap text-xs text-muted underline dark:text-drac-muted"
-                    onClick={() => {
-                      setCredentialMode("select");
-                      onUpdateState({ authUcCredential: "" });
-                    }}
-                  >
-                    Back to list
-                  </button>
-                </div>
-              ) : (
-                <select
-                  className={SELECT_CLASS}
-                  value={state.authUcCredential || ""}
+              <input
+                type="text"
+                list="auth-uc-credential-suggestions"
+                className={INPUT_CLASS}
+                placeholder="my-service-credential"
+                value={state.authUcCredential || ""}
+                onChange={(event) => onUpdateState({ authUcCredential: event.target.value })}
+              />
+              <datalist id="auth-uc-credential-suggestions">
+                {credentials.map((credential) => (
+                  <option key={credential} value={credential} />
+                ))}
+              </datalist>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="whitespace-nowrap text-xs text-blue-10 underline decoration-dotted disabled:cursor-not-allowed disabled:text-muted disabled:no-underline dark:text-drac-accent"
+                  onClick={loadCredentials}
                   disabled={!profile || credentialsLoading}
-                  onChange={(event) => {
-                    if (event.target.value === CUSTOM_CREDENTIAL_VALUE) {
-                      setCredentialMode("custom");
-                      onUpdateState({ authUcCredential: "" });
-                    } else {
-                      onUpdateState({ authUcCredential: event.target.value });
-                    }
-                  }}
                 >
-                  <option value="">{credentialsLoading ? "Loading…" : "Select credential"}</option>
-                  {credentials.map((credential) => (
-                    <option key={credential} value={credential}>
-                      {credential}
-                    </option>
-                  ))}
-                  <option value={CUSTOM_CREDENTIAL_VALUE}>Custom credential name…</option>
-                </select>
-              )}
-              {credentialsError && <span className="text-xs text-error">{credentialsError}</span>}
+                  {credentialsLoading ? "Loading…" : "Load from workspace"}
+                </button>
+                {credentialsError && <span className="text-xs text-error">{credentialsError}</span>}
+              </div>
             </label>
             <label className="flex flex-col gap-2">
               <span className="text-xs font-medium text-slate-11 dark:text-drac-foreground/80">
                 Key Vault URL
               </span>
               <input
-                type="url"
+                type="text"
                 className={INPUT_CLASS}
                 placeholder="https://my-vault.vault.azure.net/"
                 value={state.authUcVaultUrl || ""}
@@ -353,20 +330,25 @@ export const AuthenticationSection: React.FC<AuthenticationSectionProps> = ({
     [
       secretScopeActive,
       ucSecretActive,
-      state.authSecretMode,
       profile,
+      setProfile,
+      profiles,
+      profilesLoading,
+      profilesError,
       scopes,
       scopesLoading,
       scopesError,
+      loadScopes,
       keys,
       keysLoading,
       keysError,
+      loadKeys,
       state.authSecretScope,
       state.authSecretKey,
       credentials,
       credentialsLoading,
       credentialsError,
-      credentialMode,
+      loadCredentials,
       state.authUcCredential,
       state.authUcVaultUrl,
       state.authUcSecretName,
@@ -515,6 +497,7 @@ export const AuthenticationSection: React.FC<AuthenticationSectionProps> = ({
                     value={state.authToken}
                     onChange={(event) => handleBearerTokenChange(event.target.value)}
                   />
+                  <span className="text-xs text-muted dark:text-drac-muted">{SECRET_NOT_SAVED_HINT}</span>
                 </label>
                 {renderSecretSourcePicker()}
               </>
@@ -574,6 +557,7 @@ export const AuthenticationSection: React.FC<AuthenticationSectionProps> = ({
                     value={state.authToken}
                     onChange={(event) => handleBearerTokenChange(event.target.value)}
                   />
+                  <span className="text-xs text-muted dark:text-drac-muted">{SECRET_NOT_SAVED_HINT}</span>
                 </label>
                 {renderSecretSourcePicker()}
               </div>
@@ -623,6 +607,7 @@ export const AuthenticationSection: React.FC<AuthenticationSectionProps> = ({
                     value={state.authToken}
                     onChange={(event) => handleBearerTokenChange(event.target.value)}
                   />
+                  <span className="text-xs text-muted dark:text-drac-muted">{SECRET_NOT_SAVED_HINT}</span>
                 </label>
                 {renderSecretSourcePicker()}
 
