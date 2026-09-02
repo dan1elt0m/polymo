@@ -166,7 +166,9 @@ export const runtimeOptionsAtom = atom((get) => {
   const formState = get(configFormStateAtom);
   const manualOptions = { ...get(readerOptionsAtom) };
 
-  // Remove special keys managed by the incremental form fields
+  // Legacy 0.x reader-option keys: the incremental ones now live in the
+  // config itself (`stream.incremental.state_path` etc.), so a stale entry
+  // from an older saved connector is dropped rather than forwarded.
   for (const key of INCREMENTAL_OPTION_KEYS) {
     if (key in manualOptions) {
       delete manualOptions[key];
@@ -177,25 +179,6 @@ export const runtimeOptionsAtom = atom((get) => {
     if (key in manualOptions) {
       delete manualOptions[key];
     }
-  }
-
-  const statePath = formState.incrementalStatePath.trim();
-  if (statePath) {
-    manualOptions['incremental_state_path'] = statePath;
-  }
-
-  const startValue = formState.incrementalStartValue.trim();
-  if (startValue) {
-    manualOptions['incremental_start_value'] = startValue;
-  }
-
-  const stateKey = formState.incrementalStateKey.trim();
-  if (stateKey) {
-    manualOptions['incremental_state_key'] = stateKey;
-  }
-
-  if (!formState.incrementalMemoryEnabled) {
-    manualOptions['incremental_memory_state'] = 'false';
   }
 
   if (formState.authType === 'oauth2') {

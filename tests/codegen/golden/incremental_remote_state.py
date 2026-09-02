@@ -1,4 +1,4 @@
-"""Lakeflow Declarative Pipelines connector for posts."""
+"""Lakeflow Declarative Pipelines connector for issues."""
 
 import json
 import os
@@ -9,25 +9,34 @@ from typing import Any, Iterator
 import requests
 
 BASE_URL: str = "https://api.example.com"
-PATH: str = "/posts"
+PATH: str = "/issues"
 PARAMS: dict[str, Any] = {}
 HEADERS: dict[str, str] = {}
 TIMEOUT: float = 30.0
 
-WINDOWS: list[dict[str, Any]] = [{"path": "/a"}, {"path": "/b"}]
-
-STATE_PATH: str = "posts_state.json"
-STATE_KEY: str = "posts@https://api.example.com"
-START_VALUE: str | None = None
+STATE_PATH: str = "s3://team-bucket/state/issues.json"
+STATE_KEY: str = "issues@https://api.example.com"
+START_VALUE: str | None = "2024-01-01T00:00:00Z"
 CURSOR_PARAM: str = "since"
-CURSOR_FIELD: str = "updated"
+CURSOR_FIELD: str = "updated_at"
+
+
+def _state_fs() -> tuple[Any, str]:
+    try:
+        import fsspec  # type: ignore[import]
+    except ImportError as exc:
+        raise RuntimeError(
+            "fsspec is required to use non-local incremental_state_path values"
+        ) from exc
+    return fsspec.core.url_to_fs(STATE_PATH)
 
 
 def _load_state() -> dict[str, Any]:
-    if not os.path.exists(STATE_PATH):
+    fs, path = _state_fs()
+    if not fs.exists(path):
         return {}
     try:
-        with open(STATE_PATH) as fh:
+        with fs.open(path, "r") as fh:
             payload = json.load(fh)
     except (OSError, ValueError):
         return {}
@@ -35,13 +44,12 @@ def _load_state() -> dict[str, Any]:
 
 
 def _save_state(data: str) -> None:
-    directory = os.path.dirname(STATE_PATH)
-    if directory:
-        os.makedirs(directory, exist_ok=True)
-    tmp_path = f"{STATE_PATH}.tmp"
-    with open(tmp_path, "w") as fh:
+    fs, path = _state_fs()
+    directory = os.path.dirname(path)
+    if directory and directory != "/":
+        fs.makedirs(directory, exist_ok=True)
+    with fs.open(path, "w") as fh:
         fh.write(data)
-    os.replace(tmp_path, STATE_PATH)
 
 
 def _stored_cursor(payload: dict[str, Any]) -> str | None:
@@ -73,7 +81,7 @@ def _write_state(value: str) -> None:
         "cursor_param": CURSOR_PARAM,
         "cursor_field": CURSOR_FIELD,
         "cursor_value": value,
-        "mode": "cursor",
+        "mode": "updated_at",
         "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
     _save_state(json.dumps(payload, indent=2, sort_keys=True))
@@ -83,21 +91,6 @@ def _cursor_of(record: dict[str, Any]) -> str | None:
     value = record.get(CURSOR_FIELD)
     return None if value is None else str(value)
 
-
-CLIENT_SECRET: str = "REPLACE_ME"
-TOKEN_URL: str = "https://api.example.com/token"
-
-
-def get_token() -> str:
-    """Fetch an OAuth2 access token (client credentials grant)."""
-    payload = {
-        "grant_type": "client_credentials",
-        "client_id": "cid",
-        "client_secret": CLIENT_SECRET,
-    }
-    response = requests.post(TOKEN_URL, data=payload, timeout=TIMEOUT)
-    response.raise_for_status()
-    return response.json()["access_token"]
 
 MAX_RETRIES: int = 5
 INITIAL_DELAY: float = 1.0
@@ -149,7 +142,6 @@ def fetch_records(extra_params: dict[str, Any] | None = None, path: str | None =
     url_path = path or PATH
     session = requests.Session()
     session.headers.update(HEADERS)
-    session.headers["Authorization"] = f"Bearer {get_token()}"
     params = dict(PARAMS)
     if extra_params:
         params.update(extra_params)
@@ -166,16 +158,16 @@ from pyspark.sql import SparkSession  # noqa: E402
 
 spark = SparkSession.getActiveSession()
 
-SCHEMA: str = "id BIGINT, updated STRING"
+SCHEMA: str = "id BIGINT, updated_at STRING"
 
 
-from pyspark.sql.datasource import DataSource, DataSourceReader, InputPartition  # noqa: E402
+from pyspark.sql.datasource import DataSource, DataSourceReader  # noqa: E402
 
 
 class RestSource(DataSource):
     @classmethod
     def name(cls) -> str:
-        return "posts_source"
+        return "issues_source"
 
     def schema(self) -> str:
         return SCHEMA
@@ -188,11 +180,8 @@ class _Reader(DataSourceReader):
     def __init__(self, schema: Any) -> None:
         self._columns: list[str] = [field.name for field in schema.fields]
 
-    def partitions(self) -> list[InputPartition]:
-        return [InputPartition(index) for index in range(len(WINDOWS))]
-
     def read(self, partition) -> Iterator[tuple]:
-        records = fetch_records(**WINDOWS[partition.value])
+        records = fetch_records()
         cursor = None
         for record in records:
             value = _cursor_of(record)
@@ -206,6 +195,6 @@ class _Reader(DataSourceReader):
 spark.dataSource.register(RestSource)
 
 
-@dp.table(name="posts")
-def posts():
-    return spark.read.format("posts_source").load()
+@dp.table(name="issues")
+def issues():
+    return spark.read.format("issues_source").load()

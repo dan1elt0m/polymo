@@ -14,6 +14,10 @@ resources:
       catalog: {{ catalog_repr }}
       schema: {{ schema_repr }}
       serverless: true
+{% if pushdown %}
+      configuration:
+        spark.sql.python.filterPushdown.enabled: "true"
+{% endif %}
       root_path: ${workspace.file_path}
       libraries:
         - glob:

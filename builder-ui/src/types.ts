@@ -67,6 +67,13 @@ export interface IncrementalConfig {
   mode?: string | null;
   cursor_param?: string | null;
   cursor_field?: string | null;
+  // Where the generated script keeps the cursor between runs: a local path
+  // or an fsspec URL (default `<stream>_state.json`), the seed used when
+  // nothing is stored yet, and the entry key inside the state file
+  // (default `<stream>@<base_url>`).
+  state_path?: string | null;
+  start_value?: string | null;
+  state_key?: string | null;
 }
 
 export interface BackoffConfig {
@@ -113,6 +120,8 @@ export interface StreamConfig {
   streaming?: boolean;
   response_format?: 'json' | 'xml';
   xml_record_path?: string | null;
+  // Filter pushdown: DataFrame column name -> API query parameter name.
+  pushdown_params?: Record<string, string>;
 }
 
 export interface SourceConfig {
@@ -268,7 +277,7 @@ export interface ConfigFormState {
   incrementalStatePath: string;
   incrementalStartValue: string;
   incrementalStateKey: string;
-  incrementalMemoryEnabled: boolean;
+  pushdownParams: Record<string, string>;
   inferSchema: boolean;
   schema: string;
   headers: Record<string, string>;

@@ -1,13 +1,19 @@
 """Spark DataSource for {{ stream_name_doc }}."""
 
+{% set reader_imports = ["DataSource", "DataSourceReader"] + (["EqualTo", "Filter"] if pushdown else []) + (["InputPartition"] if has_windows or page_partitions else []) %}
+{% set pushed = "self._pushed" if pushdown else "" %}
+{% set pushed_arg = ", self._pushed" if pushdown else "" %}
+{% set pushed_kw = "extra_params=self._pushed" if pushdown else "" %}
+{% if pushdown %}
+from typing import Any, Iterable, Iterator
+{% else %}
 from typing import Any, Iterator
+{% endif %}
 
 {% if streaming %}
 from pyspark.sql.datasource import DataSource, SimpleDataSourceStreamReader
-{% elif has_windows %}
-from pyspark.sql.datasource import DataSource, DataSourceReader, InputPartition
 {% else %}
-from pyspark.sql.datasource import DataSource, DataSourceReader
+from pyspark.sql.datasource import {{ reader_imports | join(", ") }}
 {% endif %}
 
 from .client import {{ bundle_imports | join(", ") }}
@@ -17,6 +23,10 @@ from . import client as _client
 
 {% if schema_ddl %}
 SCHEMA: str = {{ schema_ddl | tojson }}
+
+{% endif %}
+{% if pushdown %}
+PUSHDOWN_PARAMS: dict[str, str] = {{ pushdown_params_repr }}
 
 {% endif %}
 {% if bundle_secret_slots %}
@@ -116,6 +126,21 @@ class _Reader(DataSourceReader):
             if key.lower().startswith("secret_")
         }
 {% endif %}
+{% if pushdown %}
+        self._pushed: dict[str, str] = {}
+
+    def pushFilters(self, filters: list[Filter]) -> Iterable[Filter]:
+        self._pushed = {}
+        unsupported: list[Filter] = []
+        for filter_ in filters:
+            if isinstance(filter_, EqualTo) and len(filter_.attribute) == 1:
+                param = PUSHDOWN_PARAMS.get(filter_.attribute[0])
+                if param is not None and filter_.value is not None:
+                    self._pushed[param] = str(filter_.value)
+                    continue
+            unsupported.append(filter_)
+        return unsupported
+{% endif %}
 
 {% if has_windows %}
     def partitions(self) -> list[InputPartition]:
@@ -125,20 +150,65 @@ class _Reader(DataSourceReader):
 {% if bundle_secret_slots %}
         _apply_secret_options(self._secret_options)
 {% endif %}
+{% if pushdown and windows_kind == "path" %}
+        records = fetch_records(extra_params=self._pushed, **WINDOWS[partition.value])
+{% elif pushdown %}
+        extra_params = {**WINDOWS[partition.value]["extra_params"], **self._pushed}
+        records = fetch_records(extra_params=extra_params)
+{% else %}
         records = fetch_records(**WINDOWS[partition.value])
+{% endif %}
+{% elif page_partitions and incremental %}
+    def partitions(self) -> list[InputPartition]:
+{% if bundle_secret_slots %}
+        _apply_secret_options(self._secret_options)
+{% endif %}
+        state_cursor = _read_state()
+        total = _probe_total_pages(state_cursor{{ pushed_arg }})
+        if total is None or total <= 1:
+            return [InputPartition((None, state_cursor))]
+        return [InputPartition((index, state_cursor)) for index in range(total)]
+
+    def read(self, partition) -> Iterator[tuple]:
+{% if bundle_secret_slots %}
+        _apply_secret_options(self._secret_options)
+{% endif %}
+        page_index, state_cursor = partition.value
+        if page_index is None:
+            records = fetch_records({{ pushed_kw }})
+        else:
+            records = fetch_page(page_index, state_cursor{{ pushed_arg }})
+{% elif page_partitions %}
+    def partitions(self) -> list[InputPartition]:
+{% if bundle_secret_slots %}
+        _apply_secret_options(self._secret_options)
+{% endif %}
+        total = _probe_total_pages({{ pushed }})
+        if total is None or total <= 1:
+            return [InputPartition(None)]
+        return [InputPartition(index) for index in range(total)]
+
+    def read(self, partition) -> Iterator[tuple]:
+{% if bundle_secret_slots %}
+        _apply_secret_options(self._secret_options)
+{% endif %}
+        if partition.value is None:
+            records = fetch_records({{ pushed_kw }})
+        else:
+            records = fetch_page(partition.value{{ pushed_arg }})
 {% else %}
     def read(self, partition) -> Iterator[tuple]:
 {% if bundle_secret_slots %}
         _apply_secret_options(self._secret_options)
 {% endif %}
-        records = fetch_records()
+        records = fetch_records({{ pushed_kw }})
 {% endif %}
-{% if incremental_mode %}
+{% if incremental %}
         cursor = None
 {% endif %}
         for record in records:
-{% if incremental_mode %}
-            value = record.get({{ cursor_field_repr }})
+{% if incremental %}
+            value = _cursor_of(record)
             if value is not None and (cursor is None or value > cursor):
                 cursor = value
 {% endif %}
@@ -147,8 +217,9 @@ class _Reader(DataSourceReader):
 {% else %}
             yield tuple(_cell(record.get(column)) for column in self._columns)
 {% endif %}
-{% if incremental_mode %}
-        _write_state(cursor)
+{% if incremental %}
+        if cursor is not None:
+            _write_state(cursor)
 {% endif %}
 
 

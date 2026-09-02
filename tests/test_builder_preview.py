@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import json
+import sys
+
 from polymo.builder.preview import run_preview
 from polymo.config import (
     AuthConfig,
     ErrorHandlerConfig,
+    IncrementalConfig,
     PaginationConfig,
     PartitionConfig,
     SecretRef,
@@ -183,6 +187,78 @@ def test_preview_keeps_partial_raw_pages_on_mid_stream_failure(http_server):
     assert records == [{"id": 1}]
     assert any(page["status_code"] == 200 for page in raw_pages)
     assert error is not None
+
+
+# --- incremental state --------------------------------------------------------
+# The preview drives `fetch_records()` directly, which only ever *reads* the
+# cursor (`_Reader.read()` is what commits it), and it does so against a
+# throwaway state path under a temp dir rather than the user's real one.
+
+
+def _incremental(**overrides):
+    fields = dict(mode="cursor", cursor_param="since", cursor_field="updated")
+    fields.update(overrides)
+    return IncrementalConfig(**fields)
+
+
+def test_preview_incremental_config_writes_no_state_file(
+    http_server, tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    seen = []
+
+    def route(query, headers, body):
+        seen.append(query.get("since"))
+        return 200, [{"id": 1, "updated": "2026-01-01"}], {}
+
+    http_server.routes["/posts"] = route
+    config = make_config(base_url=http_server.url, incremental=_incremental())
+    records, _, error = run_preview(config, token=None, limit=5)
+    assert records == [{"id": 1, "updated": "2026-01-01"}]
+    assert error is None
+    assert seen == [None]
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_preview_incremental_seeds_cursor_from_start_value_only(http_server, tmp_path):
+    seen = []
+
+    def route(query, headers, body):
+        seen.append(query.get("since"))
+        return 200, [{"id": 1, "updated": "2026-03-01"}], {}
+
+    http_server.routes["/posts"] = route
+    state_file = tmp_path / "state.json"
+    state_file.write_text(
+        json.dumps(
+            {"streams": {f"posts@{http_server.url}": {"cursor_value": "2026-02-01"}}}
+        )
+    )
+    config = make_config(
+        base_url=http_server.url,
+        incremental=_incremental(state_path=str(state_file), start_value="2025-01-01"),
+    )
+    records, _, error = run_preview(config, token=None, limit=5)
+    assert error is None
+    assert records == [{"id": 1, "updated": "2026-03-01"}]
+    # the real state file is neither read (2026-02-01 was never sent) nor
+    # touched by the preview
+    assert seen == ["2025-01-01"]
+    assert json.loads(state_file.read_text())["streams"][
+        f"posts@{http_server.url}"
+    ] == {"cursor_value": "2026-02-01"}
+
+
+def test_preview_remote_state_path_works_without_fsspec(http_server, monkeypatch):
+    monkeypatch.setitem(sys.modules, "fsspec", None)
+    http_server.routes["/posts"] = lambda q, h, b: (200, [{"id": 1}], {})
+    config = make_config(
+        base_url=http_server.url,
+        incremental=_incremental(state_path="s3://team/state/posts.json"),
+    )
+    records, _, error = run_preview(config, token=None, limit=5)
+    assert error is None
+    assert records == [{"id": 1}]
 
 
 # --- Databricks secret-scope references -----------------------------------

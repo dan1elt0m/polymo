@@ -48,7 +48,8 @@ If your data pipeline supplies values at runtime (like `owner: dan1elt0m`), add 
 
 ### 5. Pagination & incremental settings
 - Choose the pagination strategy that matches your API's behaviour (none, offset, page, cursor, or link header).
-- Incremental fields (`mode`, `cursor_param`, `cursor_field`) power incremental syncs in the generated script. The panel also includes runtime inputs for the state file/URL, initial cursor value, and state key override.
+- **Incremental sync** – set **Cursor parameter** and **Cursor field** to make the generated script send the last-seen cursor on every request and store the highest value it fetched (**Mode** is a free-text label kept alongside it). **State file or URL** is where the cursor lives between runs (a local path such as a Databricks Volume, or an fsspec URL like `s3://`; default `<stream>_state.json` next to the script), **Initial cursor value** seeds the very first run, and **State key override** names the entry inside a shared state file. All of these end up as constants in the generated script — see [Incremental sync](config.md#incremental-sync).
+- **Partitioning** – `Mirror pagination` fans a page/offset-paginated stream out to one Spark partition per page when a total-pages or total-records hint is set; `Parameter range` and `Endpoint list` produce one partition per value or endpoint — see [Partitioning](config.md#partitioning).
 
 ### 6. Record selector (for nested responses)
 Some APIs wrap data inside other objects. Use this panel to:
@@ -58,6 +59,9 @@ Some APIs wrap data inside other objects. Use this panel to:
 
 ### 7. Schema tab
 Switch to the **Schema** tab if you need to define the columns yourself. Otherwise leave **Infer schema** turned on and Polymo will guess from sample data.
+
+### 8. Filter pushdown
+Map DataFrame columns to API query parameters (`status → status`, `owner_id → owner`). Equality filters on those columns are sent to the API as query parameters instead of being applied after the read (Spark 4.1+): `df.filter(col("status") == "active")` becomes `?status=active`. Anything else — other operators, other columns — still works, Spark just evaluates it after the fetch. A pushed value overrides a query parameter of the same name; streaming tables don't support it. The Generated Code pane shows the `pushFilters()` method the mapping produces; the Preview panel is unaffected (it never has filters to push). See [Filter pushdown](config.md#filter-pushdown).
 
 ## The Generated Code pane
 Switch to the **Generated Code** tab at any time to see the actual Python script your configuration produces. It updates automatically (with a short debounce) every time you change a field on the UI Builder tab — there is no separate "generate" step and nothing to keep in sync by hand.
@@ -151,6 +155,8 @@ The right-hand panel is where you test your work — this runs the same fetch/pa
 5. Use **Copy Schema** to copy the column definitions to your clipboard if you want to paste them into docs or scripts.
 
 If something goes wrong — wrong URL, missing token, network issue — the error appears in the status pill and the Raw API view so you can fix it quickly.
+
+An incremental connector previews as a *first run*: the preview reads no state file (not even one you point **State file or URL** at, so a remote `s3://` path needs no fsspec on your machine), sends the **Initial cursor value** if you set one, and never writes state — only the generated pipeline's `_Reader.read()` does that.
 
 If the target API echoes your session token back in its response (an echo/debug endpoint, or a query-placed `api_key`), the preview masks it as `***REDACTED***` wherever it appears — in Records, DataFrame, and Raw API (payloads and URLs alike). This masking is best-effort: it matches the exact token substring plus the two URL-encoded forms `requests` itself would produce (so a token echoed back inside a query string, e.g. `raw_pages[*].url`, is still caught even if it contains characters like `+`, `/`, or `%`). A base64-encoded, hashed, or otherwise transformed copy of the token in the response won't be caught.
 

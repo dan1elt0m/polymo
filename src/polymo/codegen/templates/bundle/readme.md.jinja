@@ -17,3 +17,6 @@ Requires [`uv`](https://docs.astral.sh/uv/) on the deploy machine (builds the wh
 
 Table lands at `{{ catalog }}.{{ schema }}.{{ table_name }}`. Use `-t prod` for production.
 Runs `serverless: true`; a classic cluster needs the wheel as a cluster library instead.
+{% if state_remote %}
+Cursor state lives at `{{ state_path }}`; add the fsspec backend for that scheme (`s3fs`, `adlfs`, `gcsfs`, ...) to `pyproject.toml` dependencies.
+{% endif %}

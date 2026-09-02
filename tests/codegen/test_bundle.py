@@ -93,6 +93,16 @@ CLIENT_EQUALITY_CASES = {
 }
 
 
+PAGE_PARTITIONS_CONFIG = make_config(
+    base_url="https://x",
+    pagination=PaginationConfig(
+        type="page", page_param="page", page_size=2, total_pages_header="X-Pages"
+    ),
+    partition=PartitionConfig(strategy="pagination"),
+    schema="id BIGINT, title STRING",
+)
+
+
 @pytest.mark.parametrize("case", CLIENT_EQUALITY_CASES)
 def test_client_byte_equals_generate_core(case):
     config = CLIENT_EQUALITY_CASES[case]
@@ -150,7 +160,32 @@ SOURCE_IMPORT_CASES = {
     "plain": (CLIENT_EQUALITY_CASES["plain"], ["fetch_records", "_infer_schema"]),
     "windowed_incremental": (
         CLIENT_EQUALITY_CASES["windowed_incremental"],
-        ["fetch_records", "WINDOWS", "_write_state"],
+        ["fetch_records", "WINDOWS", "_cursor_of", "_write_state"],
+    ),
+    "page_partitions": (
+        PAGE_PARTITIONS_CONFIG,
+        ["fetch_records", "fetch_page", "_probe_total_pages"],
+    ),
+    "page_partitions_incremental": (
+        make_config(
+            base_url="https://x",
+            pagination=PaginationConfig(
+                type="page", page_param="page", page_size=2, total_pages_header="X"
+            ),
+            partition=PartitionConfig(strategy="pagination"),
+            incremental=IncrementalConfig(
+                mode="cursor", cursor_param="since", cursor_field="updated"
+            ),
+        ),
+        [
+            "fetch_records",
+            "fetch_page",
+            "_probe_total_pages",
+            "_infer_schema",
+            "_read_state",
+            "_cursor_of",
+            "_write_state",
+        ],
     ),
     "streaming": (CLIENT_EQUALITY_CASES["streaming"], ["fetch_page"]),
     "xml": (CLIENT_EQUALITY_CASES["xml"], ["fetch_records", "_infer_schema"]),
@@ -948,9 +983,10 @@ def _run_driver_pickle(
     options: dict,
     mode: str,
     tag: str,
+    script: str = _DRIVER_PICKLE_SCRIPT,
 ) -> Path:
     driver_script = tmp_path / f"driver_{tag}.py"
-    driver_script.write_text(_DRIVER_PICKLE_SCRIPT)
+    driver_script.write_text(script)
     pickle_path = tmp_path / f"reader_{tag}.pickle"
     driver_cwd = tmp_path / f"driver_cwd_{tag}"
     driver_cwd.mkdir()
@@ -1208,6 +1244,180 @@ def test_bundle_wheel_streaming_readbetweenoffsets_secret_survives_fresh_worker(
     assert len(seen_auth_headers) == 1
 
 
+# --- executor wheel simulation: one partition per page -----------------------
+# The `partition.strategy: pagination` fan-out splits the work across two
+# places that never share an interpreter in real Spark: the driver calls
+# `_Reader.partitions()` (probing the first page, planning one InputPartition
+# per page) and each executor calls `read(partition)` for exactly one page.
+# Same three-process shape as above, with the driver also pickling the
+# planned partitions so the worker can pick one.
+
+_DRIVER_PARTITIONS_PICKLE_SCRIPT = _DRIVER_PICKLE_SCRIPT.replace(
+    'with open(pickle_path, "wb") as fh:\n    pickle.dump(reader, fh)',
+    "partitions = reader.partitions()\n"
+    'with open(pickle_path, "wb") as fh:\n'
+    "    pickle.dump((reader, partitions), fh)",
+)
+assert "reader.partitions()" in _DRIVER_PARTITIONS_PICKLE_SCRIPT
+
+_WORKER_READ_ONE_PARTITION_SCRIPT = """
+import json
+import pickle
+import sys
+
+whl_path, pickle_path = sys.argv[1], sys.argv[2]
+if whl_path:
+    sys.path.insert(0, whl_path)
+
+with open(pickle_path, "rb") as fh:
+    reader, partitions = pickle.load(fh)
+
+records = [dict(zip(["id", "title"], row)) for row in reader.read(partitions[1])]
+sys.stdout.write(json.dumps({"planned": [p.value for p in partitions], "records": records}))
+"""
+
+
+def test_bundle_wheel_page_partition_planned_on_driver_read_on_fresh_worker(
+    tmp_path, http_server
+):
+    seen_pages: list = []
+
+    def route(query, headers, body):
+        seen_pages.append(query.get("page"))
+        page = int(query.get("page", "1"))
+        rows = {1: [{"id": 1, "title": "one"}], 2: [{"id": 2, "title": "two"}]}
+        return 200, rows.get(page, []), {"X-Pages": "3"}
+
+    http_server.routes["/posts"] = route
+    config = make_config(
+        base_url=http_server.url,
+        name="posts",
+        path="/posts",
+        pagination=PaginationConfig(
+            type="page", page_param="page", page_size=1, total_pages_header="X-Pages"
+        ),
+        partition=PartitionConfig(strategy="pagination"),
+        schema="id BIGINT, title STRING",
+    )
+
+    pkg = "execsim_pickle_pages_pkg"
+    files = generate_bundle(config, project_name=pkg, catalog="main", schema="raw")
+    source_class_name = f"{_pascal_case(pkg)}Source"
+    source_py = files[f"src/{pkg}/source.py"]
+    assert "def partitions(self) -> list[InputPartition]:" in source_py
+    assert "total = _probe_total_pages()" in source_py
+    assert "records = fetch_page(partition.value)" in source_py
+    project_dir = _write_bundle_project(tmp_path, pkg, files)
+    wheel_path = _build_wheel(project_dir)
+
+    pickle_path = _run_driver_pickle(
+        tmp_path,
+        wheel_path=wheel_path,
+        pkg=pkg,
+        source_class_name=source_class_name,
+        options={},
+        mode="batch",
+        tag="pages",
+        script=_DRIVER_PARTITIONS_PICKLE_SCRIPT,
+    )
+    # the driver made exactly one request: the probe for the first page
+    assert seen_pages == ["1"]
+
+    worker = _run_worker(
+        tmp_path,
+        wheel_path=wheel_path,
+        pickle_path=pickle_path,
+        script=_WORKER_READ_ONE_PARTITION_SCRIPT,
+        tag="pages",
+    )
+    assert worker.returncode == 0, worker.stderr
+    result = json.loads(worker.stdout)
+    assert result["planned"] == [0, 1, 2]
+    assert result["records"] == [{"id": 2, "title": "two"}]
+    # the worker fetched its one page and nothing else
+    assert seen_pages == ["1", "2"]
+
+
+# --- executor wheel simulation: filter pushdown ------------------------------
+# `pushFilters` runs on the driver (Spark's planning worker), which then
+# pickles the reader — so the pushed params live in a plain dict attribute
+# that must survive the trip to a fresh worker's `read()`.
+
+_DRIVER_PUSHDOWN_PICKLE_SCRIPT = _DRIVER_PICKLE_SCRIPT.replace(
+    'with open(pickle_path, "wb") as fh:\n    pickle.dump(reader, fh)',
+    "from pyspark.sql.datasource import EqualTo, In\n\n"
+    "unsupported = list(\n"
+    '    reader.pushFilters([EqualTo(("status",), "active"), In(("id",), [1, 2])])\n'
+    ")\n"
+    'assert [type(f).__name__ for f in unsupported] == ["In"], unsupported\n'
+    'with open(pickle_path, "wb") as fh:\n'
+    "    pickle.dump(reader, fh)",
+)
+assert "reader.pushFilters" in _DRIVER_PUSHDOWN_PICKLE_SCRIPT
+
+
+def test_bundle_wheel_pushed_filter_survives_pickling_to_fresh_worker(
+    tmp_path, http_server
+):
+    seen_queries: list = []
+
+    def route(query, headers, body):
+        seen_queries.append(query)
+        return 200, [{"id": 1, "title": "pushed"}], {}
+
+    http_server.routes["/posts"] = route
+    config = make_config(
+        base_url=http_server.url,
+        name="posts",
+        path="/posts",
+        pushdown_params={"status": "status"},
+        schema="id BIGINT, title STRING",
+    )
+
+    pkg = "execsim_pickle_pushdown_pkg"
+    files = generate_bundle(config, project_name=pkg, catalog="main", schema="raw")
+    source_class_name = f"{_pascal_case(pkg)}Source"
+    source_py = files[f"src/{pkg}/source.py"]
+    assert (
+        "def pushFilters(self, filters: list[Filter]) -> Iterable[Filter]:" in source_py
+    )
+    assert 'PUSHDOWN_PARAMS: dict[str, str] = {"status": "status"}' in source_py
+    # a bundle never sets Spark conf from source code: the pipeline file
+    # stays plain, databricks.yml carries the conf as pipeline configuration
+    assert "spark.conf.set(" not in files["pipelines/posts.py"]
+    pipeline_resource = yaml.safe_load(files["databricks.yml"])["resources"][
+        "pipelines"
+    ][f"{pkg}_pipeline"]
+    assert pipeline_resource["configuration"] == {
+        "spark.sql.python.filterPushdown.enabled": "true"
+    }
+    project_dir = _write_bundle_project(tmp_path, pkg, files)
+    wheel_path = _build_wheel(project_dir)
+
+    pickle_path = _run_driver_pickle(
+        tmp_path,
+        wheel_path=wheel_path,
+        pkg=pkg,
+        source_class_name=source_class_name,
+        options={},
+        mode="batch",
+        tag="pushdown",
+        script=_DRIVER_PUSHDOWN_PICKLE_SCRIPT,
+    )
+    assert seen_queries == []
+
+    worker = _run_worker(
+        tmp_path,
+        wheel_path=wheel_path,
+        pickle_path=pickle_path,
+        script=_WORKER_READ_SCRIPT,
+        tag="pushdown",
+    )
+    assert worker.returncode == 0, worker.stderr
+    assert json.loads(worker.stdout) == [{"id": 1, "title": "pushed"}]
+    assert seen_queries == [{"status": "active"}]
+
+
 # --- databricks.yml -----------------------------------------------------------
 
 
@@ -1229,6 +1439,8 @@ def test_databricks_yml_parses_with_expected_resource_keys():
     assert pipeline["catalog"] == "main"
     assert pipeline["schema"] == "raw"
     assert pipeline["serverless"] is True
+    # no pushdown -> no pipeline configuration block at all
+    assert "configuration" not in pipeline
     assert pipeline["root_path"] == "${workspace.file_path}"
     assert pipeline["libraries"] == [{"glob": {"include": "pipelines/posts.py"}}]
     assert pipeline["environment"]["dependencies"] == [
@@ -1302,6 +1514,45 @@ def test_pyproject_toml_adds_azure_keyvault_dependency_when_uc_secret_present():
         dep.startswith("azure-keyvault-secrets")
         for dep in data["project"]["dependencies"]
     )
+
+
+def _remote_state_config():
+    return make_config(
+        base_url="https://x",
+        incremental=IncrementalConfig(
+            mode="cursor",
+            cursor_param="since",
+            cursor_field="updated",
+            state_path="s3://team/state/posts.json",
+        ),
+    )
+
+
+def test_pyproject_toml_adds_fsspec_only_for_remote_state_path():
+    remote = _load_toml(_bundle(_remote_state_config())["pyproject.toml"])
+    assert any(dep.startswith("fsspec") for dep in remote["project"]["dependencies"])
+
+    local_config = make_config(
+        base_url="https://x",
+        incremental=IncrementalConfig(
+            mode="cursor",
+            cursor_param="since",
+            cursor_field="updated",
+            state_path="/Volumes/main/raw/state.json",
+        ),
+    )
+    local = _load_toml(_bundle(local_config)["pyproject.toml"])
+    assert not any(dep.startswith("fsspec") for dep in local["project"]["dependencies"])
+
+
+def test_readme_names_the_fsspec_backend_for_remote_state_path():
+    readme = _bundle(_remote_state_config())["README.md"]
+    assert "s3://team/state/posts.json" in readme
+    assert "s3fs" in readme
+    assert len(readme.splitlines()) <= 20
+
+    plain_readme = _bundle(make_config(base_url="https://x"))["README.md"]
+    assert "fsspec" not in plain_readme
 
 
 # --- manifest -----------------------------------------------------------------

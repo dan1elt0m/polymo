@@ -74,19 +74,26 @@ def _bundle_import_names(ctx: Dict) -> List[str]:
     Mirrors exactly what `bundle/source.py.jinja` references from the core
     module for the given config shape (see the branches in that template):
     the streaming reader only ever calls `fetch_page`; every other variant
-    calls `fetch_records`, plus `WINDOWS` when partitioned, `_infer_schema`
-    when no explicit schema was given, and `_write_state` when tracking an
-    incremental cursor.
+    calls `fetch_records`, plus `WINDOWS` when partitioned over static
+    windows, `fetch_page`/`_probe_total_pages` when fanning out one
+    partition per page, `_infer_schema` when no explicit schema was given,
+    and the cursor helpers when tracking an incremental cursor
+    (`_read_state` only when the driver resolves the cursor up front for
+    the page fan-out).
     """
     if ctx["streaming"]:
         return ["fetch_page"]
     names = ["fetch_records"]
     if ctx["has_windows"]:
         names.append("WINDOWS")
+    if ctx["page_partitions"]:
+        names.extend(["fetch_page", "_probe_total_pages"])
     if not ctx["schema_ddl"]:
         names.append("_infer_schema")
-    if ctx["incremental_mode"]:
-        names.append("_write_state")
+    if ctx["incremental"]:
+        if ctx["page_partitions"]:
+            names.append("_read_state")
+        names.extend(["_cursor_of", "_write_state"])
     return names
 
 
@@ -145,11 +152,14 @@ def generate_bundle(
         catalog_repr=_yaml_str(catalog),
         schema_repr=_yaml_str(schema),
         stream=stream,
+        pushdown=ctx["pushdown"],
     )
 
+    state_remote = ctx["incremental"] and ctx["state_remote"]
     pyproject_toml = _ENV.get_template("bundle/pyproject.toml.jinja").render(
         pkg=pkg,
         has_uc_secret_refs=ctx["has_uc_secret_refs"],
+        state_remote=state_remote,
     )
 
     readme = _ENV.get_template("bundle/readme.md.jinja").render(
@@ -161,6 +171,8 @@ def generate_bundle(
         catalog=catalog,
         schema=schema,
         table_name=table_name,
+        state_remote=state_remote,
+        state_path=ctx["state_path"],
     )
 
     manifest = (

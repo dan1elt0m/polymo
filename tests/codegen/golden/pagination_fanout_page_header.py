@@ -66,6 +66,7 @@ def fetch_records(extra_params: dict[str, Any] | None = None, path: str | None =
         params = dict(PARAMS)
         if extra_params:
             params.update(extra_params)
+        params["per_page"] = 100
         params["page"] = page
         response = _request(session, f"{BASE_URL}{url_path}", params)
         payload = response.json()
@@ -73,16 +74,39 @@ def fetch_records(extra_params: dict[str, Any] | None = None, path: str | None =
         if not records:
             return
         yield from records
+        total = response.headers.get("X-Total-Pages")
+        if total is not None and page >= int(total):
+            return
         page += 1
 
 
-def fetch_page(page_index: int) -> list[dict[str, Any]]:
+def _page_response(page_index: int) -> requests.Response:
     session = requests.Session()
     session.headers.update(HEADERS)
     params = dict(PARAMS)
+    params["per_page"] = 100
     params["page"] = page_index + 1
-    response = _request(session, f"{BASE_URL}{PATH}", params)
+    return _request(session, f"{BASE_URL}{PATH}", params)
+
+
+def fetch_page(page_index: int) -> list[dict[str, Any]]:
+    """Fetch exactly one page of records."""
+    response = _page_response(page_index)
     return _records(response.json())
+
+
+def _positive_int(value: Any) -> int | None:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def _probe_total_pages() -> int | None:
+    """Fetch the first page and resolve the page count from the total hints."""
+    response = _page_response(0)
+    return _positive_int(response.headers.get("X-Total-Pages"))
 
 
 from pyspark import pipelines as dp  # noqa: E402
@@ -93,46 +117,43 @@ spark = SparkSession.getActiveSession()
 SCHEMA: str = "id BIGINT"
 
 
-from pyspark.sql.datasource import DataSource, SimpleDataSourceStreamReader  # noqa: E402
+from pyspark.sql.datasource import DataSource, DataSourceReader, InputPartition  # noqa: E402
 
 
-class _Reader(SimpleDataSourceStreamReader):
-    def __init__(self, schema: Any) -> None:
-        self._columns: list[str] = [field.name for field in schema.fields]
-
-    def initialOffset(self) -> dict[str, Any]:
-        return {"page": 0}
-
-    def read(self, start: dict[str, Any]) -> tuple[Iterator[tuple], dict[str, Any]]:
-        page = start["page"]
-        records = fetch_page(page)
-        rows = [tuple(r.get(c) for c in self._columns) for r in records]
-        next_page = page + 1 if records else page
-        return iter(rows), {"page": next_page}
-
-    def readBetweenOffsets(self, start: dict[str, Any], end: dict[str, Any]) -> Iterator[tuple]:
-        rows = []
-        for page in range(start["page"], end["page"]):
-            for r in fetch_page(page):
-                rows.append(tuple(r.get(c) for c in self._columns))
-        return iter(rows)
-
-
-class RestStreamSource(DataSource):
+class RestSource(DataSource):
     @classmethod
     def name(cls) -> str:
-        return "posts_stream"
+        return "posts_source"
 
     def schema(self) -> str:
         return SCHEMA
 
-    def simpleStreamReader(self, schema: Any) -> "_Reader":
+    def reader(self, schema: Any) -> "_Reader":
         return _Reader(schema)
 
 
-spark.dataSource.register(RestStreamSource)
+class _Reader(DataSourceReader):
+    def __init__(self, schema: Any) -> None:
+        self._columns: list[str] = [field.name for field in schema.fields]
+
+    def partitions(self) -> list[InputPartition]:
+        total = _probe_total_pages()
+        if total is None or total <= 1:
+            return [InputPartition(None)]
+        return [InputPartition(index) for index in range(total)]
+
+    def read(self, partition) -> Iterator[tuple]:
+        if partition.value is None:
+            records = fetch_records()
+        else:
+            records = fetch_page(partition.value)
+        for record in records:
+            yield tuple(record.get(column) for column in self._columns)
+
+
+spark.dataSource.register(RestSource)
 
 
 @dp.table(name="posts")
 def posts():
-    return spark.readStream.format("posts_stream").load()
+    return spark.read.format("posts_source").load()

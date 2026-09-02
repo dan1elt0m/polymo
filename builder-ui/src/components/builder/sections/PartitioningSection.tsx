@@ -83,7 +83,12 @@ export const PartitioningSection: React.FC<PartitioningSectionProps> = ({ state,
       </div>
 
       {isPaginationMirror && (
-        <p className={HELP}>Mirrors the pagination cursor to create Spark partitions. Works best with page or offset pagination.</p>
+        <p className={HELP}>
+          Fans out one Spark partition per page: the driver fetches the first page once, reads the page count from the
+          total-pages / total-records hints in the Pagination section, and each partition fetches exactly one page.
+          Needs page or offset pagination with a page size and at least one of those hints; otherwise the table reads
+          sequentially, exactly as with no partitioning.
+        </p>
       )}
 
       {isParamRange && (
@@ -170,7 +175,8 @@ export const PartitioningSection: React.FC<PartitioningSectionProps> = ({ state,
           tooltip="Accepted formats: comma-separated list (users:/users,posts:/posts,/status) or JSON array when using Spark reader options. Name is optional; if omitted the path is used as the name. When using this strategy the stream 'path' field may be omitted."
           help={
             <>
-              Each partition surfaces an <code className="font-mono">endpoint_name</code> column. Use a broad schema (e.g. endpoint_name STRING, data STRING) for heterogeneous payloads.
+              One Spark partition per endpoint. Records are flat, with no <code className="font-mono">endpoint_name</code>{" "}
+              column or <code className="font-mono">data</code> wrapper, so every endpoint must fit the same schema.
             </>
           }
         >

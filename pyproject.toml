@@ -36,6 +36,9 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    # Test-only: exercises the fsspec branch generated for a remote
+    # incremental state path against fsspec's in-memory filesystem.
+    "fsspec>=2023.1",
     "httpx>=0.26",
     "pre-commit>=4.3.0",
     "pytest>=8.4.2",

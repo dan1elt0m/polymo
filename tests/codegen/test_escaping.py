@@ -118,13 +118,49 @@ def test_incremental_cursor_fields_with_quotes_are_escaped():
     config = make_config(
         base_url="https://api.example.com",
         incremental=IncrementalConfig(
-            mode="cursor",
+            mode='cursor"; import os #',
             cursor_param='since"; import os #',
             cursor_field='updated"; import os #',
+            state_path='/tmp/st"; import os #.json',
+            start_value='2024"; import os #',
+            state_key='key"; import os #',
         ),
     )
     script = generate_core(config)
     assert_hygiene(script)
+    assert 'STATE_PATH: str = "/tmp/st\\"; import os #.json"' in script
+    assert 'STATE_KEY: str = "key\\"; import os #"' in script
+    assert 'START_VALUE: str | None = "2024\\"; import os #"' in script
+    assert '"mode": "cursor\\"; import os #"' in script
+
+
+def test_remote_state_path_with_quotes_is_escaped():
+    config = make_config(
+        base_url="https://api.example.com",
+        incremental=IncrementalConfig(
+            mode="cursor",
+            cursor_param="since",
+            cursor_field="updated",
+            state_path='s3://b/st"; import os #.json',
+        ),
+    )
+    script = generate_core(config)
+    assert_hygiene(script)
+    assert "def _state_fs()" in script
+    assert 'STATE_PATH: str = "s3://b/st\\"; import os #.json"' in script
+
+
+def test_pushdown_column_and_param_names_with_quotes_are_escaped():
+    config = make_config(
+        base_url="https://api.example.com",
+        pushdown_params={'sta"tus': 'st"; import os #'},
+    )
+    script = generate(config)
+    assert_hygiene(script)
+    assert (
+        'PUSHDOWN_PARAMS: dict[str, str] = {"sta\\"tus": "st\\"; import os #"}'
+        in script
+    )
 
 
 def test_base_url_and_path_with_quotes_are_escaped():

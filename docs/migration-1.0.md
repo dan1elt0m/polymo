@@ -30,7 +30,7 @@ Nothing in 0.11.0 is deprecated-but-functional in 1.0 — it is gone.
 | YAML connector files (`config.yml`, `.option("config_path", ...)`, `.option("config_json", ...)`) | Removed as a runtime input. The Builder's saved `*.polymo.json` files are a different, unrelated format (see below). |
 | `polymo smoke` CLI subcommand | Removed. (As of 1.2, `polymo builder` is gone too — see the note below.) |
 | `/api/format` builder endpoint | Removed along with the YAML export it powered. |
-| `.option("token", ...)`, `.option("incremental_state_path", ...)`, `.option("stream_batch_size", ...)`, and the rest of the Spark reader options | Removed — there is no reader to pass options to. The generated script has its own top-level constants (`BASE_URL`, `PARAMS`, `HEADERS`, ...) that you edit directly instead. |
+| `.option("token", ...)`, `.option("stream_batch_size", ...)`, and the rest of the Spark reader options | Removed — there is no reader to pass options to. The generated script has its own top-level constants (`BASE_URL`, `PARAMS`, `HEADERS`, ...) that you edit directly instead. The incremental options (`incremental_state_path` / `incremental_start_value` / `incremental_state_key`) live on as `stream.incremental.*` config — see below. |
 
 What's unchanged: the *ideas* behind pagination, auth, incremental sync,
 partitioning, and record selection all carry forward — they are just
@@ -76,25 +76,36 @@ when the underlying settings look the same:
   came from. If your downstream code filtered or grouped by `endpoint_name`,
   add that column yourself (e.g. give each endpoint its own generated
   script, or add a partition-index column) before relying on it.
-- **Incremental state now lives in a fixed local file.** 0.x let you point
-  `incremental_state_path` at any local or remote path (including
-  `s3://...`). The generated script always reads/writes a local
-  `<stream-name>_state.json` next to itself — there's no equivalent of
-  `incremental_state_path`, `incremental_start_value`, or
-  `incremental_state_key` in the generated code. The Builder's Incremental
-  section still has fields with those names, but they only affect the
-  **Preview** panel's own test run — edit the generated script directly if
-  you need a different state location (e.g. a Databricks Volume path; the
-  generated comment shows an example).
-- **`pagination`-strategy partitioning no longer parallelizes.** In 0.x, a
-  `partition.strategy: pagination` block combined with `total_pages_path` /
-  `total_records_path` hints let the Spark data source plan one partition
-  per page and fan reads out across executors. Generated scripts run
-  pagination-strategy connectors as a single sequential loop — only
-  `param_range` and `endpoints` partitioning produce a parallel fan-out in
-  the generated code now: the inline `DataSource` every batch `@dp.table`
-  reads through (see [How the batch table
-  reads](config.md#how-the-batch-table-reads)) turns each window into its
-  own `InputPartition`. The `total_pages_*` hints still work as a
-  pagination stop condition; `total_records_*` is accepted by the config
-  shape for compatibility but has no effect on generated code.
+- **Incremental options moved from reader options into the config.** The
+  0.x `.option("incremental_state_path", ...)`,
+  `.option("incremental_start_value", ...)` and
+  `.option("incremental_state_key", ...)` reader options are back as
+  `stream.incremental.state_path` / `start_value` / `state_key` (the
+  Builder's **State file or URL**, **Initial cursor value** and **State key
+  override** fields), with the same semantics: a local path or `file://`
+  URL is a plain file, any other scheme (`s3://`, `gs://`, `abfss://`,
+  `dbfs://`) goes through fsspec, the seed only applies while nothing is
+  stored, and the state file keeps the 0.x `{"streams": {key: {...}}}`
+  shape (an existing 0.x file is read as-is). Defaults are unchanged:
+  `<stream>_state.json` and `<stream>@<base_url>`. They generate constants
+  (`STATE_PATH`, `START_VALUE`, `STATE_KEY`) rather than being read at run
+  time. Since 1.7; 1.0–1.6 only supported the fixed local file. See
+  [Incremental sync](config.md#incremental-sync).
+- **`incremental_memory_state` is gone.** The 0.x process-global cursor
+  cache has no meaning in a generated script, which always goes through the
+  state file.
+- **The new cursor is the maximum, not the last-seen value.** 0.x stored
+  whatever `cursor_field` value it saw last; the generated `_Reader.read()`
+  stores the highest value (string comparison) it yielded, and the write is
+  monotone, so a partition that finishes late can never lower the cursor.
+  Zero-pad numeric cursors if you rely on ordering.
+- **`pagination`-strategy partitioning parallelizes again.** Since 1.7 a
+  `partition.strategy: pagination` connector with page/offset pagination, a
+  `page_size` and at least one of `total_pages_path` /
+  `total_pages_header` / `total_records_path` / `total_records_header`
+  generates the 0.x planner: the driver probes the first page once, resolves
+  the page count with the 0.x precedence, and Spark reads one
+  `InputPartition` per page. `total_records_*` is honoured for planning
+  only (never as a stop condition), exactly as before. Without the strategy
+  or without hints the script stays a sequential loop. 1.0–1.6 always ran
+  this strategy sequentially. See [Partitioning](config.md#partitioning).

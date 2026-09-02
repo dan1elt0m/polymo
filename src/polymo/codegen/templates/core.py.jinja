@@ -1,15 +1,23 @@
 """Lakeflow Declarative Pipelines connector for {{ stream_name_doc }}."""
 
+{% if incremental %}
+import json
+{% endif %}
+{% if page_partitions and (total_records_path or total_records_header) %}
+import math
+{% endif %}
+{% if incremental %}
+import os
+{% endif %}
 {% if max_retries > 0 %}
 import time
+{% endif %}
+{% if incremental %}
+from datetime import datetime, timezone
 {% endif %}
 from typing import Any, Iterator
 
 import requests
-{% if incremental_mode %}
-import json
-import os
-{% endif %}
 {% if response_format == "xml" %}
 import xml.etree.ElementTree as ET
 {% endif %}
@@ -89,26 +97,117 @@ def _rebuild_option_literals() -> None:
 
 WINDOWS: list[dict[str, Any]] = {{ windows_repr }}
 {% endif %}
-{% if incremental_mode %}
+{% if incremental %}
 
 STATE_PATH: str = {{ state_path_repr }}
-{% if not has_windows %}
-LAST_CURSOR: dict[str, Any] = {"value": None}
+STATE_KEY: str = {{ state_key_repr }}
+START_VALUE: str | None = {{ start_value_repr }}
+CURSOR_PARAM: str = {{ cursor_param_inc_repr }}
+CURSOR_FIELD: str = {{ cursor_field_repr }}
+{% if state_remote %}
+
+
+def _state_fs() -> tuple[Any, str]:
+    try:
+        import fsspec  # type: ignore[import]
+    except ImportError as exc:
+        raise RuntimeError(
+            "fsspec is required to use non-local incremental_state_path values"
+        ) from exc
+    return fsspec.core.url_to_fs(STATE_PATH)
+
+
+def _load_state() -> dict[str, Any]:
+    fs, path = _state_fs()
+    if not fs.exists(path):
+        return {}
+    try:
+        with fs.open(path, "r") as fh:
+            payload = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _save_state(data: str) -> None:
+    fs, path = _state_fs()
+    directory = os.path.dirname(path)
+    if directory and directory != "/":
+        fs.makedirs(directory, exist_ok=True)
+    with fs.open(path, "w") as fh:
+        fh.write(data)
+{% else %}
+
+
+def _load_state() -> dict[str, Any]:
+    if not os.path.exists(STATE_PATH):
+        return {}
+    try:
+        with open(STATE_PATH) as fh:
+            payload = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _save_state(data: str) -> None:
+    directory = os.path.dirname(STATE_PATH)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    tmp_path = f"{STATE_PATH}.tmp"
+    with open(tmp_path, "w") as fh:
+        fh.write(data)
+    os.replace(tmp_path, STATE_PATH)
 {% endif %}
 
 
-def _read_state() -> dict[str, Any]:
-    if not os.path.exists(STATE_PATH):
-        return {}
-    with open(STATE_PATH) as fh:
-        return json.load(fh)
+def _stored_cursor(payload: dict[str, Any]) -> str | None:
+    streams = payload.get("streams")
+    if isinstance(streams, dict):
+        payload = streams
+    entry = payload.get(STATE_KEY)
+    if isinstance(entry, dict):
+        entry = entry.get("cursor_value") or entry.get("value")
+    return None if entry is None else str(entry)
 
 
-def _write_state(cursor: Any) -> None:
-    if cursor is None:
+def _read_state() -> str | None:
+    """Return the stored cursor, falling back to START_VALUE."""
+    return _stored_cursor(_load_state()) or START_VALUE
+
+
+def _write_state(value: str) -> None:
+    """Persist `value` unless the stored cursor is already at or past it."""
+    payload = _load_state()
+    stored = _stored_cursor(payload) or START_VALUE
+    if stored is not None and value <= stored:
         return
-    with open(STATE_PATH, "w") as fh:
-        json.dump({"cursor": cursor}, fh)
+    streams = payload.get("streams")
+    if not isinstance(streams, dict):
+        streams = {}
+        payload["streams"] = streams
+    streams[STATE_KEY] = {
+        "cursor_param": CURSOR_PARAM,
+        "cursor_field": CURSOR_FIELD,
+        "cursor_value": value,
+        "mode": {{ incremental_mode_repr }},
+        "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    _save_state(json.dumps(payload, indent=2, sort_keys=True))
+
+
+def _cursor_of(record: dict[str, Any]) -> str | None:
+{% if cursor_field_dotted %}
+    value: Any = record
+    for key in CURSOR_FIELD.split("."):
+        if not isinstance(value, dict):
+            return None
+        value = value.get(key)
+{% else %}
+    value = record.get(CURSOR_FIELD)
+{% endif %}
+    return None if value is None else str(value)
+
 {% endif %}
 {% if auth_type == "bearer" %}
 
@@ -205,7 +304,7 @@ def _request(session: requests.Session, url: str, params: dict[str, Any] | None)
 {% endif %}
 
 
-{% if total_pages_path or cursor_path or next_url_path %}
+{% if total_pages_path or cursor_path or next_url_path or (page_partitions and total_records_path) %}
 def _dig(payload: Any, path: list[str]) -> Any:
     current = payload
     for key in path:
@@ -293,8 +392,8 @@ def fetch_records(extra_params: dict[str, Any] | None = None, path: str | None =
 {% endif %}
     session.headers[{{ api_key_name_repr }}] = API_KEY
 {% endif %}
-{% if incremental_mode %}
-    state_cursor = _read_state().get("cursor")
+{% if incremental %}
+    state_cursor = _read_state()
 {% endif %}
     offset = {{ start_offset }}
     while True:
@@ -305,9 +404,9 @@ def fetch_records(extra_params: dict[str, Any] | None = None, path: str | None =
         params[{{ limit_param_repr }}] = {{ page_size }}
 {% endif %}
         params[{{ offset_param_repr }}] = offset
-{% if incremental_mode %}
+{% if incremental %}
         if state_cursor is not None:
-            params[{{ cursor_param_inc_repr }}] = state_cursor
+            params.setdefault(CURSOR_PARAM, state_cursor)
 {% endif %}
 {% if auth_type == "api_key" and api_key_in == "query" %}
 {% if api_key_optional %}
@@ -320,12 +419,6 @@ def fetch_records(extra_params: dict[str, Any] | None = None, path: str | None =
         if not records:
             return
         yield from records
-{% if incremental_mode and not has_windows %}
-        for record in records:
-            value = record.get({{ cursor_field_repr }})
-            if value is not None and (LAST_CURSOR["value"] is None or value > LAST_CURSOR["value"]):
-                LAST_CURSOR["value"] = value
-{% endif %}
         offset += {{ page_size if page_size else "len(records)" }}
 {% elif pagination_type == "page" %}
 def fetch_records(extra_params: dict[str, Any] | None = None, path: str | None = None) -> Iterator[dict[str, Any]]:
@@ -346,8 +439,8 @@ def fetch_records(extra_params: dict[str, Any] | None = None, path: str | None =
 {% endif %}
     session.headers[{{ api_key_name_repr }}] = API_KEY
 {% endif %}
-{% if incremental_mode %}
-    state_cursor = _read_state().get("cursor")
+{% if incremental %}
+    state_cursor = _read_state()
 {% endif %}
     page = {{ start_page }}
     while True:
@@ -358,9 +451,9 @@ def fetch_records(extra_params: dict[str, Any] | None = None, path: str | None =
         params[{{ limit_param_repr }}] = {{ page_size }}
 {% endif %}
         params[{{ page_param_repr }}] = page
-{% if incremental_mode %}
+{% if incremental %}
         if state_cursor is not None:
-            params[{{ cursor_param_inc_repr }}] = state_cursor
+            params.setdefault(CURSOR_PARAM, state_cursor)
 {% endif %}
 {% if auth_type == "api_key" and api_key_in == "query" %}
 {% if api_key_optional %}
@@ -378,12 +471,6 @@ def fetch_records(extra_params: dict[str, Any] | None = None, path: str | None =
         if not records:
             return
         yield from records
-{% if incremental_mode and not has_windows %}
-        for record in records:
-            value = record.get({{ cursor_field_repr }})
-            if value is not None and (LAST_CURSOR["value"] is None or value > LAST_CURSOR["value"]):
-                LAST_CURSOR["value"] = value
-{% endif %}
 {% if total_pages_path %}
         total = _dig(payload, {{ total_pages_path }})
         if total is not None and page >= int(total):
@@ -414,15 +501,15 @@ def fetch_records(extra_params: dict[str, Any] | None = None, path: str | None =
     session.headers[{{ api_key_name_repr }}] = API_KEY
 {% endif %}
 {% if next_url_path %}
-{% if incremental_mode %}
-    state_cursor = _read_state().get("cursor")
+{% if incremental %}
+    state_cursor = _read_state()
 {% endif %}
     url, params = f"{BASE_URL}{url_path}", dict(PARAMS)
     if extra_params:
         params.update(extra_params)
-{% if incremental_mode %}
+{% if incremental %}
     if state_cursor is not None:
-        params[{{ cursor_param_inc_repr }}] = state_cursor
+        params.setdefault(CURSOR_PARAM, state_cursor)
 {% endif %}
 {% if auth_type == "api_key" and api_key_in == "query" %}
 {% if api_key_optional %}
@@ -440,19 +527,13 @@ def fetch_records(extra_params: dict[str, Any] | None = None, path: str | None =
         records = _records(payload)
         if records:
             yield from records
-{% if incremental_mode and not has_windows %}
-        for record in records:
-            value = record.get({{ cursor_field_repr }})
-            if value is not None and (LAST_CURSOR["value"] is None or value > LAST_CURSOR["value"]):
-                LAST_CURSOR["value"] = value
-{% endif %}
         next_url = _dig(payload, {{ next_url_path }})
         if not next_url:
             return
         url, params = next_url, None
 {% else %}
-{% if incremental_mode %}
-    state_cursor = _read_state().get("cursor")
+{% if incremental %}
+    state_cursor = _read_state()
 {% endif %}
     cursor = {{ initial_cursor_repr }}
     while True:
@@ -464,9 +545,9 @@ def fetch_records(extra_params: dict[str, Any] | None = None, path: str | None =
 {% endif %}
         if cursor is not None:
             params[{{ cursor_param_repr }}] = cursor
-{% if incremental_mode %}
+{% if incremental %}
         if state_cursor is not None:
-            params[{{ cursor_param_inc_repr }}] = state_cursor
+            params.setdefault(CURSOR_PARAM, state_cursor)
 {% endif %}
 {% if auth_type == "api_key" and api_key_in == "query" %}
 {% if api_key_optional %}
@@ -483,12 +564,6 @@ def fetch_records(extra_params: dict[str, Any] | None = None, path: str | None =
         records = _records(payload)
         if records:
             yield from records
-{% if incremental_mode and not has_windows %}
-        for record in records:
-            value = record.get({{ cursor_field_repr }})
-            if value is not None and (LAST_CURSOR["value"] is None or value > LAST_CURSOR["value"]):
-                LAST_CURSOR["value"] = value
-{% endif %}
 {% if cursor_header %}
         cursor = response.headers.get({{ cursor_header_repr }})
 {% elif cursor_path %}
@@ -518,15 +593,15 @@ def fetch_records(extra_params: dict[str, Any] | None = None, path: str | None =
 {% endif %}
     session.headers[{{ api_key_name_repr }}] = API_KEY
 {% endif %}
-{% if incremental_mode %}
-    state_cursor = _read_state().get("cursor")
+{% if incremental %}
+    state_cursor = _read_state()
 {% endif %}
     url, params = f"{BASE_URL}{url_path}", dict(PARAMS)
     if extra_params:
         params.update(extra_params)
-{% if incremental_mode %}
+{% if incremental %}
     if state_cursor is not None:
-        params[{{ cursor_param_inc_repr }}] = state_cursor
+        params.setdefault(CURSOR_PARAM, state_cursor)
 {% endif %}
 {% if auth_type == "api_key" and api_key_in == "query" %}
 {% if api_key_optional %}
@@ -539,12 +614,6 @@ def fetch_records(extra_params: dict[str, Any] | None = None, path: str | None =
         records = _records({% if response_format == "xml" %}ET.fromstring(response.content){% else %}response.json(){% endif %})
         if records:
             yield from records
-{% if incremental_mode and not has_windows %}
-        for record in records:
-            value = record.get({{ cursor_field_repr }})
-            if value is not None and (LAST_CURSOR["value"] is None or value > LAST_CURSOR["value"]):
-                LAST_CURSOR["value"] = value
-{% endif %}
         url, params = response.links.get("next", {}).get("url"), None
 {% elif pagination_type == "none" %}
 def fetch_records(extra_params: dict[str, Any] | None = None, path: str | None = None) -> Iterator[dict[str, Any]]:
@@ -568,10 +637,10 @@ def fetch_records(extra_params: dict[str, Any] | None = None, path: str | None =
     params = dict(PARAMS)
     if extra_params:
         params.update(extra_params)
-{% if incremental_mode %}
-    state_cursor = _read_state().get("cursor")
+{% if incremental %}
+    state_cursor = _read_state()
     if state_cursor is not None:
-        params[{{ cursor_param_inc_repr }}] = state_cursor
+        params.setdefault(CURSOR_PARAM, state_cursor)
 {% endif %}
 {% if auth_type == "api_key" and api_key_in == "query" %}
 {% if api_key_optional %}
@@ -582,12 +651,6 @@ def fetch_records(extra_params: dict[str, Any] | None = None, path: str | None =
     response = _request(session, f"{BASE_URL}{url_path}", params)
     records = _records({% if response_format == "xml" %}ET.fromstring(response.content){% else %}response.json(){% endif %})
     yield from records
-{% if incremental_mode and not has_windows %}
-    for record in records:
-        value = record.get({{ cursor_field_repr }})
-        if value is not None and (LAST_CURSOR["value"] is None or value > LAST_CURSOR["value"]):
-            LAST_CURSOR["value"] = value
-{% endif %}
 {% endif %}
 {% if not schema_ddl %}
 
@@ -635,10 +698,22 @@ def _infer_schema() -> str:
         )
     return ", ".join(f"`{name}` {type_}" for name, type_ in fields.items())
 {% endif %}
-{% if streaming %}
+{% if streaming or page_partitions %}
+{% set probe_arg_list = (["state_cursor: str | None"] if incremental else []) + (["extra_params: dict[str, str] | None"] if pushdown else []) %}
+{% set probe_call_list = (["state_cursor"] if incremental else []) + (["extra_params"] if pushdown else []) %}
+{% set page_args = (["page_index: int"] + probe_arg_list) | join(", ") %}
+{% set page_call = (["page_index"] + probe_call_list) | join(", ") %}
+{% set probe_args = probe_arg_list | join(", ") %}
+{% set probe_call = (["0"] + probe_call_list) | join(", ") %}
+{% set has_pages_hint = total_pages_path or total_pages_header %}
+{% set has_records_hint = total_records_path or total_records_header %}
 
 
+{% if page_partitions %}
+def _page_response({{ page_args }}) -> requests.Response:
+{% else %}
 def fetch_page(page_index: int) -> list[dict[str, Any]]:
+{% endif %}
     session = requests.Session()
     session.headers.update(HEADERS)
 {% if auth_type == "oauth2" %}
@@ -655,13 +730,25 @@ def fetch_page(page_index: int) -> list[dict[str, Any]]:
     session.headers[{{ api_key_name_repr }}] = API_KEY
 {% endif %}
     params = dict(PARAMS)
+{% if pushdown %}
+    if extra_params:
+        params.update(extra_params)
+{% endif %}
 {% if limit_param and page_size %}
     params[{{ limit_param_repr }}] = {{ page_size }}
 {% endif %}
-{% if pagination_type == "page" %}
-    params[{{ page_param_repr }}] = {{ start_page }} + page_index
+{% if pagination_type == "page" and start_page == 0 %}
+    params[{{ page_param_repr }}] = page_index
+{% elif pagination_type == "page" %}
+    params[{{ page_param_repr }}] = page_index + {{ start_page }}
+{% elif start_offset == 0 %}
+    params[{{ offset_param_repr }}] = page_index * {{ page_size }}
 {% else %}
     params[{{ offset_param_repr }}] = {{ start_offset }} + page_index * {{ page_size }}
+{% endif %}
+{% if incremental %}
+    if state_cursor is not None:
+        params.setdefault(CURSOR_PARAM, state_cursor)
 {% endif %}
 {% if auth_type == "api_key" and api_key_in == "query" %}
 {% if api_key_optional %}
@@ -669,6 +756,65 @@ def fetch_page(page_index: int) -> list[dict[str, Any]]:
 {% endif %}
     params[{{ api_key_name_repr }}] = API_KEY
 {% endif %}
+{% if page_partitions %}
+    return _request(session, f"{BASE_URL}{PATH}", params)
+
+
+def fetch_page({{ page_args }}) -> list[dict[str, Any]]:
+    """Fetch exactly one page of records."""
+    response = _page_response({{ page_call }})
+    return _records({% if response_format == "xml" %}ET.fromstring(response.content){% else %}response.json(){% endif %})
+
+
+def _positive_int(value: Any) -> int | None:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def _probe_total_pages({{ probe_args }}) -> int | None:
+    """Fetch the first page and resolve the page count from the total hints."""
+    response = _page_response({{ probe_call }})
+{% set pages_path_expr = "_positive_int(_dig(payload, " ~ total_pages_path ~ "))" %}
+{% set pages_header_expr = "_positive_int(response.headers.get(" ~ total_pages_header_repr ~ "))" %}
+{% set records_path_expr = "_positive_int(_dig(payload, " ~ total_records_path ~ "))" %}
+{% set records_header_expr = "_positive_int(response.headers.get(" ~ total_records_header_repr ~ "))" %}
+{% if total_pages_path or total_records_path %}
+    payload = response.json()
+{% endif %}
+{% if total_pages_path and total_pages_header %}
+    pages = {{ pages_path_expr }}
+    if pages is None:
+        pages = {{ pages_header_expr }}
+{% if has_records_hint %}
+    if pages is not None:
+        return pages
+{% else %}
+    return pages
+{% endif %}
+{% elif has_pages_hint and has_records_hint %}
+    pages = {{ pages_path_expr if total_pages_path else pages_header_expr }}
+    if pages is not None:
+        return pages
+{% elif has_pages_hint %}
+    return {{ pages_path_expr if total_pages_path else pages_header_expr }}
+{% endif %}
+{% if total_records_path and total_records_header %}
+    records = {{ records_path_expr }}
+    if records is None:
+        records = {{ records_header_expr }}
+{% elif has_records_hint %}
+    records = {{ records_path_expr if total_records_path else records_header_expr }}
+{% endif %}
+{% if has_records_hint %}
+    if records is None:
+        return None
+    return math.ceil(records / {{ page_size }})
+{% endif %}
+{% else %}
     response = _request(session, f"{BASE_URL}{PATH}", params)
     return _records({% if response_format == "xml" %}ET.fromstring(response.content){% else %}response.json(){% endif %})
+{% endif %}
 {% endif %}

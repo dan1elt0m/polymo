@@ -49,6 +49,30 @@ def test_validate_with_config_dict() -> None:
     assert "yaml" not in payload
 
 
+def test_validate_round_trips_pushdown_params() -> None:
+    app = create_app()
+    client = TestClient(app)
+
+    config_dict = {
+        "version": "0.1",
+        "source": {"type": "rest", "base_url": "https://example.com"},
+        "stream": {
+            "name": "posts",
+            "path": "/posts",
+            "pushdown_params": {"status": "status", "owner_id": "owner"},
+        },
+    }
+
+    response = client.post("/api/validate", json={"config_dict": config_dict})
+    payload = response.json()
+
+    assert response.status_code == 200, payload
+    assert payload["config"]["stream"]["pushdown_params"] == {
+        "status": "status",
+        "owner_id": "owner",
+    }
+
+
 def test_yaml_payload_rejected() -> None:
     app = create_app()
     client = TestClient(app)

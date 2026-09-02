@@ -4,10 +4,12 @@ import ast
 import re
 import subprocess
 import sys
+import types
 from types import SimpleNamespace
 from typing import Any
+from unittest import mock
 
-from polymo.codegen import generate_core
+from polymo.codegen import generate, generate_core
 from polymo.config import AuthConfig, RestSourceConfig, StreamConfig
 
 
@@ -73,4 +75,54 @@ def run_generated(
     namespace: dict[str, Any] = {}
     exec(compile(code, "<generated>", "exec"), namespace)  # noqa: S102
     namespace.update(overrides)
+    return SimpleNamespace(**namespace)
+
+
+def install_fake_pipelines() -> None:
+    """Stub `pyspark.pipelines` (Databricks-only) so generated scripts import.
+
+    The `dp.table` decorator only ships on Databricks runtimes, not in the
+    OSS `pyspark` wheel; a no-op decorator lets the *unmodified* output of
+    `generate()` be exec'd here, decorator included.
+    """
+    if "pyspark.pipelines" in sys.modules:
+        return
+    fake_pipelines = types.ModuleType("pyspark.pipelines")
+
+    def _table(**_kwargs):
+        def _decorator(func):
+            return func
+
+        return _decorator
+
+    fake_pipelines.table = _table
+    sys.modules["pyspark.pipelines"] = fake_pipelines
+
+
+def fake_schema(*names: str) -> SimpleNamespace:
+    """The only part of a Spark schema `_Reader.__init__` reads: `.fields[].name`."""
+    return SimpleNamespace(fields=[SimpleNamespace(name=name) for name in names])
+
+
+def run_generated_script(config: RestSourceConfig) -> SimpleNamespace:
+    """Exec the full `generate()` output (core + `_Reader`) without a JVM.
+
+    `SparkSession.getActiveSession()` is patched to hand back a stub whose
+    `dataSource.register` is a no-op, so the script's module-level
+    registration succeeds and the generated `RestSource`/`_Reader` classes
+    can be driven directly: `_Reader(fake_schema(...)).partitions()` and
+    `.read(partition)` run exactly the code an executor would.
+    """
+    from pyspark.sql import SparkSession
+
+    install_fake_pipelines()
+    script = generate(config)
+    assert_hygiene(script)
+    stub = SimpleNamespace(
+        dataSource=SimpleNamespace(register=lambda cls: None),
+        conf=SimpleNamespace(set=lambda key, value: None),
+    )
+    namespace: dict[str, Any] = {}
+    with mock.patch.object(SparkSession, "getActiveSession", return_value=stub):
+        exec(compile(script, "<generated>", "exec"), namespace)  # noqa: S102
     return SimpleNamespace(**namespace)

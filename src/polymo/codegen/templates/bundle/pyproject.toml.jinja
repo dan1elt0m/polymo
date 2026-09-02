@@ -7,6 +7,9 @@ dependencies = [
 {% if has_uc_secret_refs %}
     "azure-keyvault-secrets>=4.8",
 {% endif %}
+{% if state_remote %}
+    "fsspec>=2023.1",
+{% endif %}
 ]
 
 [build-system]
