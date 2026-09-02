@@ -120,6 +120,8 @@ export interface StreamConfig {
   streaming?: boolean;
   response_format?: 'json' | 'xml';
   xml_record_path?: string | null;
+  // Filter pushdown: DataFrame column name -> API query parameter name.
+  pushdown_params?: Record<string, string>;
 }
 
 export interface SourceConfig {
@@ -275,6 +277,7 @@ export interface ConfigFormState {
   incrementalStatePath: string;
   incrementalStartValue: string;
   incrementalStateKey: string;
+  pushdownParams: Record<string, string>;
   inferSchema: boolean;
   schema: string;
   headers: Record<string, string>;

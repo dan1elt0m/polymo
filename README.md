@@ -57,7 +57,7 @@ def posts():
     return spark.read.format("posts_source").load()
 ```
 
-Every field you fill in — pagination, incremental sync, partitioning, error handling, headers, query parameters, an explicit schema, XML responses, streaming tables — is baked in as a constant or a small block of specialized code. Options you don't use produce no code at all.
+Every field you fill in — pagination, incremental sync, partitioning, filter pushdown, error handling, headers, query parameters, an explicit schema, XML responses, streaming tables — is baked in as a constant or a small block of specialized code. Options you don't use produce no code at all.
 
 <p align="center">
   <a href="docs/ui.png">

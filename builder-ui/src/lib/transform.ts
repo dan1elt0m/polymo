@@ -22,6 +22,14 @@ export function formStateToConfig(formState: ConfigFormState): RestSourceConfig 
     }
   });
 
+  // Filter pushdown mapping (column -> query parameter) - drop blank rows
+  const cleanPushdownParams: Record<string, string> = {};
+  Object.entries(formState.pushdownParams || {}).forEach(([column, param]) => {
+    if (column.trim() && param.trim()) {
+      cleanPushdownParams[column.trim()] = param.trim();
+    }
+  });
+
   const fieldPathSegments = (formState.recordFieldPath || [])
     .map((segment) => segment.trim())
     .filter((segment) => segment.length > 0);
@@ -413,6 +421,7 @@ export function formStateToConfig(formState: ConfigFormState): RestSourceConfig 
       },
       error_handler: errorHandler,
       ...(partitionConfig ? { partition: partitionConfig } : {}),
+      ...(Object.keys(cleanPushdownParams).length ? { pushdown_params: cleanPushdownParams } : {}),
     },
   } as any; // stream.name is optional; backend derives one from the path when omitted
 }
@@ -622,6 +631,9 @@ export function configToFormState(config: RestSourceConfig): ConfigFormState {
     incrementalStatePath: config.stream.incremental?.state_path || '',
     incrementalStartValue: config.stream.incremental?.start_value || '',
     incrementalStateKey: config.stream.incremental?.state_key || '',
+    pushdownParams: Object.fromEntries(
+      Object.entries(config.stream.pushdown_params || {}).map(([column, param]) => [column, String(param)]),
+    ),
     inferSchema: config.stream.infer_schema ?? true,
     schema: config.stream.schema || '',
     recordFieldPath: Array.isArray(recordSelector.field_path) ? recordSelector.field_path.map(String) : [],

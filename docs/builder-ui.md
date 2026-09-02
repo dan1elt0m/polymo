@@ -60,6 +60,9 @@ Some APIs wrap data inside other objects. Use this panel to:
 ### 7. Schema tab
 Switch to the **Schema** tab if you need to define the columns yourself. Otherwise leave **Infer schema** turned on and Polymo will guess from sample data.
 
+### 8. Filter pushdown
+Map DataFrame columns to API query parameters (`status → status`, `owner_id → owner`). Equality filters on those columns are sent to the API as query parameters instead of being applied after the read (Spark 4.1+): `df.filter(col("status") == "active")` becomes `?status=active`. Anything else — other operators, other columns — still works, Spark just evaluates it after the fetch. A pushed value overrides a query parameter of the same name; streaming tables don't support it. The Generated Code pane shows the `pushFilters()` method the mapping produces; the Preview panel is unaffected (it never has filters to push). See [Filter pushdown](config.md#filter-pushdown).
+
 ## The Generated Code pane
 Switch to the **Generated Code** tab at any time to see the actual Python script your configuration produces. It updates automatically (with a short debounce) every time you change a field on the UI Builder tab — there is no separate "generate" step and nothing to keep in sync by hand.
 

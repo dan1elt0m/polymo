@@ -107,6 +107,7 @@ export const INITIAL_FORM_STATE: ConfigFormState = {
   incrementalStatePath: '',
   incrementalStartValue: '',
   incrementalStateKey: '',
+  pushdownParams: {},
   inferSchema: true,
   schema: '',
   recordFieldPath: [],

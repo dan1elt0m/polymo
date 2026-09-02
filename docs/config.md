@@ -257,6 +257,52 @@ what `_uc_secret` needs.
   was referenced — edit that constant after export, or wire it up to a
   secret store the same way as the Bearer/OAuth2 placeholders.
 
+## Filter pushdown
+
+The **Filter pushdown** panel (`stream.pushdown_params`) maps DataFrame
+column names to API query parameter names:
+
+```json
+"pushdown_params": {"status": "status", "owner_id": "owner"}
+```
+
+With a mapping in place, the generated `_Reader` implements Spark's
+`pushFilters()` (Python Data Source filter pushdown, Spark 4.1+): an
+**equality filter on a mapped column** is taken out of Spark's post-read
+filtering and sent to the API as that query parameter on every request the
+read makes — the sequential fetch, every static window, and the page probe
+and per-page fetches of the `pagination` strategy alike.
+
+```python
+spark.read.format("posts_source").load().filter(col("status") == "active")
+# -> GET /posts?status=active
+```
+
+What is pushed and what is not:
+
+- Pushed: `EqualTo` on a top-level column listed in `pushdown_params`, with
+  a non-null value (rendered with `str()`, so `owner_id == 42` becomes
+  `?owner=42`).
+- Left to Spark (returned from `pushFilters` unchanged): every other filter
+  shape — `In`, comparisons, `Not`, `IsNull`, string matches — plus
+  equality on an unmapped column, on a nested column (`a.b`), or against
+  `null`. Those still apply; they just run after the read.
+
+Precedence: a pushed value **overrides** an explicit `stream.params` entry
+of the same name (you asked for the filter, so it wins). Mapping a column
+to a parameter the fetch loop assigns itself (`page`/`offset`/`limit`, the
+pagination or incremental `cursor_param`, a `param_range` partition param)
+or to a query-placed `api_key` name is a config error, as is mapping two
+columns to one parameter.
+
+Runtime note: Spark only calls `pushFilters` when
+`spark.sql.python.filterPushdown.enabled` is on (it defaults to off in
+Spark 4.1/4.2, and a reader that implements `pushFilters` is rejected while
+it is off), so the generated script sets that conf on the session next to
+the `dataSource.register(...)` call. Filter pushdown is batch-only; a
+streaming table with `pushdown_params` is rejected at generation time. When
+the mapping is empty the generated script contains no pushdown code at all.
+
 ## Reader options
 
 The **Spark reader options** panel supplies values used to resolve path

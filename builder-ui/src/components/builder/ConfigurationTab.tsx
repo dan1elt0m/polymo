@@ -12,6 +12,7 @@ import { PaginationSection } from "./sections/PaginationSection";
 import { IncrementalSection } from "./sections/IncrementalSection";
 import { RecordSelectorSection } from "./sections/RecordSelectorSection";
 import { PartitioningSection } from "./sections/PartitioningSection";
+import { PushdownSection } from "./sections/PushdownSection";
 import { ReaderOptionsSection } from "./sections/ReaderOptionsSection";
 import { SchemaTab } from "./SchemaTab";
 
@@ -77,6 +78,7 @@ export const ConfigurationTab: React.FC<ConfigurationTabProps> = ({
           <ErrorHandlingSection state={state} onUpdateState={onUpdateState} />
           <HeadersSection state={state} onUpdateState={onUpdateState} />
           <ParamsSection params={state.params} onAddParam={onAddParam} onRemoveParam={onRemoveParam} onUpdateParam={onUpdateParam} />
+          <PushdownSection state={state} onUpdateState={onUpdateState} />
           <ReaderOptionsSection
             readerOptions={readerOptions}
             setReaderOptions={setReaderOptions}
