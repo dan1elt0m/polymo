@@ -152,6 +152,7 @@ def generate_bundle(
         catalog_repr=_yaml_str(catalog),
         schema_repr=_yaml_str(schema),
         stream=stream,
+        pushdown=ctx["pushdown"],
     )
 
     state_remote = ctx["incremental"] and ctx["state_remote"]

@@ -298,8 +298,11 @@ columns to one parameter.
 Runtime note: Spark only calls `pushFilters` when
 `spark.sql.python.filterPushdown.enabled` is on (it defaults to off in
 Spark 4.1/4.2, and a reader that implements `pushFilters` is rejected while
-it is off), so the generated script sets that conf on the session next to
-the `dataSource.register(...)` call. Filter pushdown is batch-only; a
+it is off). The standalone script sets that conf on the session itself,
+next to the `dataSource.register(...)` call; a bundle never sets Spark conf
+from source code — its `databricks.yml` declares it under the pipeline
+resource instead (`configuration: {spark.sql.python.filterPushdown.enabled:
+"true"}`), so it arrives as pipeline configuration. Filter pushdown is batch-only; a
 streaming table with `pushdown_params` is rejected at generation time. When
 the mapping is empty the generated script contains no pushdown code at all.
 

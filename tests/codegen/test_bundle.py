@@ -1382,11 +1382,15 @@ def test_bundle_wheel_pushed_filter_survives_pickling_to_fresh_worker(
         "def pushFilters(self, filters: list[Filter]) -> Iterable[Filter]:" in source_py
     )
     assert 'PUSHDOWN_PARAMS: dict[str, str] = {"status": "status"}' in source_py
-    pipeline_py = files["pipelines/posts.py"]
-    assert (
-        'spark.conf.set("spark.sql.python.filterPushdown.enabled", "true")'
-        in pipeline_py
-    )
+    # a bundle never sets Spark conf from source code: the pipeline file
+    # stays plain, databricks.yml carries the conf as pipeline configuration
+    assert "spark.conf.set(" not in files["pipelines/posts.py"]
+    pipeline_resource = yaml.safe_load(files["databricks.yml"])["resources"][
+        "pipelines"
+    ][f"{pkg}_pipeline"]
+    assert pipeline_resource["configuration"] == {
+        "spark.sql.python.filterPushdown.enabled": "true"
+    }
     project_dir = _write_bundle_project(tmp_path, pkg, files)
     wheel_path = _build_wheel(project_dir)
 
@@ -1435,6 +1439,8 @@ def test_databricks_yml_parses_with_expected_resource_keys():
     assert pipeline["catalog"] == "main"
     assert pipeline["schema"] == "raw"
     assert pipeline["serverless"] is True
+    # no pushdown -> no pipeline configuration block at all
+    assert "configuration" not in pipeline
     assert pipeline["root_path"] == "${workspace.file_path}"
     assert pipeline["libraries"] == [{"glob": {"include": "pipelines/posts.py"}}]
     assert pipeline["environment"]["dependencies"] == [
