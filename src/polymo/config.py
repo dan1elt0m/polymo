@@ -221,11 +221,26 @@ class SchemaConfig:
 
 @dataclass(frozen=True)
 class IncrementalConfig:
-    """Incremental loading hints for future extensions."""
+    """Incremental cursor tracking between runs.
+
+    Enabled iff both `cursor_param` and `cursor_field` are set (`mode` is a
+    free-text label stored alongside the cursor in the state file). The
+    remaining fields mirror the 0.x reader options of the same name:
+    `state_path` (local path or fsspec URL, default `<stream>_state.json`),
+    `start_value` (seed used only when no stored cursor exists) and
+    `state_key` (entry key in the state file, default `<stream>@<base_url>`).
+    """
 
     mode: Optional[str] = None
     cursor_param: Optional[str] = None
     cursor_field: Optional[str] = None
+    state_path: Optional[str] = None
+    start_value: Optional[str] = None
+    state_key: Optional[str] = None
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.cursor_param and self.cursor_field)
 
 
 @dataclass(frozen=True)
@@ -594,6 +609,9 @@ def config_to_dict(config: RestSourceConfig) -> Dict[str, Any]:
         "mode": stream.incremental.mode,
         "cursor_param": stream.incremental.cursor_param,
         "cursor_field": stream.incremental.cursor_field,
+        "state_path": stream.incremental.state_path,
+        "start_value": stream.incremental.start_value,
+        "state_key": stream.incremental.state_key,
     }
     stream_dict["incremental"] = incremental
 
@@ -1066,11 +1084,15 @@ def _parse_incremental(raw: Any) -> IncrementalConfig:
     mode = raw.get("mode")
     cursor_param = raw.get("cursor_param")
     cursor_field = raw.get("cursor_field")
+    start_value = raw.get("start_value")
 
     return IncrementalConfig(
         mode=str(mode) if mode else None,
         cursor_param=str(cursor_param) if cursor_param else None,
         cursor_field=str(cursor_field) if cursor_field else None,
+        state_path=_maybe_str(raw.get("state_path"), "incremental.state_path"),
+        start_value=str(start_value) if start_value not in (None, "") else None,
+        state_key=_maybe_str(raw.get("state_key"), "incremental.state_key"),
     )
 
 

@@ -1041,3 +1041,80 @@ def test_auth_secret_and_uc_secret_are_mutually_exclusive() -> None:
 
     with pytest.raises(ConfigError):
         parse_config(raw)
+
+
+# --- incremental: state_path / start_value / state_key ----------------------
+
+
+def _incremental_raw(incremental: dict) -> dict:
+    return {
+        "version": 0.1,
+        "source": {"type": "rest", "base_url": "https://api.test"},
+        "stream": {"name": "sample", "path": "/objects", "incremental": incremental},
+    }
+
+
+def test_incremental_state_fields_parse_and_round_trip() -> None:
+    raw = _incremental_raw(
+        {
+            "mode": "updated_at",
+            "cursor_param": "since",
+            "cursor_field": "updated_at",
+            "state_path": "s3://team/state.json",
+            "start_value": 20240101,
+            "state_key": "sample-prod",
+        }
+    )
+    config = parse_config(raw)
+    incremental = config.stream.incremental
+    assert incremental.enabled is True
+    assert incremental.state_path == "s3://team/state.json"
+    assert incremental.start_value == "20240101"
+    assert incremental.state_key == "sample-prod"
+
+    round_tripped = config_to_dict(config)["stream"]["incremental"]
+    assert round_tripped == {
+        "mode": "updated_at",
+        "cursor_param": "since",
+        "cursor_field": "updated_at",
+        "state_path": "s3://team/state.json",
+        "start_value": "20240101",
+        "state_key": "sample-prod",
+    }
+    assert parse_config(config_to_dict(config)).stream.incremental == incremental
+
+
+def test_incremental_state_fields_default_to_none() -> None:
+    config = parse_config(
+        _incremental_raw({"mode": "x", "cursor_param": "since", "cursor_field": "u"})
+    )
+    incremental = config.stream.incremental
+    assert incremental.state_path is None
+    assert incremental.start_value is None
+    assert incremental.state_key is None
+    serialized = config_to_dict(config)["stream"]["incremental"]
+    assert serialized["state_path"] is None
+    assert serialized["start_value"] is None
+    assert serialized["state_key"] is None
+
+
+def test_incremental_enabled_requires_cursor_param_and_field() -> None:
+    only_mode = parse_config(_incremental_raw({"mode": "x"}))
+    assert only_mode.stream.incremental.enabled is False
+    only_param = parse_config(_incremental_raw({"cursor_param": "since"}))
+    assert only_param.stream.incremental.enabled is False
+
+
+@pytest.mark.parametrize("field", ["state_path", "state_key"])
+@pytest.mark.parametrize("value", ["", 7])
+def test_incremental_state_path_and_key_must_be_non_empty_strings(field, value) -> None:
+    raw = _incremental_raw({"cursor_param": "since", "cursor_field": "u", field: value})
+    with pytest.raises(ConfigError, match=f"incremental.{field}"):
+        parse_config(raw)
+
+
+def test_incremental_blank_start_value_means_none() -> None:
+    raw = _incremental_raw(
+        {"cursor_param": "since", "cursor_field": "u", "start_value": ""}
+    )
+    assert parse_config(raw).stream.incremental.start_value is None
