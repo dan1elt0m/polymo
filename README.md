@@ -14,12 +14,12 @@
 
 # Welcome to Polymo
 
-Setting up API ingestion in Databricks Lakeflow Declarative Pipelines is tricky, because it involves classes and requires knowledge of inner working of declrative pipelines. Polymo is a tool that helps to define the pipeline from a [Builder UI](docs/builder-ui.md), it allows you to preview real responses locally, and export a standalone [Lakeflow Declarative Pipelines](https://docs.databricks.com/aws/en/dlt/) pipeline. `polymo` is never a dependency of the scripts it generates.
+Setting up API ingestion in Databricks Lakeflow Declarative Pipelines is tricky, because it involves classes and requires knowledge of inner working of declrative pipelines. Polymo is a tool that helps to define the pipeline from the [Polymo UI](docs/builder-ui.md), it allows you to preview real responses locally, and export a standalone [Lakeflow Declarative Pipelines](https://docs.databricks.com/aws/en/dlt/) pipeline. `polymo` is never a dependency of the scripts it generates.
 The output is plain Python that only needs `requests`, the standard library, and `pyspark`. Nothing is imported from `polymo`, and there is no config file to load at runtime. The generated code is yours: edit it, version it, review it like any other code.
 
-## What the builder generates
+## What Polymo generates
 
-Pointing the builder at `https://jsonplaceholder.typicode.com/posts` produces a single file. Shown here, the real script also contains the retry/backoff and response-normalization helpers.
+Pointing Polymo at `https://jsonplaceholder.typicode.com/posts` produces a single file. Shown here, the real script also contains the retry/backoff and response-normalization helpers.
 
 ```python
 """Lakeflow Declarative Pipelines connector for posts."""
@@ -68,17 +68,17 @@ Every field you fill in: pagination, incremental sync, partitioning, filter push
 
 ## How does it work?
 
-Open the Builder, describe your API (base URL and path are the only required fields), and press **Preview** to see the DataFrame, the raw records, and the raw API responses side by side. When you're happy, switch to the **Generated Code** tab and download the script or bootstrap a Databricks project.
+Open Polymo, describe your API (base URL and path are the only required fields), and press **Preview** to see the DataFrame, the raw records, and the raw API responses side by side. When you're happy, switch to the **Generated Code** tab and download the script or bootstrap a Databricks project.
 
 Ready to run it on Databricks? The **Deploy** tab walks through it: Select Profile → Target → Bootstrap → Deploy → Run:
 
 1. Pick a Databricks CLI profile, then a catalog and schema (or type a schema name).
 2. **Bootstrap** writes a complete [Databricks Asset Bundle](https://docs.databricks.com/dev-tools/bundles/) project: the connector as an installable package under `src/`, the pipeline under `pipelines/`, and a `databricks.yml` that builds the wheel and attaches it to a serverless pipeline.
-3. **Deploy** and **Run** drive `databricks bundle deploy` and `databricks bundle run` without leaving the Builder, with the CLI output docked below.
+3. **Deploy** and **Run** drive `databricks bundle deploy` and `databricks bundle run` without leaving Polymo, with the CLI output docked below.
 
-Secrets never land in generated code. Each auth field (bearer token, API key, OAuth2 client secret) and any `{{ options.<name> }}` placeholder can reference a Databricks secret scope or a Unity Catalog service credential backed by Azure Key Vault; the pipeline resolves the value on the driver and passes it to the reader, and the Builder redacts it from every preview. Requires the [Databricks CLI](https://docs.databricks.com/dev-tools/cli/) and a `~/.databrickscfg` profile, see [Deploy to Databricks](docs/builder-ui.md#deploy-to-databricks) for the full walkthrough.
+Secrets never land in generated code. Each auth field (bearer token, API key, OAuth2 client secret) and any `{{ options.<name> }}` placeholder can reference a Databricks secret scope or a Unity Catalog service credential backed by Azure Key Vault; the pipeline resolves the value on the driver and passes it to the reader, and Polymo redacts it from every preview. Requires the [Databricks CLI](https://docs.databricks.com/dev-tools/cli/) and a `~/.databrickscfg` profile, see [Deploy to Databricks](docs/builder-ui.md#deploy-to-databricks) for the full walkthrough.
 
-See the [Connector options reference](docs/config.md) for what every Builder field generates, and the [Builder UI walkthrough](docs/builder-ui.md) for a guided tour.
+See the [Connector options reference](docs/config.md) for what every field generates, and the [Polymo UI walkthrough](docs/builder-ui.md) for a guided tour.
 
 ## How to start?
 
@@ -87,7 +87,7 @@ pip install polymo
 ```
 
 
-## Launch the builder UI
+## Launch the UI
 
 ```bash
 polymo
@@ -99,7 +99,7 @@ Or without installing it first:
 uvx polymo
 ```
 
-#### (Optional) Run the Builder in Docker
+#### (Optional) Run Polymo in Docker
 
 ```bash
 docker compose up --build builder
