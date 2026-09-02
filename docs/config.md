@@ -168,11 +168,16 @@ in `client.py` is instead typed `API_TOKEN: str | None = None` (the
 `_dbx_secret` helper function itself is still generated, just not called at
 module scope), and `pipelines/<stream>.py` — which only ever runs on the
 driver — calls it there and threads the resolved value through as a
-DataSource reader option (`secret_api_token`, etc.), which `src/<pkg>/source.py`
-installs onto `client`'s globals before the first fetch. If a slot is still
-`None` once the fetch path actually needs it, the generated code raises a
-clear `RuntimeError` naming the slot instead of silently sending `None` to
-the real API. Nothing about deploying the bundle itself
+DataSource reader option (`secret_api_token`, etc.). Spark reconstructs the
+reader fresh on every executor (it pickles the driver's reader object by
+reference and re-imports `client.py` there, wiping any module state the
+driver had set), so `src/<pkg>/source.py` installs the resolved option onto
+`client`'s globals twice: once on the driver when the reader is built
+(covering schema inference), and again on the worker at the top of every
+`read()`/`readBetweenOffsets()` call, immediately before that call's fetch.
+If a slot is still `None` once a fetch path actually needs it, the generated
+code raises a clear `RuntimeError` naming the slot instead of silently
+sending `None` to the real API. Nothing about deploying the bundle itself
 (`databricks bundle deploy`) touches secret values — deploy only uploads
 source files and cluster/pipeline definitions; the secret is resolved only
 once the pipeline actually runs (`databricks bundle run`).

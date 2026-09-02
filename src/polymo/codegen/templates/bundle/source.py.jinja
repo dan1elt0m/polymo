@@ -32,13 +32,23 @@ def _apply_secret_options(options: Any) -> None:
 {% endif %}
 {% if streaming %}
 class _Reader(SimpleDataSourceStreamReader):
-    def __init__(self, schema: Any) -> None:
+    def __init__(self, schema: Any{% if bundle_secret_slots %}, options: Any{% endif %}) -> None:
         self._columns: list[str] = [field.name for field in schema.fields]
+{% if bundle_secret_slots %}
+        self._secret_options: dict[str, str] = {
+            key: value
+            for key, value in options.items()
+            if key.lower().startswith("secret_")
+        }
+{% endif %}
 
     def initialOffset(self) -> dict[str, Any]:
         return {"page": 0}
 
     def read(self, start: dict[str, Any]) -> tuple[Iterator[tuple], dict[str, Any]]:
+{% if bundle_secret_slots %}
+        _apply_secret_options(self._secret_options)
+{% endif %}
         page = start["page"]
         records = fetch_page(page)
         rows = [tuple(r.get(c) for c in self._columns) for r in records]
@@ -46,6 +56,9 @@ class _Reader(SimpleDataSourceStreamReader):
         return iter(rows), {"page": next_page}
 
     def readBetweenOffsets(self, start: dict[str, Any], end: dict[str, Any]) -> Iterator[tuple]:
+{% if bundle_secret_slots %}
+        _apply_secret_options(self._secret_options)
+{% endif %}
         rows = []
         for page in range(start["page"], end["page"]):
             for r in fetch_page(page):
@@ -67,8 +80,10 @@ class {{ source_class_name }}(DataSource):
     def simpleStreamReader(self, schema: Any) -> "_Reader":
 {% if bundle_secret_slots %}
         _apply_secret_options(self.options)
-{% endif %}
+        return _Reader(schema, self.options)
+{% else %}
         return _Reader(schema)
+{% endif %}
 {% else %}
 class {{ source_class_name }}(DataSource):
     @classmethod
@@ -85,22 +100,37 @@ class {{ source_class_name }}(DataSource):
     def reader(self, schema: Any) -> "_Reader":
 {% if bundle_secret_slots %}
         _apply_secret_options(self.options)
-{% endif %}
+        return _Reader(schema, self.options)
+{% else %}
         return _Reader(schema)
+{% endif %}
 
 
 class _Reader(DataSourceReader):
-    def __init__(self, schema: Any) -> None:
+    def __init__(self, schema: Any{% if bundle_secret_slots %}, options: Any{% endif %}) -> None:
         self._columns: list[str] = [field.name for field in schema.fields]
+{% if bundle_secret_slots %}
+        self._secret_options: dict[str, str] = {
+            key: value
+            for key, value in options.items()
+            if key.lower().startswith("secret_")
+        }
+{% endif %}
 
 {% if has_windows %}
     def partitions(self) -> list[InputPartition]:
         return [InputPartition(index) for index in range(len(WINDOWS))]
 
     def read(self, partition) -> Iterator[tuple]:
+{% if bundle_secret_slots %}
+        _apply_secret_options(self._secret_options)
+{% endif %}
         records = fetch_records(**WINDOWS[partition.value])
 {% else %}
     def read(self, partition) -> Iterator[tuple]:
+{% if bundle_secret_slots %}
+        _apply_secret_options(self._secret_options)
+{% endif %}
         records = fetch_records()
 {% endif %}
 {% if incremental_mode %}

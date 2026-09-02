@@ -782,6 +782,432 @@ def test_bundle_wheel_option_placeholder_in_path_resolved(tmp_path, http_server)
     assert http_server.log[-1][1] == "/tenants/real-tenant/posts"
 
 
+# --- executor wheel simulation: three real processes, no shared interpreter --
+# Regression test for a critical gap in the two-subprocess simulations above:
+# they construct the DataSource, call `.reader(schema)`, AND call
+# `reader.read(None)` all in the SAME "worker" process. That process is a
+# fresh interpreter relative to the test itself, but `_apply_secret_options`
+# (called from `.reader()`/`.simpleStreamReader()`) and `reader.read()` both
+# run in that one process, sharing the same `<pkg>.client` module object —
+# so the setattr from `.reader()` is still visible when `.read()` runs
+# immediately after it. Real Spark never does this: it pickles the
+# constructed `_Reader` instance BY REFERENCE on the driver and sends the
+# pickle to a genuinely separate worker process, which reconstructs it via a
+# FRESH `import <pkg>.source` (and, transitively, `<pkg>.client`) — with the
+# driver-side `_apply_secret_options` setattr nowhere in reach, because it
+# ran on a different module object in a different process entirely. That's
+# exactly the bug this fix closes: `_apply_secret_options` must also run on
+# the worker, right before every `read()`/`readBetweenOffsets()` call.
+#
+# Simulated with three real processes sharing only the built wheel and a
+# stdlib-pickle file on disk: (A) `uv build --wheel` (via `_build_wheel`,
+# same as every other wheel-sim test above); (B) a "driver" process that
+# constructs the DataSource with the resolved secret option (mirroring what
+# `pipelines/<stream>.py` passes), calls `schema()` and `reader(schema)` (or
+# `simpleStreamReader(schema)`), and pickles the reader with the STDLIB
+# `pickle` module — by-reference pickling of a class that lives in the
+# wheel is exactly what Spark's cloudpickle does too, so stdlib pickle is a
+# faithful stand-in and keeps this test cloudpickle-free; (C) a "worker"
+# process — a genuinely fresh interpreter with NOTHING but the wheel on
+# `sys.path` — that unpickles the reader and calls `read()`/
+# `readBetweenOffsets()` against the local mock HTTP server, asserting the
+# request that actually left carried the resolved secret.
+
+_DRIVER_PICKLE_SCRIPT = """
+import importlib
+import json
+import pickle
+import sys
+
+whl_path, pkg, source_class_name, options_json, pickle_path, mode = (
+    sys.argv[1],
+    sys.argv[2],
+    sys.argv[3],
+    sys.argv[4],
+    sys.argv[5],
+    sys.argv[6],
+)
+if whl_path:
+    sys.path.insert(0, whl_path)
+
+options = json.loads(options_json)
+
+
+class _Field:
+    def __init__(self, name):
+        self.name = name
+
+
+class _Schema:
+    def __init__(self, names):
+        self.fields = [_Field(name) for name in names]
+
+
+source_module = importlib.import_module(f"{pkg}.source")
+source_cls = getattr(source_module, source_class_name)
+
+# Mirrors a real driver: construct the DataSource with the options a real
+# driver would have resolved and passed (Spark hands DataSource.__init__ a
+# case-insensitive mapping that lowercases every key on the way in, so the
+# option is passed pre-lowercased here too), then obtain the reader. (Not
+# calling schema() here -- unlike a real driver, which would -- keeps this
+# script from making its own live HTTP request when a config has no
+# explicit schema_ddl and schema() falls back to _infer_schema(); that
+# path is covered separately, and would otherwise double the request count
+# a caller sees against the mock server below.)
+instance = source_cls(options)
+schema = _Schema(["id", "title"])
+if mode == "stream":
+    reader = instance.simpleStreamReader(schema)
+else:
+    reader = instance.reader(schema)
+
+# stdlib pickle, BY REFERENCE (the _Reader class lives in the wheel's
+# <pkg>.source module) -- exactly what Spark's cloudpickle does with a
+# module-level class. The worker process below reconstructs it from a
+# fresh `import <pkg>.source`, with <pkg>.client re-imported at ITS
+# import-time defaults, same as a real executor.
+with open(pickle_path, "wb") as fh:
+    pickle.dump(reader, fh)
+"""
+
+_WORKER_READ_SCRIPT = """
+import json
+import pickle
+import sys
+
+whl_path, pickle_path = sys.argv[1], sys.argv[2]
+if whl_path:
+    sys.path.insert(0, whl_path)
+
+with open(pickle_path, "rb") as fh:
+    reader = pickle.load(fh)
+
+records = [dict(zip(["id", "title"], row)) for row in reader.read(None)]
+sys.stdout.write(json.dumps(records))
+"""
+
+_WORKER_READ_BETWEEN_OFFSETS_SCRIPT = """
+import json
+import pickle
+import sys
+
+whl_path, pickle_path = sys.argv[1], sys.argv[2]
+if whl_path:
+    sys.path.insert(0, whl_path)
+
+with open(pickle_path, "rb") as fh:
+    reader = pickle.load(fh)
+
+rows = list(reader.readBetweenOffsets({"page": 0}, {"page": 1}))
+records = [dict(zip(["id", "title"], row)) for row in rows]
+sys.stdout.write(json.dumps(records))
+"""
+
+# Negative control shared by every test below: a worker process with the
+# wheel on sys.path and NOTHING else -- no reader, no `_apply_secret_options`
+# call of any kind -- calling the fetch entrypoint directly. It must fail
+# with the generated RuntimeError guard; if it ever silently sent a
+# placeholder/None value to the real API, the fix would be too broad (or the
+# guard broken) rather than too narrow.
+_WORKER_DIRECT_FETCH_SCRIPT = """
+import importlib
+import sys
+
+whl_path, pkg, fetch_name = sys.argv[1], sys.argv[2], sys.argv[3]
+if whl_path:
+    sys.path.insert(0, whl_path)
+
+client_module = importlib.import_module(f"{pkg}.client")
+fetch = getattr(client_module, fetch_name)
+if fetch_name == "fetch_page":
+    fetch(0)
+else:
+    list(fetch())
+"""
+
+
+def _write_bundle_project(tmp_path: Path, pkg: str, files: dict) -> Path:
+    project_dir = tmp_path / f"bundle_project_{pkg}"
+    (project_dir / "src" / pkg).mkdir(parents=True)
+    (project_dir / "pyproject.toml").write_text(files["pyproject.toml"])
+    (project_dir / "src" / pkg / "__init__.py").write_text(
+        files[f"src/{pkg}/__init__.py"]
+    )
+    (project_dir / "src" / pkg / "client.py").write_text(files[f"src/{pkg}/client.py"])
+    (project_dir / "src" / pkg / "source.py").write_text(files[f"src/{pkg}/source.py"])
+    return project_dir
+
+
+def _run_driver_pickle(
+    tmp_path: Path,
+    *,
+    wheel_path: Path,
+    pkg: str,
+    source_class_name: str,
+    options: dict,
+    mode: str,
+    tag: str,
+) -> Path:
+    driver_script = tmp_path / f"driver_{tag}.py"
+    driver_script.write_text(_DRIVER_PICKLE_SCRIPT)
+    pickle_path = tmp_path / f"reader_{tag}.pickle"
+    driver_cwd = tmp_path / f"driver_cwd_{tag}"
+    driver_cwd.mkdir()
+    driver = subprocess.run(
+        [
+            sys.executable,
+            str(driver_script),
+            str(wheel_path),
+            pkg,
+            source_class_name,
+            json.dumps(options),
+            str(pickle_path),
+            mode,
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(driver_cwd),
+    )
+    assert driver.returncode == 0, driver.stderr
+    assert pickle_path.exists(), driver.stderr
+    return pickle_path
+
+
+def _run_worker(
+    tmp_path: Path, *, wheel_path: Path, pickle_path: Path, script: str, tag: str
+) -> subprocess.CompletedProcess:
+    worker_script = tmp_path / f"worker_{tag}.py"
+    worker_script.write_text(script)
+    worker_cwd = tmp_path / f"worker_cwd_{tag}"
+    worker_cwd.mkdir()
+    return subprocess.run(
+        [sys.executable, str(worker_script), str(wheel_path), str(pickle_path)],
+        capture_output=True,
+        text=True,
+        cwd=str(worker_cwd),
+    )
+
+
+def _run_direct_fetch(
+    tmp_path: Path, *, wheel_path: Path, pkg: str, fetch_name: str, tag: str
+) -> subprocess.CompletedProcess:
+    script = tmp_path / f"direct_{tag}.py"
+    script.write_text(_WORKER_DIRECT_FETCH_SCRIPT)
+    cwd = tmp_path / f"direct_cwd_{tag}"
+    cwd.mkdir()
+    return subprocess.run(
+        [sys.executable, str(script), str(wheel_path), pkg, fetch_name],
+        capture_output=True,
+        text=True,
+        cwd=str(cwd),
+    )
+
+
+def test_bundle_wheel_reader_pickled_on_driver_secret_survives_fresh_worker(
+    tmp_path, http_server
+):
+    """The core regression test: a reader built (and secret-applied) on one
+    process must still carry a working secret once pickled and unpickled
+    into a genuinely different process, exactly like a real Spark executor.
+    """
+    seen_auth_headers: list = []
+
+    def route(query, headers, body):
+        seen_auth_headers.append(headers.get("Authorization"))
+        return 200, [{"id": 1, "title": "hello from a fresh worker"}], {}
+
+    http_server.routes["/posts"] = route
+    config = make_config(
+        base_url=http_server.url,
+        name="posts",
+        path="/posts",
+        auth=AuthConfig(
+            type="bearer", secret=SecretRef(scope="my-scope", key="my-key")
+        ),
+    )
+
+    pkg = "execsim_pickle_pkg"
+    files = generate_bundle(config, project_name=pkg, catalog="main", schema="raw")
+    source_class_name = f"{_pascal_case(pkg)}Source"
+    project_dir = _write_bundle_project(tmp_path, pkg, files)
+    wheel_path = _build_wheel(project_dir)
+
+    pickle_path = _run_driver_pickle(
+        tmp_path,
+        wheel_path=wheel_path,
+        pkg=pkg,
+        source_class_name=source_class_name,
+        options={"secret_api_token": "resolved-secret-value"},
+        mode="batch",
+        tag="bearer",
+    )
+
+    worker = _run_worker(
+        tmp_path,
+        wheel_path=wheel_path,
+        pickle_path=pickle_path,
+        script=_WORKER_READ_SCRIPT,
+        tag="bearer",
+    )
+    assert worker.returncode == 0, worker.stderr
+    assert json.loads(worker.stdout) == [
+        {"id": 1, "title": "hello from a fresh worker"}
+    ]
+    assert seen_auth_headers[-1] == "Bearer resolved-secret-value"
+
+    # negative control: a worker process that imports the wheel and calls
+    # fetch_records() directly, with no reader / secret-installation step at
+    # all, must fail loudly instead of ever sending a request with a
+    # placeholder value.
+    direct = _run_direct_fetch(
+        tmp_path,
+        wheel_path=wheel_path,
+        pkg=pkg,
+        fetch_name="fetch_records",
+        tag="bearer",
+    )
+    assert direct.returncode != 0
+    assert "RuntimeError" in direct.stderr
+    assert (
+        "API_TOKEN was not installed by the pipeline — resolve secrets on"
+        " the driver and pass them as reader options"
+    ) in direct.stderr
+    # the request that reached the server is only the one from the worker
+    # above -- the direct-fetch negative control never got that far.
+    assert len(seen_auth_headers) == 1
+
+
+def test_bundle_wheel_reader_pickled_on_driver_opt_header_secret_survives_fresh_worker(
+    tmp_path, http_server
+):
+    """Same three-process check for an OPT_* secret embedded inside a
+    header literal (the Maileon shape: `Authorization: Basic
+    {{ options.api_key_b64 }}`) -- `_rebuild_option_literals` must also run
+    on the worker, not just the driver, or the header would still carry the
+    frozen-at-import `None`.
+    """
+    seen_auth_headers: list = []
+
+    def route(query, headers, body):
+        seen_auth_headers.append(headers.get("Authorization"))
+        return 200, [{"id": 1, "title": "hello"}], {}
+
+    http_server.routes["/posts"] = route
+    config = make_config(
+        base_url=http_server.url,
+        name="posts",
+        path="/posts",
+        headers={"Authorization": "Basic {{ options.api_key_b64 }}"},
+        option_secrets={"api_key_b64": SecretRef(scope="my-scope", key="api-key-b64")},
+    )
+
+    pkg = "execsim_pickle_opt_pkg"
+    files = generate_bundle(config, project_name=pkg, catalog="main", schema="raw")
+    source_class_name = f"{_pascal_case(pkg)}Source"
+    client_py = files[f"src/{pkg}/client.py"]
+    assert "def _rebuild_option_literals(" in client_py
+    project_dir = _write_bundle_project(tmp_path, pkg, files)
+    wheel_path = _build_wheel(project_dir)
+
+    pickle_path = _run_driver_pickle(
+        tmp_path,
+        wheel_path=wheel_path,
+        pkg=pkg,
+        source_class_name=source_class_name,
+        options={"secret_opt_api_key_b64": "dGVzdC12YWx1ZQ=="},
+        mode="batch",
+        tag="opt_header",
+    )
+
+    worker = _run_worker(
+        tmp_path,
+        wheel_path=wheel_path,
+        pickle_path=pickle_path,
+        script=_WORKER_READ_SCRIPT,
+        tag="opt_header",
+    )
+    assert worker.returncode == 0, worker.stderr
+    assert json.loads(worker.stdout) == [{"id": 1, "title": "hello"}]
+    assert seen_auth_headers[-1] == "Basic dGVzdC12YWx1ZQ=="
+    # unlike the API_TOKEN/API_KEY/CLIENT_SECRET auth slot (guarded inline on
+    # every `fetch_records`/`fetch_page` call, see the bearer-secret test's
+    # negative control), an OPT_* value embedded in a HEADERS/PARAMS/PATH
+    # literal is only re-checked when `_rebuild_option_literals` actually
+    # runs -- which only ever happens via `_apply_secret_options`, i.e. via
+    # the DataSource/reader. A direct `client.fetch_records()` call that
+    # bypasses the DataSource entirely (not something real Spark ever does)
+    # has no such guard to hit; that's a pre-existing, orthogonal gap, not
+    # part of what this fix closes, so it has no negative control here.
+
+
+def test_bundle_wheel_streaming_readbetweenoffsets_secret_survives_fresh_worker(
+    tmp_path, http_server
+):
+    """Same three-process check for the streaming reader's
+    `readBetweenOffsets` -- `SimpleDataSourceStreamReader.read` runs
+    driver-side in real Spark, but `readBetweenOffsets` runs on a worker,
+    so it needs its own `_apply_secret_options` call, independent of
+    `read`'s.
+    """
+    seen_auth_headers: list = []
+
+    def route(query, headers, body):
+        seen_auth_headers.append(headers.get("Authorization"))
+        return 200, [{"id": 1, "title": "hello streaming"}], {}
+
+    http_server.routes["/posts"] = route
+    config = make_config(
+        base_url=http_server.url,
+        name="posts",
+        path="/posts",
+        streaming=True,
+        schema="id BIGINT, title STRING",
+        pagination=PaginationConfig(type="page", page_param="page", page_size=100),
+        auth=AuthConfig(
+            type="bearer", secret=SecretRef(scope="my-scope", key="my-key")
+        ),
+    )
+
+    pkg = "execsim_pickle_stream_pkg"
+    files = generate_bundle(config, project_name=pkg, catalog="main", schema="raw")
+    source_class_name = f"{_pascal_case(pkg)}Source"
+    project_dir = _write_bundle_project(tmp_path, pkg, files)
+    wheel_path = _build_wheel(project_dir)
+
+    pickle_path = _run_driver_pickle(
+        tmp_path,
+        wheel_path=wheel_path,
+        pkg=pkg,
+        source_class_name=source_class_name,
+        options={"secret_api_token": "resolved-secret-value"},
+        mode="stream",
+        tag="stream",
+    )
+
+    worker = _run_worker(
+        tmp_path,
+        wheel_path=wheel_path,
+        pickle_path=pickle_path,
+        script=_WORKER_READ_BETWEEN_OFFSETS_SCRIPT,
+        tag="stream",
+    )
+    assert worker.returncode == 0, worker.stderr
+    assert json.loads(worker.stdout) == [{"id": 1, "title": "hello streaming"}]
+    assert seen_auth_headers[-1] == "Bearer resolved-secret-value"
+
+    direct = _run_direct_fetch(
+        tmp_path, wheel_path=wheel_path, pkg=pkg, fetch_name="fetch_page", tag="stream"
+    )
+    assert direct.returncode != 0
+    assert "RuntimeError" in direct.stderr
+    assert (
+        "API_TOKEN was not installed by the pipeline — resolve secrets on"
+        " the driver and pass them as reader options"
+    ) in direct.stderr
+    assert len(seen_auth_headers) == 1
+
+
 # --- databricks.yml -----------------------------------------------------------
 
 
