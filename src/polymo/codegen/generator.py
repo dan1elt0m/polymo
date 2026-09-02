@@ -7,7 +7,7 @@ import json
 import keyword
 import re
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from jinja2 import Environment, PackageLoader, StrictUndefined
 
@@ -178,6 +178,23 @@ def _uc_secret_call(ref: UcSecretRef) -> str:
     return (
         f"_uc_secret({_py_literal(ref.credential)}, {_py_literal(ref.vault_url)}, "
         f"{_py_literal(ref.secret_name)})"
+    )
+
+
+def _bundle_secret_call(ref: SecretRef | UcSecretRef) -> str:
+    """Render a secret ref as a call on the imported `client` MODULE object.
+
+    Used only for bundles' `pipelines/<stream>.py`, which resolves secret
+    refs driver-side by calling the helper through the imported `client`
+    module (`from <pkg> import client`) rather than a bare module-level
+    call — see the `_context` docstring for why bundles can't just bake the
+    call into `client.py` itself the way single-file scripts do.
+    """
+    if isinstance(ref, SecretRef):
+        return f"client._dbx_secret({_py_literal(ref.scope)}, {_py_literal(ref.key)})"
+    return (
+        f"client._uc_secret({_py_literal(ref.credential)}, "
+        f"{_py_literal(ref.vault_url)}, {_py_literal(ref.secret_name)})"
     )
 
 
@@ -465,7 +482,33 @@ def _require_no_xml_json_paths(stream) -> None:
             )
 
 
-def _context(config: RestSourceConfig) -> Dict[str, Any]:
+def _context(config: RestSourceConfig, *, for_bundle: bool = False) -> Dict[str, Any]:
+    """Build the template-rendering context for `config`.
+
+    `for_bundle` switches how auth-secret-ref slots (API_TOKEN/API_KEY/
+    CLIENT_SECRET and any ref-backed OPT_* option placeholder) render:
+
+    - `for_bundle=False` (default, used by `generate_core`/`generate` for
+      single-file scripts and the builder preview/export): a secret-ref slot
+      gets a direct `_dbx_secret(...)`/`_uc_secret(...)` call as its RHS.
+      Correct there because a single-file script's DataSource/reader classes
+      live in `__main__` (not a real importable module), so Spark can only
+      pickle them BY VALUE — the pickle snapshots the already-resolved value
+      from the driver, and the module is never re-imported from scratch
+      anywhere else.
+    - `for_bundle=True` (used by `codegen.bundle.generate_bundle` for
+      `src/<pkg>/client.py`): every secret-ref slot instead gets the same
+      `"REPLACE_ME"` placeholder RHS as an *unset* slot. This is required,
+      not cosmetic — `src/<pkg>` ships as an installed wheel, so Spark's
+      Python workers pickle the registered DataSource class BY REFERENCE and
+      reconstruct it with a fresh `import <pkg>.client`, which has no
+      SparkSession/dbutils available; a module-level `_dbx_secret(...)`/
+      `_uc_secret(...)` call would raise there on every single read. The
+      `_dbx_secret`/`_uc_secret` helper *function definitions* are still
+      emitted (gated on `has_secret_refs`/`has_uc_secret_refs`, unaffected by
+      `for_bundle`) so `pipelines/<stream>.py` — which only ever runs
+      driver-side — can call them directly; see `bundle_secret_slots` below.
+    """
     stream = config.stream
     eh = stream.error_handler
     auth = config.auth
@@ -485,8 +528,9 @@ def _context(config: RestSourceConfig) -> Dict[str, Any]:
         """RHS for one auth secret slot: `_dbx_secret(...)`, `_uc_secret(...)`,
         or the `"REPLACE_ME"` placeholder. `secret`/`uc_secret` are mutually
         exclusive (enforced in `AuthConfig` parsing), so at most one applies.
+        Always `"REPLACE_ME"` when `for_bundle` — see the docstring above.
         """
-        if auth.type != auth_type:
+        if auth.type != auth_type or for_bundle:
             return _REPLACE_ME_RHS
         if auth.secret:
             return _dbx_secret_call(auth.secret)
@@ -500,9 +544,13 @@ def _context(config: RestSourceConfig) -> Dict[str, Any]:
     option_placeholder_specs = [
         (
             var,
-            _dbx_secret_call(option_placeholder_refs[var])
-            if var in option_placeholder_refs
-            else _REPLACE_ME_RHS,
+            _REPLACE_ME_RHS
+            if for_bundle
+            else (
+                _dbx_secret_call(option_placeholder_refs[var])
+                if var in option_placeholder_refs
+                else _REPLACE_ME_RHS
+            ),
         )
         for var in option_placeholders
     ]
@@ -516,6 +564,30 @@ def _context(config: RestSourceConfig) -> Dict[str, Any]:
     has_uc_secret_refs = bool(
         auth.type in ("bearer", "api_key", "oauth2") and auth.uc_secret
     )
+    # Driver-side resolution list for bundles: (module attribute name, call
+    # expression reaching the helper through the imported `client` module
+    # object, e.g. `client._dbx_secret("scope", "key")`). Computed
+    # regardless of `for_bundle` (cheap, and only ever consumed by
+    # `codegen.bundle`'s bundle_ctx) — see `templates/bundle/pipeline.py.jinja`
+    # (resolves these driver-side and threads them through as DataSource
+    # reader options) and `templates/bundle/source.py.jinja` (installs them
+    # onto `client`'s module globals on each worker before fetching).
+    bundle_secret_slots: List[Tuple[str, str]] = []
+    for slot_var, slot_auth_type in (
+        ("API_TOKEN", "bearer"),
+        ("API_KEY", "api_key"),
+        ("CLIENT_SECRET", "oauth2"),
+    ):
+        if auth.type != slot_auth_type:
+            continue
+        if auth.secret:
+            bundle_secret_slots.append((slot_var, _bundle_secret_call(auth.secret)))
+        elif auth.uc_secret:
+            bundle_secret_slots.append((slot_var, _bundle_secret_call(auth.uc_secret)))
+    for var in option_placeholders:
+        ref = option_placeholder_refs.get(var)
+        if ref is not None:
+            bundle_secret_slots.append((var, _bundle_secret_call(ref)))
     return {
         "auth_type": auth.type,
         "token_url": auth.token_url,
@@ -544,6 +616,7 @@ def _context(config: RestSourceConfig) -> Dict[str, Any]:
         "client_secret_rhs": client_secret_rhs,
         "has_secret_refs": has_secret_refs,
         "has_uc_secret_refs": has_uc_secret_refs,
+        "bundle_secret_slots": bundle_secret_slots,
         "schema_ddl": stream.schema,
         "stream_name": stream.name,
         "stream_name_repr": _py_literal(stream.name),

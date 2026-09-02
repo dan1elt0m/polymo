@@ -13,5 +13,5 @@ dependencies = [
 # --wheel` against this file at deploy time; the pipeline resource's
 # `environment.dependencies` then installs the built wheel.
 [build-system]
-requires = ["uv_build>=0.4.0,<1.0"]
+requires = ["uv_build>=0.7.19,<1.0"]
 build-backend = "uv_build"

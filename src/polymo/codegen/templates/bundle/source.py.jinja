@@ -7,9 +7,34 @@ file freely — it is not read by polymo again.
 from typing import Any, Iterator
 
 from .client import {{ bundle_imports | join(", ") }}
+{% if bundle_secret_slots %}
+from . import client as _client
+{% endif %}
 
 {% if schema_ddl %}
 SCHEMA: str = {{ schema_ddl | tojson }}
+
+{% endif %}
+{% if bundle_secret_slots %}
+def _apply_secret_options(options: Any) -> None:
+    """Install driver-resolved secrets onto `{{ bundle_pkg }}.client`'s module
+    globals (see `pipelines/{{ func_name }}.py`, which resolves them driver-side
+    and threads them through as DataSource reader options — a bare
+    module-level `_dbx_secret(...)`/`_uc_secret(...)` call in `client.py`
+    would fail here: every Spark Python worker gets its own fresh
+    `{{ bundle_pkg }}.client` import, with no SparkSession/dbutils available).
+    Called from `schema()` and `reader()`/`simpleStreamReader()` below so
+    both schema inference and the actual read see the real value, on
+    whichever process (driver or worker) ends up running them. `options` is
+    Spark's case-insensitive options mapping — keys always come back
+    lowercased, so the slot name is reconstructed via `.upper()` (every
+    slot this generator ever names — API_TOKEN/API_KEY/CLIENT_SECRET/OPT_*
+    — is uppercase by construction).
+    """
+    prefix = "polymo_secret_"
+    for key, value in options.items():
+        if key.lower().startswith(prefix):
+            setattr(_client, key[len(prefix) :].upper(), value)
 
 {% endif %}
 {% if streaming %}
@@ -49,9 +74,15 @@ class {{ source_class_name }}(DataSource):
         return "{{ func_name }}_stream"
 
     def schema(self) -> str:
+{% if bundle_secret_slots %}
+        _apply_secret_options(self.options)
+{% endif %}
         return SCHEMA
 
     def simpleStreamReader(self, schema: Any) -> "_Reader":
+{% if bundle_secret_slots %}
+        _apply_secret_options(self.options)
+{% endif %}
         return _Reader(schema)
 {% else %}
 {% if has_windows %}
@@ -67,10 +98,16 @@ class {{ source_class_name }}(DataSource):
         return "{{ func_name }}_source"
 
     def schema(self) -> str:
+{% if bundle_secret_slots %}
+        _apply_secret_options(self.options)
+{% endif %}
         return {% if schema_ddl %}SCHEMA{% else %}_infer_schema(){% endif %}
 
 
     def reader(self, schema: Any) -> "_Reader":
+{% if bundle_secret_slots %}
+        _apply_secret_options(self.options)
+{% endif %}
         return _Reader(schema)
 
 

@@ -8,11 +8,19 @@ fetch/schema code under `src/<pkg>/client.py`, the connector's
 `DataSource`/reader under `src/<pkg>/source.py`, and a thin pipeline source
 under `pipelines/` that imports both and wires the `@dp.table`. Zero polymo
 imports appear anywhere in the output — `src/<pkg>/client.py` is exactly
-`generate_core(config)`, the same code the builder's preview/export use, so
-a bundle project can never drift from what those show. The pipeline
-resource's `environment.dependencies` installs the built wheel, so
-`src/<pkg>` is importable on the driver AND every executor without any
-pickle-by-value trick.
+`generate_core(config)` for a config with no auth secret refs, the same
+code the builder's preview/export use, so a bundle project can never drift
+from what those show *when there's nothing secret to resolve differently*.
+When a secret ref IS present, `client.py` intentionally diverges: see
+`generator._context`'s docstring for why (short version: `src/<pkg>` ships
+as a wheel, so Spark's Python workers re-import it fresh with no
+SparkSession/dbutils available — a module-level `_dbx_secret(...)`/
+`_uc_secret(...)` call would blow up there). The pipeline resource's
+`environment.dependencies` installs the built wheel, so `src/<pkg>` is
+importable on the driver AND every executor without any pickle-by-value
+trick; any auth secret ref is instead resolved driver-side in
+`pipelines/<stream>.py` and threaded through as DataSource reader options
+(see that template).
 """
 
 from __future__ import annotations
@@ -27,7 +35,6 @@ from .generator import (
     _context,
     _ENV,
     _identifier,
-    generate_core,
     validate_dp_wiring,
 )
 
@@ -97,7 +104,9 @@ def generate_bundle(
         databricks.yml
         pyproject.toml            # packages src/<pkg> as a wheel (uv_build)
         src/<pkg>/__init__.py
-        src/<pkg>/client.py       # == generate_core(config), byte-for-byte
+        src/<pkg>/client.py       # generate_core(config, for_bundle=True) —
+                                   # identical to generate_core(config) unless
+                                   # an auth secret ref is present
         src/<pkg>/source.py       # the <PascalCase(pkg)>Source DataSource + reader
         pipelines/<stream>.py     # imports both, wires the @dp.table
         README.md
@@ -105,14 +114,20 @@ def generate_bundle(
     """
     validate_dp_wiring(config)
 
-    ctx = _context(config)
+    # for_bundle=True: any auth-secret-ref slot renders as the "REPLACE_ME"
+    # placeholder here instead of a direct `_dbx_secret(...)`/`_uc_secret(...)`
+    # call — see `generator._context`'s docstring. The helper function
+    # definitions are unaffected (still gated on has_secret_refs/
+    # has_uc_secret_refs); `bundle_secret_slots` (also in this context)
+    # drives the driver-side resolution in pipeline.py.jinja instead.
+    ctx = _context(config, for_bundle=True)
     pkg = _identifier(project_name)
     stream = ctx["func_name"]
     pipeline_key = f"{pkg}_pipeline"
     table_name = _identifier(ctx["stream_name"])
     source_class_name = f"{_pascal_case(pkg)}Source"
 
-    core = generate_core(config)
+    core = _ENV.get_template("core.py.jinja").render(**ctx)
 
     bundle_ctx = dict(ctx)
     bundle_ctx["bundle_pkg"] = pkg

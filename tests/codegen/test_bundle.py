@@ -14,9 +14,11 @@ import yaml
 from polymo.codegen import generate_bundle, generate_core
 from polymo.codegen.bundle import _pascal_case
 from polymo.config import (
+    AuthConfig,
     IncrementalConfig,
     PaginationConfig,
     PartitionConfig,
+    SecretRef,
 )
 from tests.codegen.helpers import assert_hygiene, make_config
 
@@ -96,6 +98,45 @@ def test_client_byte_equals_generate_core(case):
     config = CLIENT_EQUALITY_CASES[case]
     files = _bundle(config)
     assert files["src/demo/client.py"] == generate_core(config)
+
+
+def test_client_diverges_from_generate_core_when_secret_ref_present():
+    """The byte-equality invariant above only holds when there's nothing
+    secret-ref-shaped to render differently — see `generator._context`'s
+    docstring for why. A bundle's `client.py` keeps the `"REPLACE_ME"`
+    placeholder for a secret-ref slot (never a direct `_dbx_secret(...)`
+    call), on purpose: `src/<pkg>` ships as a wheel, so a module-level
+    secret call there would run on a session-less Spark worker. This is a
+    static-content regression test for that divergence; the executor
+    simulation (`test_bundle_wheel_secret_ref_resolved_driver_side_and_shipped_via_options`)
+    proves the driver-side replacement actually works end to end.
+    """
+    from polymo.codegen.generator import _context, _ENV
+
+    config = make_config(
+        base_url="https://x",
+        auth=AuthConfig(
+            type="bearer", secret=SecretRef(scope="my-scope", key="my-key")
+        ),
+    )
+    files = _bundle(config)
+    bundle_client = files["src/demo/client.py"]
+    standalone_core = generate_core(config)
+
+    assert bundle_client != standalone_core
+    assert 'API_TOKEN: str = "REPLACE_ME"' in bundle_client
+    assert '_dbx_secret("my-scope", "my-key")' in standalone_core
+    assert '_dbx_secret("my-scope", "my-key")' not in bundle_client
+    # the helper function itself is still emitted in both — only the
+    # module-level call site differs
+    assert "def _dbx_secret(" in bundle_client
+    assert "def _dbx_secret(" in standalone_core
+
+    # bundle.py's actual rendering is exactly generate_core(config, for_bundle=True)
+    for_bundle_core = _ENV.get_template("core.py.jinja").render(
+        **_context(config, for_bundle=True)
+    )
+    assert bundle_client == for_bundle_core
 
 
 # --- source.py hygiene + import correctness -----------------------------------
@@ -397,6 +438,157 @@ def test_bundle_wheel_installs_client_and_source_for_the_executor(
     assert negative.returncode != 0
     assert "ModuleNotFoundError" in negative.stderr
     assert pkg in negative.stderr
+
+
+# --- executor wheel simulation: auth secret refs -----------------------------
+# Regression test for a critical bug in the wheel-packaging fix above: once
+# `src/<pkg>` ships as an installed wheel, Spark's Python workers pickle the
+# registered DataSource class BY REFERENCE and reconstruct it with a fresh
+# `import <pkg>.client` — which runs with no SparkSession/dbutils available.
+# A module-level `API_TOKEN: str = _dbx_secret(...)`/`_uc_secret(...)` call in
+# `client.py` (the by-value-pickling-era design) would therefore raise on
+# EVERY read once bundled as a wheel. The fix: bundles' `client.py` keeps its
+# secret-ref slots as plain "REPLACE_ME" placeholders (the helper function
+# defs are still emitted); `pipelines/<stream>.py` resolves the ref
+# driver-side (the only place with a session) and threads the value through
+# as a DataSource reader option (`polymo_secret_<VAR>`); `<pkg>.source`
+# installs it onto `<pkg>.client`'s globals — in `schema()` AND `reader()`,
+# so schema inference is covered too — before any fetch call runs.
+#
+# Simulated with the same two-subprocess wheel setup as above, but standing
+# in for the driver's resolution step by constructing the DataSource
+# directly with the option a real driver would have produced (Spark hands
+# `DataSource.__init__` a case-insensitive options mapping that lowercases
+# every key on the way in, so the option is passed pre-lowercased here too —
+# exercising the `.upper()` reconstruction in `_apply_secret_options`
+# exactly as it would see it for real). The negative control (no secret
+# option at all) proves the positive result genuinely depends on the options
+# channel: with nothing supplied, the request goes out with the unresolved
+# "REPLACE_ME" placeholder instead of silently succeeding some other way.
+
+_LOAD_FROM_WHEEL_WITH_SECRET_SCRIPT = """
+import importlib
+import json
+import sys
+
+whl_path, pkg, source_class_name, options_json = (
+    sys.argv[1],
+    sys.argv[2],
+    sys.argv[3],
+    sys.argv[4],
+)
+if whl_path:
+    sys.path.insert(0, whl_path)
+
+options = json.loads(options_json)
+
+
+class _Field:
+    def __init__(self, name):
+        self.name = name
+
+
+class _Schema:
+    def __init__(self, names):
+        self.fields = [_Field(name) for name in names]
+
+
+source_module = importlib.import_module(f"{pkg}.source")
+source_cls = getattr(source_module, source_class_name)
+# Mirrors Spark exactly: the DataSource instance is constructed with the
+# options mapping, then .reader(schema) is called on that SAME instance —
+# both happen in this one worker process, with nothing else of <pkg> on
+# sys.path but the wheel.
+instance = source_cls(options)
+reader = instance.reader(_Schema(["id", "title"]))
+records = list(reader.read(None))
+sys.stdout.write(json.dumps(records))
+"""
+
+
+def test_bundle_wheel_secret_ref_resolved_driver_side_and_shipped_via_options(
+    tmp_path, http_server
+):
+    seen_auth_headers: list = []
+
+    def route(query, headers, body):
+        seen_auth_headers.append(headers.get("Authorization"))
+        return 200, [{"id": 1, "title": "hello"}], {}
+
+    http_server.routes["/posts"] = route
+    config = make_config(
+        base_url=http_server.url,
+        name="posts",
+        path="/posts",
+        auth=AuthConfig(
+            type="bearer", secret=SecretRef(scope="my-scope", key="my-key")
+        ),
+    )
+
+    pkg = "execsim_secret_pkg"
+    files = generate_bundle(config, project_name=pkg, catalog="main", schema="raw")
+    source_class_name = f"{_pascal_case(pkg)}Source"
+
+    # client.py never calls _dbx_secret at module level for a bundle — that
+    # is the actual bug this test guards against (it would raise on a
+    # session-less worker). pipelines/posts.py resolves it driver-side
+    # instead.
+    client_py = files[f"src/{pkg}/client.py"]
+    assert 'API_TOKEN: str = "REPLACE_ME"' in client_py
+    assert '_dbx_secret("my-scope", "my-key")' not in client_py
+    assert (
+        "def _dbx_secret(" in client_py
+    )  # helper still emitted, for the driver to call
+    pipeline_py = files["pipelines/posts.py"]
+    assert 'client._dbx_secret("my-scope", "my-key")' in pipeline_py
+    assert ".options(**_secret_options)" in pipeline_py
+
+    project_dir = tmp_path / "bundle_project"
+    (project_dir / "src" / pkg).mkdir(parents=True)
+    (project_dir / "pyproject.toml").write_text(files["pyproject.toml"])
+    (project_dir / "src" / pkg / "__init__.py").write_text(
+        files[f"src/{pkg}/__init__.py"]
+    )
+    (project_dir / "src" / pkg / "client.py").write_text(client_py)
+    (project_dir / "src" / pkg / "source.py").write_text(files[f"src/{pkg}/source.py"])
+
+    wheel_path = _build_wheel(project_dir)
+
+    load_script = tmp_path / "load_from_wheel_secret.py"
+    load_script.write_text(_LOAD_FROM_WHEEL_WITH_SECRET_SCRIPT)
+    executor_cwd = tmp_path / "executor_cwd_secret"
+    executor_cwd.mkdir()
+
+    def load(options: dict) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [
+                sys.executable,
+                str(load_script),
+                str(wheel_path),
+                pkg,
+                source_class_name,
+                json.dumps(options),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(executor_cwd),
+        )
+
+    # --- positive: the driver-resolved secret arrives as a reader option,
+    # pre-lowercased exactly like Spark's real CaseInsensitiveDict would
+    # hand it over.
+    positive = load({"polymo_secret_api_token": "resolved-secret-value"})
+    assert positive.returncode == 0, positive.stderr
+    assert json.loads(positive.stdout) == [[1, "hello"]]
+    assert seen_auth_headers[-1] == "Bearer resolved-secret-value"
+
+    # --- negative control: no secret option supplied at all -> the request
+    # goes out with the unresolved "REPLACE_ME" placeholder instead of the
+    # real secret, proving the positive result above genuinely depends on
+    # the options channel.
+    negative = load({})
+    assert negative.returncode == 0, negative.stderr
+    assert seen_auth_headers[-1] == "Bearer REPLACE_ME"
 
 
 # --- databricks.yml -----------------------------------------------------------

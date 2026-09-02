@@ -91,6 +91,21 @@ export const AuthenticationSection: React.FC<AuthenticationSectionProps> = ({
     state.authUcCredential ? "custom" : "select",
   );
 
+  // Keep the mode in sync when a saved connector hydrates form state
+  // asynchronously after mount: a credential value the fetched list does
+  // not contain must render in the custom input, not as an unselected
+  // <select> silently holding a value.
+  React.useEffect(() => {
+    if (
+      state.authUcCredential &&
+      credentialMode === "select" &&
+      !credentialsLoading &&
+      !credentials.includes(state.authUcCredential)
+    ) {
+      setCredentialMode("custom");
+    }
+  }, [state.authUcCredential, credentialMode, credentials, credentialsLoading]);
+
   const secretScopeActive = state.authSecretMode === "secret_scope";
   const ucSecretActive = state.authSecretMode === "uc_secret";
 
