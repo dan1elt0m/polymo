@@ -1,0 +1,53 @@
+name: live
+
+# Generated scripts against real public APIs, read back through Spark's
+# Python Data Source API (tests/live). Kept out of the regular `test`
+# workflow so an outage at a third-party API never blocks a merge; runs
+# weekly, on demand, and on pull requests that touch code generation.
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - "src/polymo/codegen/**"
+      - "src/polymo/config.py"
+      - "tests/live/**"
+      - ".github/workflows/live.yml"
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+concurrency:
+  group: live-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Set up Python
+        run: uv python install 3.12 && uv python pin 3.12
+      - name: Install dependencies
+        run: uv venv && uv sync
+      - name: Run live public-API tests
+        env:
+          POLYMO_LIVE: "1"
+          # raises the GitHub API rate limit for the tests that use it
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          source .venv/bin/activate
+          pytest tests/live -m live --junitxml=junit/live.xml
+      - name: Publish test report
+        uses: mikepenz/action-junit-report@v6
+        if: always()
+        with:
+          report_paths: "junit/live.xml"
+          check_name: live public-API tests

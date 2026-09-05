@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -77,6 +79,12 @@ def spark_session():
     from tests.codegen.helpers import install_fake_pipelines
 
     install_fake_pipelines()
+    # Python workers otherwise run whatever `python3` is first on PATH, which
+    # is not this interpreter when pytest is invoked as `.venv/bin/python -m
+    # pytest` -- the generated scripts would then execute against a different
+    # site-packages (requests, certifi) than the one under test.
+    os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
+    os.environ.setdefault("PYSPARK_DRIVER_PYTHON", sys.executable)
 
     session = (
         SparkSession.builder.master("local[1]")

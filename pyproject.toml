@@ -95,4 +95,5 @@ extend-exclude = ["tests/codegen/golden", "tests/codegen/golden_bundle"]
 [tool.pytest.ini_options]
 markers = [
     "spark: exercises a real local[1] PySpark session (slower: ~seconds of JVM startup).",
+    "live: reads public APIs over the network through Spark; skipped unless POLYMO_LIVE=1 (see tests/live).",
 ]

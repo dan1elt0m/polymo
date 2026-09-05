@@ -36,7 +36,7 @@ HEADERS: dict[str, str] = {}
 TIMEOUT: float = 30.0
 
 
-def fetch_records() -> list[dict[str, Any]]:
+def fetch_records() -> Iterator[dict[str, Any]]:
     ...
 
 
@@ -121,6 +121,8 @@ Other material:
 ## Contributing
 
 Is there something missing? Raise an issue or contribute! Contributions and early feedback welcome.
+
+`pytest` runs the unit suite against a local mock API and a local Spark session. `POLYMO_LIVE=1 pytest tests/live` additionally reads every connector option against public APIs (jsonplaceholder, PokeAPI, GitHub, GitLab, Wikipedia, httpbin, arXiv, ...) through Spark's Python Data Source API; the `live` workflow runs that weekly and on pull requests that touch code generation.
 
 ---
 If Polymo helped, a ⭐ makes my day
