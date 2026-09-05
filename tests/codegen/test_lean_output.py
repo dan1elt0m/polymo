@@ -119,10 +119,9 @@ def test_golden_bundle_files_have_no_polymo_mentions():
     for path in GOLDEN_BUNDLE_DIR.rglob("*"):
         if not path.is_file():
             continue
-        if path.name == ".polymo-bundle.json":
-            # explicit exception: the tool's own manifest, read back by the
-            # "Run on Databricks" flow — its `generated_by` field is allowed
-            # (and expected) to name polymo.
+        if path.name in (".polymo-bundle.json", ".gitignore"):
+            # explicit exceptions: the tool's own manifest (`generated_by`
+            # names polymo) and the .gitignore that excludes it by filename.
             continue
         _assert_no_polymo_mentions(path.read_text(), str(path))
 
@@ -273,7 +272,7 @@ def test_bundle_sweep_has_no_stray_comments_or_polymo_mentions(case):
         if relpath.endswith(".py"):
             _assert_no_stray_comments(content, f"bundle({case})/{relpath}")
             _assert_no_literal_conditions(content, f"bundle({case})/{relpath}")
-        if relpath == ".polymo-bundle.json":
+        if relpath in (".polymo-bundle.json", ".gitignore"):
             continue
         _assert_no_polymo_mentions(content, f"bundle({case})/{relpath}")
 

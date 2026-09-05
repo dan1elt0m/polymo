@@ -114,6 +114,8 @@ Fill in a **Project name** (defaults to the connector's table name) and a **Proj
                               # table lands
   .polymo-bundle.json         # small manifest the Run button reads back (pipeline
                                # resource key) — not meant to be edited by hand
+  .gitignore                  # excludes .polymo-bundle.json, .idea/, dist/, and
+                               # other local/derived state from your own repo
 ```
 
 `src/<pkg>/client.py` is never a re-derived or hand-simplified copy of the exported script — it *is* the same `generate_core()` output, so the bundle project can never drift from what the Generated Code pane and the Preview panel show you.

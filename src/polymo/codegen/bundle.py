@@ -48,6 +48,18 @@ def _polymo_version() -> str:
         return "0.0.0"
 
 
+_GITIGNORE = """\
+.databricks/
+build/
+dist/
+__pycache__/
+*.py[cod]
+.venv/
+.idea/
+.polymo-bundle.json
+"""
+
+
 def _yaml_str(value: str) -> str:
     """Render `value` as a double-quoted YAML scalar (valid JSON is valid YAML)."""
     return json.dumps(value)
@@ -118,6 +130,8 @@ def generate_bundle(
         pipelines/<stream>.py     # imports both, wires the @dp.table
         README.md
         .polymo-bundle.json       # read back by the "Run on Databricks" flow
+        .gitignore                # excludes local/derived state, incl. the
+                                   # manifest above -- see _GITIGNORE
     """
     validate_dp_wiring(config)
 
@@ -196,4 +210,5 @@ def generate_bundle(
         f"pipelines/{stream}.py": pipeline_file,
         "README.md": readme,
         ".polymo-bundle.json": manifest,
+        ".gitignore": _GITIGNORE,
     }

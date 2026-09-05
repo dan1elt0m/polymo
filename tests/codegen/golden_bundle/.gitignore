@@ -1,0 +1,8 @@
+.databricks/
+build/
+dist/
+__pycache__/
+*.py[cod]
+.venv/
+.idea/
+.polymo-bundle.json

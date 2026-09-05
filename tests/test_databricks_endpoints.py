@@ -588,6 +588,7 @@ def test_bootstrap_writes_expected_files(tmp_path):
         "pipelines/posts.py",
         "README.md",
         ".polymo-bundle.json",
+        ".gitignore",
     }
 
     for relpath in payload["files"]:

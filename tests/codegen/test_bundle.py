@@ -33,6 +33,7 @@ EXPECTED_KEYS = {
     "pipelines/posts.py",
     "README.md",
     ".polymo-bundle.json",
+    ".gitignore",
 }
 
 
@@ -62,6 +63,7 @@ def test_pkg_and_stream_names_are_sanitized_identifiers():
         "pipelines/my_posts_.py",
         "README.md",
         ".polymo-bundle.json",
+        ".gitignore",
     }
 
 
@@ -1565,6 +1567,24 @@ def test_manifest_has_expected_keys():
     assert manifest["pipeline_key"] == "demo_pipeline"
     assert manifest["stream"] == "posts"
     assert manifest["generated_by"].startswith("polymo ")
+
+
+# --- gitignore --------------------------------------------------------------
+# `.polymo-bundle.json` and `.idea/` (and the other artifacts below) are all
+# either polymo-specific state or purely local/derived -- none of them should
+# end up committed to the user's own repo by default.
+
+
+def test_gitignore_excludes_local_artifacts():
+    config = make_config(base_url="https://x")
+    files = _bundle(config)
+    gitignore = files[".gitignore"]
+    assert ".polymo-bundle.json" in gitignore
+    assert ".idea/" in gitignore
+    # `uv build --wheel` (run locally and by `bundle deploy`) writes here
+    assert "dist/" in gitignore
+    # local state written by `databricks bundle validate`/`deploy`
+    assert ".databricks/" in gitignore
 
 
 # --- README ---------------------------------------------------------------
