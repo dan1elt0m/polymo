@@ -6,6 +6,12 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 10
+    ignore:
+      # ruff is capped below 0.16 on purpose (see pyproject.toml): its newer
+      # default lint rules flag the generated scripts checked byte-for-byte
+      # against tests/codegen/golden. A Dependabot bump would only re-widen
+      # that cap (and auto-merge), so ruff is updated by hand.
+      - dependency-name: "ruff"
     groups:
       python-minor-and-patch:
         update-types:

@@ -55,7 +55,7 @@ dev = [
     # isn't on the dependency-vulnerability list -- so it's pinned here
     # rather than rewriting the codegen templates to chase a newer
     # linter's opinions.
-    "ruff>=0.13.3,<0.17",
+    "ruff>=0.13.3,<0.16",
 ]
 docs = [
     "mkdocs>=1.4.2",
