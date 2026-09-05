@@ -1,6 +1,6 @@
 """Lakeflow Declarative Pipelines connector for {{ stream_name_doc }}."""
 
-{% if incremental %}
+{% if import_json %}
 import json
 {% endif %}
 {% if page_partitions and (total_records_path or total_records_header) %}
@@ -12,10 +12,17 @@ import os
 {% if max_retries > 0 %}
 import time
 {% endif %}
-{% if incremental %}
-from datetime import datetime, timezone
+{% if datetime_imports %}
+from datetime import {{ datetime_imports }}
 {% endif %}
+{% if import_decimal %}
+from decimal import Decimal
+{% endif %}
+{% if cast_plan %}
+from typing import Any, Callable, Iterator
+{% else %}
 from typing import Any, Iterator
+{% endif %}
 
 import requests
 {% if response_format == "xml" %}
@@ -316,19 +323,116 @@ def _dig(payload: Any, path: list[str]) -> Any:
 
 
 {% endif %}
+{% if cast_plan %}
+{% if "_to_str" in cast_helpers %}
+def _to_str(value: Any) -> Any:
+    if value is None or isinstance(value, str):
+        return value
+    if isinstance(value, (dict, list)):
+        return json.dumps(value)
+    return str(value)
+
+
+{% endif %}
+{% if "_to_bool" in cast_helpers %}
+def _to_bool(value: Any) -> Any:
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in ("true", "1", "yes", "y", "on"):
+            return True
+        if lowered in ("false", "0", "no", "n", "off"):
+            return False
+        return value
+    return value if value is None else bool(value)
+
+
+{% endif %}
+{% if "_to_int" in cast_helpers %}
+def _to_int(value: Any) -> Any:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return value
+
+
+{% endif %}
+{% if "_to_float" in cast_helpers %}
+def _to_float(value: Any) -> Any:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return value
+
+
+{% endif %}
+{% if "_to_decimal" in cast_helpers %}
+def _to_decimal(value: Any) -> Any:
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value))
+    except ArithmeticError:
+        return value
+
+
+{% endif %}
+{% if "_to_timestamp" in cast_helpers %}
+def _to_timestamp(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return value
+
+
+{% endif %}
+{% if "_to_date" in cast_helpers %}
+def _to_date(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+    except ValueError:
+        return value
+
+
+{% endif %}
+CASTS: dict[str, Callable[[Any], Any]] = {
+{% for name_repr, helper in cast_plan %}
+    {{ name_repr }}: {{ helper }},
+{% endfor %}
+}
+
+
+def _cast_record(record: dict[str, Any]) -> dict[str, Any]:
+    for column, cast in CASTS.items():
+        if column in record:
+            record[column] = cast(record[column])
+    return record
+
+
+{% endif %}
 {% if response_format == "xml" %}
 XML_RECORD_PATH: str = {{ xml_record_path_repr }}
+
+
+def _local_name(tag: str) -> str:
+    return tag.rpartition("}")[2]
 
 
 def _records(root: ET.Element) -> list[dict[str, Any]]:
     records = []
     for element in root.findall(XML_RECORD_PATH):
-        record: dict[str, Any] = {f"@{key}": value for key, value in element.attrib.items()}
+        record: dict[str, Any] = {f"@{_local_name(key)}": value for key, value in element.attrib.items()}
         for child in element:
-            record[child.tag] = child.text
+            record[_local_name(child.tag)] = child.text
         records.append(record)
 {% if record_filter_expr %}
     records = [record for record in records if ({{ record_filter_expr }})]
+{% endif %}
+{% if cast_plan %}
+    records = [_cast_record(record) for record in records]
 {% endif %}
     return records
 {% else %}
@@ -364,6 +468,9 @@ def _records(payload: Any) -> list[dict[str, Any]]:
     records = [r if isinstance(r, dict) else {"record": r} for r in records]
 {% if record_filter_expr %}
     records = [record for record in records if ({{ record_filter_expr }})]
+{% endif %}
+{% if cast_plan %}
+    records = [_cast_record(record) for record in records]
 {% endif %}
     return records
 {% endif %}

@@ -45,12 +45,16 @@ def _request(session: requests.Session, url: str, params: dict[str, Any] | None)
 XML_RECORD_PATH: str = ".//contact"
 
 
+def _local_name(tag: str) -> str:
+    return tag.rpartition("}")[2]
+
+
 def _records(root: ET.Element) -> list[dict[str, Any]]:
     records = []
     for element in root.findall(XML_RECORD_PATH):
-        record: dict[str, Any] = {f"@{key}": value for key, value in element.attrib.items()}
+        record: dict[str, Any] = {f"@{_local_name(key)}": value for key, value in element.attrib.items()}
         for child in element:
-            record[child.tag] = child.text
+            record[_local_name(child.tag)] = child.text
         records.append(record)
     return records
 

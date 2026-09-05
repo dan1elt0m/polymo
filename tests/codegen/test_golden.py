@@ -143,6 +143,18 @@ CASES = {
             ),
         ),
     ),
+    "xml_typed_cast": make_config(
+        base_url="https://api.example.com",
+        name="rates",
+        path="/rates.xml",
+        response_format="xml",
+        xml_record_path=".//rate",
+        record_selector=RecordSelectorConfig(cast_to_schema_types=True),
+        schema=(
+            "`@currency` STRING, `@rate` DOUBLE, updated TIMESTAMP, day DATE,"
+            " amount DECIMAL(18,6), active BOOLEAN, count INT"
+        ),
+    ),
     "maileon_xml": make_config(
         base_url="https://api.maileon.com/1.0",
         name="contacts",

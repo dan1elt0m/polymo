@@ -226,6 +226,44 @@ def test_sample_endpoint_executes_generated_code(http_server) -> None:
     assert payload["dtypes"]
 
 
+def test_sample_endpoint_returns_cast_values_as_json(http_server) -> None:
+    http_server.routes["/posts"] = lambda q, h, b: (
+        200,
+        [{"id": "7", "price": "10.90", "at": "2024-05-13T15:30:42Z", "ok": "true"}],
+        {},
+    )
+    app = create_app()
+    client = TestClient(app)
+
+    config_dict = {
+        "version": "0.1",
+        "source": {"type": "rest", "base_url": http_server.url},
+        "stream": {
+            "name": "posts",
+            "path": "/posts",
+            "schema": "id INT, price DECIMAL(10,2), at TIMESTAMP, ok BOOLEAN",
+            "record_selector": {"cast_to_schema_types": True},
+        },
+    }
+
+    response = client.post("/api/sample", json={"config_dict": config_dict, "limit": 5})
+    payload = response.json()
+
+    assert response.status_code == 200, payload
+    assert payload["rest_error"] is None
+    [record] = payload["records"]
+    assert record["id"] == 7
+    assert record["ok"] is True
+    assert record["at"].startswith("2024-05-13T15:30:42")
+    assert float(record["price"]) == 10.9
+    assert {d["column"]: d["type"] for d in payload["dtypes"]} == {
+        "id": "int",
+        "price": "decimal(10,2)",
+        "at": "timestamp",
+        "ok": "boolean",
+    }
+
+
 def test_sample_endpoint_reports_rest_error() -> None:
     app = create_app()
     client = TestClient(app)

@@ -33,6 +33,31 @@ def test_xml_records_parsed(http_server):
     ]
 
 
+def test_xml_namespaces_are_stripped_from_record_keys(http_server):
+    # Atom-style feeds put every element in a default namespace, which
+    # ElementTree exposes as `{uri}tag`; the record path still needs that
+    # Clark notation, but the resulting columns should read as plain names.
+    body = (
+        '<feed xmlns="http://www.w3.org/2005/Atom" xmlns:x="http://x.test/ns">'
+        '<entry x:kind="paper"><id>a1</id><title>First</title></entry>'
+        '<entry x:kind="note"><id>a2</id><title>Second</title></entry>'
+        "</feed>"
+    )
+    http_server.routes["/feed"] = lambda q, h, b: (200, body, {})
+    config = make_config(
+        base_url=http_server.url,
+        name="entries",
+        path="/feed",
+        response_format="xml",
+        xml_record_path=".//{http://www.w3.org/2005/Atom}entry",
+    )
+    module = run_generated(config)
+    assert list(module.fetch_records()) == [
+        {"@kind": "paper", "id": "a1", "title": "First"},
+        {"@kind": "note", "id": "a2", "title": "Second"},
+    ]
+
+
 def test_xml_page_pagination_with_total_pages_header(http_server):
     # The Maileon shape: page_index/page_size pagination, total page count
     # reported via an X-Pages response header, XML body.

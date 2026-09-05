@@ -21,6 +21,7 @@ from polymo.config import (
     IncrementalConfig,
     PaginationConfig,
     PartitionConfig,
+    RecordSelectorConfig,
     SecretRef,
     UcSecretRef,
 )
@@ -139,6 +140,11 @@ def test_golden_single_file_scripts_have_no_polymo_mentions():
 
 SWEEP_CONFIGS = {
     "plain": make_config(base_url="https://x"),
+    "typed_cast": make_config(
+        base_url="https://x",
+        record_selector=RecordSelectorConfig(cast_to_schema_types=True),
+        schema="id INT, price DECIMAL(10,2), ok BOOLEAN, at TIMESTAMP, name STRING",
+    ),
     "bearer_secret": make_config(
         base_url="https://x",
         auth=AuthConfig(type="bearer", secret=SecretRef(scope="s", key="k")),

@@ -12,7 +12,14 @@ from urllib.parse import urlparse
 
 from jinja2 import Environment, PackageLoader, StrictUndefined
 
-from ..config import PartitionConfig, RestSourceConfig, SecretRef, UcSecretRef
+from ..config import (
+    PartitionConfig,
+    RestSourceConfig,
+    SecretRef,
+    UcSecretRef,
+    _split_field_name,
+    _split_top_level,
+)
 from .templating import _PathFormatter, _render_template
 
 
@@ -439,6 +446,59 @@ def _static_windows(config: RestSourceConfig) -> Optional[List[Dict[str, Any]]]:
     return None
 
 
+_CAST_HELPERS = {
+    "string": "_to_str",
+    "varchar": "_to_str",
+    "char": "_to_str",
+    "text": "_to_str",
+    "boolean": "_to_bool",
+    "bool": "_to_bool",
+    "tinyint": "_to_int",
+    "smallint": "_to_int",
+    "int": "_to_int",
+    "integer": "_to_int",
+    "bigint": "_to_int",
+    "long": "_to_int",
+    "float": "_to_float",
+    "real": "_to_float",
+    "double": "_to_float",
+    "float64": "_to_float",
+    "timestamp": "_to_timestamp",
+    "date": "_to_date",
+}
+
+
+def _cast_plan(stream) -> List[Tuple[str, str]]:
+    """`(column, helper)` pairs for `record_selector.cast_to_schema_types`.
+
+    Casting needs a declared type per column, so the plan is empty -- and
+    the generated script carries no cast code at all -- unless the option
+    is on AND the stream pins an explicit `schema`. Only top-level scalar
+    columns are cast, which is what the option exists for: XML APIs (where
+    every value is text) and JSON APIs that quote their numbers, booleans
+    or timestamps. ARRAY/MAP/STRUCT/VARIANT columns pass through untouched.
+    Mirrors the 0.x `_cast_value` semantics, minus the nested recursion.
+    """
+    selector = stream.record_selector
+    if not (selector.cast_to_schema_types and stream.schema):
+        return []
+    plan: List[Tuple[str, str]] = []
+    try:
+        field_defs = _split_top_level(stream.schema)
+        for field_def in field_defs:
+            name, rest = _split_field_name(field_def)
+            type_spec = rest.strip().lower()
+            if type_spec.startswith(("decimal", "numeric")):
+                helper: Optional[str] = "_to_decimal"
+            else:
+                helper = _CAST_HELPERS.get(type_spec)
+            if helper is not None:
+                plan.append((name, helper))
+    except ValueError as exc:
+        raise CodegenError(f"schema DDL could not be parsed: {exc}") from exc
+    return plan
+
+
 _LOCAL_STATE_SCHEMES = frozenset({"", "file"})
 
 
@@ -618,6 +678,16 @@ def _context(config: RestSourceConfig, *, for_bundle: bool = False) -> Dict[str,
     state_path, state_remote = _resolve_state_path(config)
     state_key = incremental.state_key or f"{stream.name}@{base_url}"
     page_partitions = _page_partitions(stream)
+    cast_plan = _cast_plan(stream)
+    cast_helpers = list(dict.fromkeys(helper for _, helper in cast_plan))
+    # Imports shared between features: `json`/`datetime` serve both the
+    # incremental state file and the cast helpers, so they're resolved here
+    # once instead of in competing template conditions.
+    datetime_names = set()
+    if incremental.enabled:
+        datetime_names.update({"datetime", "timezone"})
+    if "_to_timestamp" in cast_helpers or "_to_date" in cast_helpers:
+        datetime_names.add("datetime")
     # Static windows carry either `path` (endpoints) or `extra_params`
     # (param_range), never both — the reader template merges pushed filter
     # params differently for each shape.
@@ -837,6 +907,11 @@ def _context(config: RestSourceConfig, *, for_bundle: bool = False) -> Dict[str,
         "state_remote": state_remote,
         "state_key_repr": _py_literal(state_key),
         "start_value_repr": _py_literal(incremental.start_value),
+        "cast_plan": [(_py_literal(name), helper) for name, helper in cast_plan],
+        "cast_helpers": cast_helpers,
+        "import_json": incremental.enabled or "_to_str" in cast_helpers,
+        "import_decimal": "_to_decimal" in cast_helpers,
+        "datetime_imports": ", ".join(sorted(datetime_names)),
         "windows_repr": _py_literal(windows) if windows is not None else None,
         "has_windows": bool(windows),
         "windows_kind": windows_kind,

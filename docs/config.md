@@ -306,6 +306,13 @@ resource instead (`configuration: {spark.sql.python.filterPushdown.enabled:
 streaming table with `pushdown_params` is rejected at generation time. When
 the mapping is empty the generated script contains no pushdown code at all.
 
+One Spark quirk to know about when experimenting in a notebook: Spark 4.2
+keeps the reader that accepted a pushed filter on the DataFrame object
+`load()` returned, so a later query on that *same* DataFrame with a
+different (or no) filter still sends the first pushed parameter. Call
+`spark.read.format(...).load()` again for each distinct filter. A pipeline
+table never hits this: its function body loads the source exactly once.
+
 ## Reader options
 
 The **Spark reader options** panel supplies values used to resolve path
@@ -490,10 +497,21 @@ selector** panel (`stream.record_selector`) configures how the generated
   walks `payload["data"]["items"]`.
 - `record_filter` — a boolean Python expression evaluated per record, e.g.
   `record.get('status') == 'open'`.
-- `cast_to_schema_types` — coerce values to match your declared `schema`
-  (below) instead of leaving them as raw JSON types.
+- `cast_to_schema_types` — cast each top-level scalar column to the type
+  declared in `schema` (below) before it reaches Spark: `"42"` → `INT`,
+  `"10.90"` → `DOUBLE` / `DECIMAL`, `"true"` → `BOOLEAN`, ISO 8601 text →
+  `TIMESTAMP` / `DATE`, and a dict or list under a `STRING` column → its
+  JSON text. This is what lets an XML API (where every value is text) or a
+  JSON API that quotes its numbers fit a typed schema — without it, Spark
+  rejects the mismatched value. The generated `_records()` applies a small
+  `CASTS` table with one `_to_*` helper per type actually used; a value
+  that can't be cast is passed on unchanged, so Spark still reports it.
+  Requires an explicit `schema` (it is a no-op with an inferred one);
+  `ARRAY` / `MAP` / `STRUCT` / `VARIANT` columns pass through as-is, and
+  `record_filter` runs before casting, on the raw values.
 
-This section is JSON-only; it has no effect on XML responses (see below).
+`field_path` and `record_filter` are JSON-only and have no effect on XML
+responses (see below); `cast_to_schema_types` applies to both.
 
 ## Schema
 
@@ -570,6 +588,11 @@ script parses the response with `xml.etree.ElementTree` and, for each
 matched element, builds a record dict from its attributes (prefixed `@`) and
 its direct children (`{child.tag: child.text}`).
 
+Every value an XML record carries is text. Declare the schema you want
+and turn on `cast_to_schema_types` (see [Record selector](#record-selector))
+to land `INT` / `DOUBLE` / `BOOLEAN` / `TIMESTAMP` columns instead of
+strings.
+
 Keep these gotchas in mind:
 
 - **Nested containers flatten to empty/whitespace text, not a value.**
@@ -583,11 +606,13 @@ Keep these gotchas in mind:
   key, so `<item><tag>a</tag><tag>b</tag></item>` produces `{"tag": "b"}` —
   `"a"` is silently overwritten. Rename or restructure the XML upstream if
   you need every occurrence.
-- **Namespaced documents need Clark notation.** For
+- **Namespaced documents need Clark notation in the record path.** For
   `<ns:contact xmlns:ns="...">`, `xml_record_path` must use
   `{http://the/actual/namespace/uri}contact`, not the `ns:contact` prefix
   form — `ElementTree.findall()` doesn't resolve XML namespace prefixes on
-  its own.
+  its own. The record keys themselves are namespace-free: a child
+  `<{http://www.w3.org/2005/Atom}title>` becomes the `title` column and a
+  namespaced attribute becomes `@name`, so your schema uses plain names.
 - XML responses are incompatible with `cursor_path`, `next_url_path`,
   `total_pages_path`, `total_records_path`, and the record selector's
   `field_path` — all of those dig through a decoded JSON payload, which
