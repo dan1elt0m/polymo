@@ -8,7 +8,7 @@ from typing import Sequence
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="polymo", description="Launch the local polymo Builder UI"
+        prog="polymo", description="Launch the local Polymo UI"
     )
     parser.add_argument(
         "--host", default="127.0.0.1", help="Host to bind (default: %(default)s)"
@@ -24,13 +24,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
 
-    if not _require_builder_deps():
+    if not _require_ui_deps():
         return 1
 
     import uvicorn
 
     uvicorn.run(
-        "polymo.builder.app:create_app",
+        "polymo.ui.app:create_app",
         host=args.host,
         port=args.port,
         reload=args.reload,
@@ -39,12 +39,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
-def _require_builder_deps() -> bool:
+def _require_ui_deps() -> bool:
     """Verify the install is intact (pyspark present and compatible).
 
     polymo now depends on pyspark unconditionally, so a missing or
     incompatible pyspark means the install itself is broken. Returns True
-    when the environment is ready to launch the builder. On a missing
+    when the environment is ready to launch the UI. On a missing
     pyspark install, prints a friendly hint and returns False so the caller
     can exit cleanly instead of tracebacking.
     """

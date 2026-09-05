@@ -1,7 +1,7 @@
 # Migrating from polymo 0.x
 
 Polymo 1.0 removes the runtime connector entirely. Polymo is now a **dev-time
-code generator only**: the [Builder UI](builder-ui.md) turns a form into a
+code generator only**: the [UI](ui.md) turns a form into a
 standalone Python script, and nothing in that script imports `polymo`. If you
 are not ready to move yet, pin the last 0.x release and keep using the
 runtime as-is:
@@ -17,7 +17,7 @@ Nothing in 0.11.0 is deprecated-but-functional in 1.0 — it is gone.
 > **Since 1.2:** the `builder` extra is gone. `pip install polymo` now
 > includes everything (FastAPI, Uvicorn, PySpark, PyArrow, requests) — there
 > is nothing extra to opt into. The `polymo builder` subcommand is also
-> gone; the bare `polymo` command launches the Builder directly. See the
+> gone; the bare `polymo` command launches the UI directly. See the
 > [CLI reference](cli.md) for the current flags.
 
 ## What was removed
@@ -27,33 +27,33 @@ Nothing in 0.11.0 is deprecated-but-functional in 1.0 — it is gone.
 | `spark.read.format("polymo")` / `spark.readStream.format("polymo")` | Removed. There is no Spark data source named `polymo` any more. |
 | `polymo.ApiReader` | Removed. |
 | `polymo.PolymoConfig` (and `load_config` / `dump_config` / `.reader_config()` / `.dump_yaml()`) | Removed. Nothing in polymo reads or writes YAML any more. |
-| YAML connector files (`config.yml`, `.option("config_path", ...)`, `.option("config_json", ...)`) | Removed as a runtime input. The Builder's saved `*.polymo.json` files are a different, unrelated format (see below). |
+| YAML connector files (`config.yml`, `.option("config_path", ...)`, `.option("config_json", ...)`) | Removed as a runtime input. The UI's saved `*.polymo.json` files are a different, unrelated format (see below). |
 | `polymo smoke` CLI subcommand | Removed. (As of 1.2, `polymo builder` is gone too — see the note below.) |
-| `/api/format` builder endpoint | Removed along with the YAML export it powered. |
+| `/api/format` UI endpoint | Removed along with the YAML export it powered. |
 | `.option("token", ...)`, `.option("stream_batch_size", ...)`, and the rest of the Spark reader options | Removed — there is no reader to pass options to. The generated script has its own top-level constants (`BASE_URL`, `PARAMS`, `HEADERS`, ...) that you edit directly instead. The incremental options (`incremental_state_path` / `incremental_start_value` / `incremental_state_key`) live on as `stream.incremental.*` config — see below. |
 
 What's unchanged: the *ideas* behind pagination, auth, incremental sync,
 partitioning, and record selection all carry forward — they are just
-expressed as Builder form fields that generate code instead of YAML that a
+expressed as UI form fields that generate code instead of YAML that a
 runtime interprets. See the [Connector options reference](config.md) for the
 current shape of each.
 
 ## Rebuilding an old YAML connector
 
-There is deliberately no YAML importer. The Builder's `*.polymo.json` save
+There is deliberately no YAML importer. The UI's `*.polymo.json` save
 format is a different, work-in-progress JSON shape (it exists to let you
 pause and resume a form-in-progress, not to import legacy configs), so the
 fastest path is to re-enter your settings by hand:
 
 1. Open your old `config.yml` (or however you saved the connector) next to
-   the Builder.
-2. Launch the Builder: `polymo`.
+   the UI.
+2. Launch the UI: `polymo`.
 3. Walk each section of the form and copy the equivalent value across —
    `source.base_url` → **Base URL**, `stream.path` → **Stream Path**,
    `stream.pagination` → the **Pagination** section, `stream.auth` → the
    **Authentication** section, and so on. The
    [Connector options reference](config.md) maps every old YAML key to its
-   Builder field and to what it now generates.
+   UI field and to what it now generates.
 4. Click **Preview** to confirm the connector still fetches the data you
    expect, then export the script from the **Generated Code** tab.
 5. Optionally save the in-progress form as a `*.polymo.json` file so you can
@@ -81,7 +81,7 @@ when the underlying settings look the same:
   `.option("incremental_start_value", ...)` and
   `.option("incremental_state_key", ...)` reader options are back as
   `stream.incremental.state_path` / `start_value` / `state_key` (the
-  Builder's **State file or URL**, **Initial cursor value** and **State key
+  UI's **State file or URL**, **Initial cursor value** and **State key
   override** fields), with the same semantics: a local path or `file://`
   URL is a plain file, any other scheme (`s3://`, `gs://`, `abfss://`,
   `dbfs://`) goes through fsspec, the seed only applies while nothing is

@@ -50,4 +50,4 @@ jobs:
       - name: Build frontend
         run: npm run build
       - name: Verify built bundle matches source (bundle parity gate)
-        run: git diff --exit-code src/polymo/builder/static/
+        run: git diff --exit-code src/polymo/ui/static/

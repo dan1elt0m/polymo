@@ -1,7 +1,7 @@
 """Shared plumbing for the live public-API suite.
 
 Every test here follows the same shape: build a `RestSourceConfig` the way
-the Builder would, `generate()` the standalone script, exec it unmodified
+the UI would, `generate()` the standalone script, exec it unmodified
 (the `spark_session` fixture stubs the Databricks-only `pyspark.pipelines`
 module), and read the registered Python Data Source back through
 `spark.read.format(...)` / `spark.readStream.format(...)` exactly as a

@@ -1,10 +1,10 @@
 # Connector Options Reference
 
 Polymo has no config file and no runtime. You describe a connector once in
-the [Builder UI](builder-ui.md), and every field you fill in changes what
+the [UI](ui.md), and every field you fill in changes what
 the exported Python script looks like. This page documents each option, the
 JSON key it maps to (the same shape `generate()` and `parse_config()` accept
-in Python, and what the Builder's saved `*.polymo.json` files use
+in Python, and what the UI's saved `*.polymo.json` files use
 internally), and what it generates.
 
 You will only write this JSON by hand if you are calling `polymo.generate()`
@@ -34,7 +34,7 @@ schema). In JSON form:
 That is enough for `generate()` to produce a script that fetches
 `https://api.example.com/v1/items` once and infers columns from the
 response — the same as filling in just **Base URL** and **Stream Path** in
-the Builder and leaving everything else at its default.
+the UI and leaving everything else at its default.
 
 ## Base configuration
 
@@ -43,11 +43,11 @@ the Builder and leaving everything else at its default.
   trailing slash.
 - **Table name** (`stream.name`) — becomes the dp table name
   (`@dp.table(name=...)`), sanitized to a SQL identifier at export time.
-  Optional: leave it blank and the Builder derives one from the stream path
+  Optional: leave it blank and Polymo derives one from the stream path
   instead (e.g. `/v1/items` → `v1_items`).
 - **Stream Path** (`stream.path`) — appended to `BASE_URL` and stored as
   `PATH`. Must start with `/`. You can use placeholders like
-  `/repos/{owner}/{repo}`; the Builder's reader options are wired to fill
+  `/repos/{owner}/{repo}`; the UI's reader options are wired to fill
   these in — see [Reader options](#reader-options) below.
 - **Streaming table** (`stream.streaming`) — every generated `@dp.table`
   ingests through a small Spark `DataSource` registered inline in the
@@ -64,7 +64,7 @@ the Builder and leaving everything else at its default.
 
 ## Authentication
 
-Set an **Auth Type** in the Builder's Authentication section. It is not
+Set an **Auth Type** in the UI's Authentication section. It is not
 persisted in a saved config — you re-enter secrets each time you reopen a
 connector.
 
@@ -108,7 +108,7 @@ source:
 
 (the same shape works for `api_key` and `oauth2`'s `client_secret` slot).
 Both `scope` and `key` are required and must be non-empty — this is a
-**reference only**; the config, the generated script, and the builder's
+**reference only**; the config, the generated script, and the UI's
 logs never contain the secret value itself. Codegen resolves it at runtime
 via a generated `_dbx_secret(scope, key)` helper instead:
 
@@ -140,7 +140,7 @@ stream:
       key: api-key-b64
 ```
 
-The builder preview cannot resolve real Databricks secrets outside a
+The UI preview cannot resolve real Databricks secrets outside a
 Databricks cluster: previewing a secret-ref config without a session token
 sends the same `"REPLACE_ME"` dummy the unresolved-placeholder path already
 does, so the request still fires (and fails/succeeds against the real API
@@ -149,17 +149,17 @@ the preview UI overrides the relevant auth slot (bearer/api_key/oauth2)
 with that token, the same way it does for a plain placeholder. `OPT_*`
 secret refs have no override in preview and always get the dummy.
 
-**Setting a `secret` reference in the Builder** happens through the
+**Setting a `secret` reference in the UI** happens through the
 **Secret source** toggle on each auth field (Bearer/API Key/OAuth2 Client
 Secret) — switch it from "enter for preview / placeholder in export" to
 "Databricks secret scope" and pick a scope + key from the dropdowns (backed
 by `databricks secrets list-scopes`/`list-secrets` for the profile chosen on
-the [Deploy tab](builder-ui.md#deploy-to-databricks)). See
-[Deploy to Databricks → Secrets](builder-ui.md#secrets) for the UI walkthrough.
+the [Deploy tab](ui.md#deploy-to-databricks)). See
+[Deploy to Databricks → Secrets](ui.md#secrets) for the UI walkthrough.
 
 **At deploy time**, this reference resolves differently in a bundle project
 than in the exported script above. `src/<pkg>/client.py` — the file the
-[Deploy tab](builder-ui.md#deploy-to-databricks) bootstraps under a
+[Deploy tab](ui.md#deploy-to-databricks) bootstraps under a
 project's `src/` directory — ships as an installed wheel, so Spark
 reconstructs its `DataSource` on every executor with a fresh
 `import <pkg>.client` and no Spark session available; a module-level
@@ -224,10 +224,10 @@ message names the required `azure-keyvault-secrets` package. Unlike
 `option_secrets` stays scope-only (see above); use `auth.uc_secret` for the
 primary auth secret slot.
 
-**Setting a `uc_secret` reference in the Builder** happens through the same
+**Setting a `uc_secret` reference in the UI** happens through the same
 **Secret source** toggle described above — pick **UC credential (Key
 Vault)** and fill in the credential, vault URL, and secret name. See
-[Deploy to Databricks → Secrets](builder-ui.md#secrets) for the UI
+[Deploy to Databricks → Secrets](ui.md#secrets) for the UI
 walkthrough.
 
 **At deploy time**, this reference resolves the same way a Databricks
@@ -238,7 +238,7 @@ DataSource reader option, resolved only once the pipeline actually runs
 (never at `databricks bundle deploy` time). The generated `pyproject.toml`
 adds `azure-keyvault-secrets` as a dependency automatically whenever a
 `uc_secret` reference is present, so the built wheel (see [Deploy to
-Databricks → Project bootstrap](builder-ui.md#project-bootstrap)) carries
+Databricks → Project bootstrap](ui.md#project-bootstrap)) carries
 what `_uc_secret` needs.
 
 ## Query parameters & headers
@@ -469,7 +469,7 @@ How the generated code uses it:
   partition, so all pages of a run are fetched against the cursor the page
   count was planned with.
 
-The Builder's **Preview** never touches your state: it generates the same
+The UI's **Preview** never touches your state: it generates the same
 `fetch_records()` against a throwaway state path, so it always shows a
 first run (seeded from `start_value` if set) and never writes a file.
 
@@ -624,7 +624,7 @@ Keep these gotchas in mind:
 There are none. Every option above is resolved once, at generation time,
 into literal constants in the exported script (`BASE_URL`, `PATH`, `PARAMS`,
 `HEADERS`, `SCHEMA`, ...). Editing the connector after export means editing
-the script directly, or changing the Builder form and re-exporting.
+the script directly, or changing the form in the UI and re-exporting.
 
 The one exception is a [Databricks secret-scope
 reference](#databricks-secret-scope-references) or a [UC service-credential
@@ -637,4 +637,4 @@ generated script runs.
 If you're coming from the 0.x YAML runtime, see the
 [migration guide](migration-1.0.md) for the full list of what moved or
 disappeared, plus a checklist for rebuilding an old connector in the
-Builder.
+UI.

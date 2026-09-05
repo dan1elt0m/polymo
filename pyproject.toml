@@ -1,7 +1,7 @@
 [project]
 name = "polymo"
 version = "1.8.0"
-description = "Generate standalone Lakeflow Declarative Pipelines scripts from a point-and-click REST connector builder"
+description = "Generate standalone Lakeflow Declarative Pipelines scripts from a point-and-click UI"
 readme = "README.md"
 authors = [
     { name = "Daniel Tom", email = "d.e.tom89@gmail.com" }
@@ -75,10 +75,10 @@ requires = ["uv_build>=0.8.17,<0.13.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-# Dev-only MSW mock service worker; polymo/builder/static/main.tsx only
+# Dev-only MSW mock service worker; polymo/ui/static/main.tsx only
 # registers it in import.meta.env.DEV builds, so it never runs from the
 # packaged production static assets. Keep it out of the wheel.
-wheel-exclude = ["polymo/builder/static/mockServiceWorker.js"]
+wheel-exclude = ["polymo/ui/static/mockServiceWorker.js"]
 
 [project.urls]
 Homepage = "https://github.com/dan1elt0m/polymo"

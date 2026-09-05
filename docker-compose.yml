@@ -1,9 +1,9 @@
 services:
-  builder:
+  ui:
     build:
       context: .
       dockerfile: Dockerfile
-    command: uvicorn polymo.builder.app:create_app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn polymo.ui.app:create_app --host 0.0.0.0 --port 8000 --reload
     ports:
       - "8000:8000"
     environment:

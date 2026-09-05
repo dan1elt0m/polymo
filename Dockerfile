@@ -29,8 +29,8 @@ RUN pip install --upgrade pip \
     && pip install -e .
 
 COPY docs ./docs
-COPY builder-ui ./builder-ui
+COPY ui ./ui
 
 EXPOSE 8000
 
-CMD ["uvicorn", "polymo.builder.app:create_app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["uvicorn", "polymo.ui.app:create_app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

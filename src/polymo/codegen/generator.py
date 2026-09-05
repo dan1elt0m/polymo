@@ -555,7 +555,7 @@ def _resolved(stream, options):
     A `{{ options.<name> }}` reference whose `<name>` is NOT present in
     `options` would normally blow up Jinja's `StrictUndefined` at render
     time (`/api/generate` passes no options at all, so this is the common
-    case for any config that references options — e.g. the builder's
+    case for any config that references options — e.g. the UI's
     api_key auth, or a hand-written `Authorization: Basic
     {{ options.api_key_b64 }}` header). Instead of failing, each missing
     name gets a unique marker substituted in as its "value" before
@@ -613,7 +613,7 @@ def _require_no_xml_json_paths(stream) -> None:
     (`_dig`, or the record_selector's `field_path` walk); none of them make
     sense against an `xml.etree.ElementTree` element, so combining any of
     them with `response_format: xml` is rejected at generation time (which
-    also guards the builder preview, since it calls `generate_core` too).
+    also guards the UI preview, since it calls `generate_core` too).
     """
     if stream.response_format != "xml":
         return
@@ -639,7 +639,7 @@ def _context(config: RestSourceConfig, *, for_bundle: bool = False) -> Dict[str,
     CLIENT_SECRET and any ref-backed OPT_* option placeholder) render:
 
     - `for_bundle=False` (default, used by `generate_core`/`generate` for
-      single-file scripts and the builder preview/export): a secret-ref slot
+      single-file scripts and the UI preview/export): a secret-ref slot
       gets a direct `_dbx_secret(...)`/`_uc_secret(...)` call as its RHS.
       Correct there because a single-file script's DataSource/reader classes
       live in `__main__` (not a real importable module), so Spark can only

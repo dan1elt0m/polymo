@@ -16,10 +16,10 @@ from typing import (
 )
 import re
 
-# pyspark is optional at generation time (it only ships in the `builder`
-# extra): a bare `pip install polymo` must be able to `import polymo` and
-# call `generate()`, including for configs with a `schema` DDL string, so
-# nothing in this module may import pyspark eagerly at module load time.
+# pyspark must never be imported eagerly here: config parsing and
+# `generate()` run without a Spark session, including for configs with a
+# `schema` DDL string, and `tests/test_public_api.py` guards that
+# codegen-only use stays pyspark-free.
 # `parse_schema_struct` (and its helpers below) import pyspark lazily,
 # inside the functions that actually need real Spark type objects; the
 # config-parsing validation path (`_validate_ddl`) is deliberately kept
@@ -245,7 +245,7 @@ class IncrementalConfig:
 
 @dataclass(frozen=True)
 class RecordSelectorConfig:
-    """Record selector configuration inspired by Airbyte's builder."""
+    """Record selector configuration: field path, filter and casts."""
 
     field_path: List[str] = field(default_factory=list)
     record_filter: Optional[str] = None
@@ -622,7 +622,7 @@ def config_to_dict(config: RestSourceConfig) -> Dict[str, Any]:
     stream = config.stream
     stream_dict: Dict[str, Any] = {
         # 'name' becomes the dp table name (sanitized to a SQL identifier
-        # at codegen time); always included so the builder UI's "Table
+        # at codegen time); always included so the UI's "Table
         # name" field round-trips through /api/validate.
         "name": stream.name,
         "path": stream.path,
@@ -1469,8 +1469,8 @@ def _validate_ddl(ddl: str) -> None:
     """Validate schema DDL syntax without requiring pyspark to be installed.
 
     This runs during `parse_config` for every stream with a `schema`, which
-    means it runs during `generate()` too. pyspark is only in the `builder`
-    extra, so this must not import it (see `_validate_ddl_syntax`).
+    means it runs during `generate()` too, which must stay free of any Spark
+    import (see `_validate_ddl_syntax`).
     """
     _validate_ddl_syntax(ddl)
 

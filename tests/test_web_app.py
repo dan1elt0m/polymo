@@ -6,10 +6,10 @@ from urllib.parse import quote, quote_plus
 
 import pytest
 
-fastapi = pytest.importorskip("fastapi", reason="FastAPI is required for builder tests")
+fastapi = pytest.importorskip("fastapi", reason="FastAPI is required for UI tests")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from polymo.builder import create_app  # noqa: E402
+from polymo.ui import create_app  # noqa: E402
 
 SAMPLE_CONFIG_DICT = {
     "version": "0.1",
@@ -91,7 +91,7 @@ def test_index_serves_built_ui_bundle() -> None:
     response = client.get("/")
     assert response.status_code == 200
 
-    static_path = resources.files("polymo.builder").joinpath("static", "main.js")
+    static_path = resources.files("polymo.ui").joinpath("static", "main.js")
     main_js = static_path.read_text(encoding="utf-8")
     assert "/api/generate" in main_js
 
@@ -116,7 +116,7 @@ def test_generate_returns_script() -> None:
 
 
 def test_generate_uses_explicit_stream_name_as_table_name() -> None:
-    """Feature: builder UI 'Table name' field. When `stream.name` is set in
+    """Feature: the UI's 'Table name' field. When `stream.name` is set in
     the config dict it becomes the dp table name, overriding the
     path-derived default (which for `/data/records` would be
     `data_records`, not `my_table`)."""
@@ -169,7 +169,7 @@ def test_generate_rejects_codegen_invalid_config() -> None:
 
 def test_generate_endpoint_no_longer_crashes_on_unresolved_option() -> None:
     """Regression pin: /api/generate passes no `options`, so a config whose
-    headers reference `{{ options.<name> }}` (e.g. the builder's api_key
+    headers reference `{{ options.<name> }}` (e.g. the UI's api_key
     auth, or a hand-written `Authorization: Basic {{ options.api_key_b64 }}`
     header) used to fail template rendering. It must now generate a script
     with an `OPT_*` placeholder variable instead."""
@@ -550,7 +550,7 @@ def test_sample_endpoint_keeps_raw_pages_when_records_step_fails(http_server) ->
     """UX regression pin: when the records/dtypes step fails after the HTTP
     fetch already succeeded (e.g. an explicit schema that can't coerce a
     sampled value — `k INT` given a string), `/api/sample` used to discard
-    the already-collected `raw_pages` behind a 502, so the builder UI's Raw
+    the already-collected `raw_pages` behind a 502, so the UI's Raw
     API tab showed only an error with nothing to inspect. It must now
     return 200 with the real `raw_pages` populated and `rest_error`
     describing the records-step failure, so the UI can still show what the

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="builder-ui/public/logo.png" alt="Polymo" width="220">
+  <img src="ui/public/logo.png" alt="Polymo" width="220">
 </p>
 
 <p align="center">
@@ -14,7 +14,7 @@
 
 # Welcome to Polymo
 
-Setting up API ingestion in Databricks Lakeflow Declarative Pipelines is tricky, because it involves classes and requires knowledge of inner working of declarative pipelines. Polymo is a tool that helps to define the pipeline from a [UI](docs/builder-ui.md). It allows you to preview the ingestion dataframes locally, and export a standalone [Lakeflow Declarative Pipelines](https://docs.databricks.com/aws/en/dlt/) pipeline. `polymo` is never a dependency of the scripts it generates.
+Setting up API ingestion in Databricks Lakeflow Declarative Pipelines is tricky, because it involves classes and requires knowledge of inner working of declarative pipelines. Polymo is a tool that helps to define the pipeline from a [UI](docs/ui.md). It allows you to preview the ingestion dataframes locally, and export a standalone [Lakeflow Declarative Pipelines](https://docs.databricks.com/aws/en/dlt/) pipeline. `polymo` is never a dependency of the scripts it generates.
 The output is plain Python that only needs `requests`, the standard library, and `pyspark`. Nothing is imported from `polymo`, and there is no config file to load at runtime. The generated code is yours: edit it, version it, review it like any other code.
 
 ## What Polymo generates
@@ -62,7 +62,7 @@ Every field you fill in: pagination, incremental sync, partitioning, filter push
 
 <p align="center">
   <a href="docs/ui.png">
-    <img src="docs/ui.png" alt="Polymo Builder UI connector preview screen" width="860">
+    <img src="docs/ui.png" alt="Polymo UI connector preview screen" width="860">
   </a>
 </p>
 
@@ -76,9 +76,9 @@ Ready to run it on Databricks? The **Deploy** tab walks through it: Select Profi
 2. **Bootstrap** writes a complete [Databricks Asset Bundle](https://docs.databricks.com/dev-tools/bundles/) project: the connector as an installable package under `src/`, the pipeline under `pipelines/`, and a `databricks.yml` that builds the wheel and attaches it to a serverless pipeline.
 3. **Deploy** and **Run** drive `databricks bundle deploy` and `databricks bundle run` without leaving Polymo, with the CLI output docked below.
 
-Secrets never land in generated code. Each auth field (bearer token, API key, OAuth2 client secret) and any `{{ options.<name> }}` placeholder can reference a Databricks secret scope or a Unity Catalog service credential backed by Azure Key Vault; the pipeline resolves the value on the driver and passes it to the reader, and Polymo redacts it from every preview. Requires the [Databricks CLI](https://docs.databricks.com/dev-tools/cli/) and a `~/.databrickscfg` profile, see [Deploy to Databricks](docs/builder-ui.md#deploy-to-databricks) for the full walkthrough.
+Secrets never land in generated code. Each auth field (bearer token, API key, OAuth2 client secret) and any `{{ options.<name> }}` placeholder can reference a Databricks secret scope or a Unity Catalog service credential backed by Azure Key Vault; the pipeline resolves the value on the driver and passes it to the reader, and Polymo redacts it from every preview. Requires the [Databricks CLI](https://docs.databricks.com/dev-tools/cli/) and a `~/.databrickscfg` profile, see [Deploy to Databricks](docs/ui.md#deploy-to-databricks) for the full walkthrough.
 
-See the [Connector options reference](docs/config.md) for what every field generates, and the [Polymo UI walkthrough](docs/builder-ui.md) for a guided tour.
+See the [Connector options reference](docs/config.md) for what every field generates, and the [Polymo UI walkthrough](docs/ui.md) for a guided tour.
 
 ## How to start?
 
@@ -102,7 +102,7 @@ uvx polymo
 #### (Optional) Run Polymo in Docker
 
 ```bash
-docker compose up --build builder
+docker compose up --build ui
 ```
 
 The service listens on port `8000`; open <http://localhost:8000> once Uvicorn reports it is running.

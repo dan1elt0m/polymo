@@ -9,7 +9,7 @@ fetch/schema code under `src/<pkg>/client.py`, the connector's
 under `pipelines/` that imports both and wires the `@dp.table`. Zero polymo
 imports appear anywhere in the output — `src/<pkg>/client.py` is exactly
 `generate_core(config)` for a config with no auth secret refs, the same
-code the builder's preview/export use, so a bundle project can never drift
+code the UI's preview/export use, so a bundle project can never drift
 from what those show *when there's nothing secret to resolve differently*.
 When a secret ref IS present, `client.py` intentionally diverges: see
 `generator._context`'s docstring for why (short version: `src/<pkg>` ships

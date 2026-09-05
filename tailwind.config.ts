@@ -12,7 +12,7 @@ const radixPalette = {
 };
 
 // Theme-aware tokens. The actual colour values live in
-// builder-ui/src/styles/index.css as RGB triplets on :root (light) and
+// ui/src/styles/index.css as RGB triplets on :root (light) and
 // .dark, so a single utility such as `bg-surface` or `text-fg-muted`
 // resolves correctly in both themes without any `.dark … !important`
 // override layer. `<alpha-value>` keeps `/50`-style opacity modifiers
@@ -21,7 +21,7 @@ const token = (name: string) => `rgb(var(--${name}) / <alpha-value>)`;
 
 const config: Config = {
 	darkMode: "class",
-	content: ["./builder-ui/index.html", "./builder-ui/src/**/*.{ts,tsx}"],
+	content: ["./ui/index.html", "./ui/src/**/*.{ts,tsx}"],
 	theme: {
 		extend: {
 			colors: {

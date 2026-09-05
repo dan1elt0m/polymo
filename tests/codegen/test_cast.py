@@ -5,7 +5,7 @@ numbers; with an explicit typed schema Spark would reject those values on
 ingest. With the option on, the generated `_records()` runs each top-level
 scalar column through a per-type `_to_*` helper (only the helpers the
 schema needs are emitted) before the reader, the streaming reader or the
-builder preview ever see the record. Nested columns pass through untouched
+UI preview ever see the record. Nested columns pass through untouched
 and a value that can't be cast is left as-is, so Spark still reports it.
 """
 

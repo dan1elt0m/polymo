@@ -7,12 +7,12 @@ from typing import Any, List, Optional
 
 import pytest
 
-fastapi = pytest.importorskip("fastapi", reason="FastAPI is required for builder tests")
+fastapi = pytest.importorskip("fastapi", reason="FastAPI is required for UI tests")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from polymo.builder import app as builder_app  # noqa: E402
-from polymo.builder import create_app, databricks  # noqa: E402
-from polymo.builder.databricks import (  # noqa: E402
+from polymo.ui import app as ui_app  # noqa: E402
+from polymo.ui import create_app, databricks  # noqa: E402
+from polymo.ui.databricks import (  # noqa: E402
     DatabricksCliError,
     list_profiles,
     run_cli,
@@ -676,7 +676,7 @@ def test_bootstrap_rejects_home_directory(tmp_path, monkeypatch):
 def test_bootstrap_rejects_path_inside_polymo_package_dir(tmp_path, monkeypatch):
     fake_package_dir = tmp_path / "site-packages" / "polymo"
     fake_package_dir.mkdir(parents=True)
-    monkeypatch.setattr(builder_app, "_polymo_package_dir", lambda: fake_package_dir)
+    monkeypatch.setattr(ui_app, "_polymo_package_dir", lambda: fake_package_dir)
 
     app = create_app()
     client = TestClient(app)

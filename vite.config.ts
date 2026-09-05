@@ -2,8 +2,8 @@ import path from "node:path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 
-const rootDir = path.resolve(__dirname, "builder-ui");
-const staticDir = path.resolve(__dirname, "src/polymo/builder/static");
+const rootDir = path.resolve(__dirname, "ui");
+const staticDir = path.resolve(__dirname, "src/polymo/ui/static");
 
 export default defineConfig({
   root: rootDir,

@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
-	testDir: "builder-ui/tests",
+	testDir: "ui/tests",
 	retries: process.env.CI ? 2 : 0,
 	reporter: [["list"], ["html", { open: "never" }]],
 	use: {
