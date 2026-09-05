@@ -1,6 +1,6 @@
 [project]
 name = "polymo"
-version = "1.8.0"
+version = "1.8.1"
 description = "Generate standalone Lakeflow Declarative Pipelines scripts from a point-and-click UI"
 readme = "README.md"
 authors = [
