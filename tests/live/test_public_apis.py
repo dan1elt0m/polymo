@@ -22,7 +22,7 @@ Which API proves what:
 - httpbin.org: request echo, which is the only way to *see* what left the
   script: bearer / API-key / OAuth2 client-credentials auth, static and
   option-placeholder headers and params, filter pushdown, retries.
-- ecb.europa.eu / export.arxiv.org: XML with attributes, namespaces and
+- ecb.europa.eu / feeds.bbci.co.uk: XML with attributes, namespaces and
   child elements.
 
 Opt-in: `POLYMO_LIVE=1 pytest tests/live` (see tests/live/conftest.py).
@@ -71,9 +71,8 @@ GITHUB = "https://api.github.com"
 GITLAB = "https://gitlab.com/api/v4"
 WIKIPEDIA = "https://en.wikipedia.org/w"
 ECB = "https://www.ecb.europa.eu"
-ARXIV = "https://export.arxiv.org"
+BBC_FEEDS = "https://feeds.bbci.co.uk"
 
-ATOM = "{http://www.w3.org/2005/Atom}"
 EUROFXREF = "{http://www.ecb.int/vocabulary/2002-08-01/eurofxref}"
 
 
@@ -583,21 +582,23 @@ def test_xml_attributes_with_namespaced_record_path(spark_session):
 
 
 def test_xml_child_elements_become_columns(spark_session):
+    # An RSS 2.0 feed: every <item> carries its fields as un-namespaced child
+    # elements. (This used to query export.arxiv.org, which answers the
+    # weekly run with 429/406 often enough to make the suite flaky.)
     config = live_config(
-        base_url=ARXIV,
-        name="live_arxiv",
-        path="/api/query",
-        params={"search_query": 'ti:"delta lake"', "max_results": 5},
+        base_url=BBC_FEEDS,
+        name="live_bbc_rss",
+        path="/news/world/rss.xml",
         response_format="xml",
-        xml_record_path=f".//{ATOM}entry",
-        schema="id STRING, title STRING, published STRING",
+        xml_record_path=".//item",
+        schema="title STRING, link STRING, pubDate STRING",
     )
     rows = read_batch(spark_session, config).collect()
-    assert rows
+    assert len(rows) > 5
     for row in rows:
-        assert row.id.startswith("http://arxiv.org/abs/")
-        assert "Delta Lake" in row.title
-        assert row.published.endswith("Z")
+        assert row.title
+        assert row.link.startswith("https://www.bbc.")
+        assert row.pubDate.endswith(" GMT")
 
 
 # --- error handling -----------------------------------------------------------
